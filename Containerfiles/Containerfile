@@ -1,7 +1,7 @@
 # --------------------------------------------------------------------------
 # Stage 1: Build the Go binary
 # --------------------------------------------------------------------------
-FROM docker.io/library/golang:1.22 AS builder
+FROM docker.io/library/golang:1.24 AS builder
 
 WORKDIR /src
 
@@ -15,7 +15,7 @@ RUN CGO_ENABLED=0 go build -o zk-mcp ./cli/cmd/zk-mcp
 # --------------------------------------------------------------------------
 # Stage 2: Final image — headless devcontainer
 # --------------------------------------------------------------------------
-FROM registry.fedoraproject.org/fedora:41
+FROM registry.fedoraproject.org/fedora-minimal:43
 
 # ── 1. User setup ─────────────────────────────────────────────────────────
 USER root
@@ -28,7 +28,7 @@ RUN id -u user &>/dev/null || useradd -u 1001 -g 0 -m -s /bin/bash user && \
 # ── 2. System packages ───────────────────────────────────────────────────
 RUN dnf install -y --setopt=tsflags=nodocs \
         tmux git curl tar gzip unzip ncurses findutils which make gcc \
-        openssh-server openssh-clients && \
+        openssh-server openssh-clients fd-find && \
     dnf clean all
 
 # ── 2b. SSH server setup ─────────────────────────────────────────────────
@@ -66,17 +66,12 @@ COPY --chown=user:0 Containerfiles/config/nvim/init.lua           /home/user/.co
 COPY --chown=user:0 Containerfiles/config/nvim/lua/config/lazy.lua    /home/user/.config/nvim/lua/config/lazy.lua
 COPY --chown=user:0 Containerfiles/config/nvim/lua/config/options.lua /home/user/.config/nvim/lua/config/options.lua
 COPY --chown=user:0 Containerfiles/config/nvim/lua/plugins/zk.lua    /home/user/.config/nvim/lua/plugins/zk.lua
-COPY --chown=user:0 Containerfiles/config/nvim/lua/plugins/glow.lua  /home/user/.config/nvim/lua/plugins/glow.lua
 
 # ── 11. Copy zk NeoVim plugin files ──────────────────────────────────────
 COPY --chown=user:0 lua/zk/init.lua      /home/user/zk-plugin/lua/zk/init.lua
 COPY --chown=user:0 lua/zk/picker.lua     /home/user/zk-plugin/lua/zk/picker.lua
 COPY --chown=user:0 plugin/zk.lua         /home/user/zk-plugin/plugin/zk.lua
 COPY --chown=user:0 after/ftplugin/markdown.lua /home/user/zk-plugin/after/ftplugin/markdown.lua
-
-# ── 12a. Glow (Markdown renderer) ────────────────────────────────────────
-RUN curl -fsSL "https://github.com/charmbracelet/glow/releases/download/v2.1.1/glow_2.1.1_Linux_x86_64.tar.gz" \
-        | tar xz --strip-components=1 -C /home/user/.local/bin glow_2.1.1_Linux_x86_64/glow
 
 # ── 12. Install mason tools before Lazy sync (tree-sitter must exist first)
 RUN MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
