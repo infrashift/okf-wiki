@@ -60,6 +60,7 @@ build-image:
 
 run-container:
 	$(CONTAINER_ENGINE) run -d --name $(CONTAINER_NAME) \
+		--userns=keep-id \
 		-p $(SSH_PORT):2222 \
 		-v $(SSH_PUBKEY):/home/user/.ssh/authorized_keys:ro,Z \
 		-v $(ZK_VAULT):/home/user/zk_vault:Z \

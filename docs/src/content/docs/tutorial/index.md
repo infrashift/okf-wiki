@@ -37,6 +37,7 @@ The container runs an SSH server on port 2222. You need to mount an
 
 ```bash
 podman run -d --name zk-dev \
+  --userns=keep-id \
   -p 2222:2222 \
   -v ./Containerfiles/config/test_ssh_key.pub:/home/user/.ssh/authorized_keys:ro,Z \
   zk-devcontainer:latest
@@ -46,6 +47,7 @@ podman run -d --name zk-dev \
 
 ```bash
 podman run -d --name zk-dev \
+  --userns=keep-id \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
   zk-devcontainer:latest
@@ -128,6 +130,7 @@ To **persist notes across container restarts**, mount a host directory:
 
 ```bash
 podman run -d --name zk-dev \
+  --userns=keep-id \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
   -v ~/zk_vault:/home/user/zettelkasten:Z \
@@ -654,6 +657,7 @@ podman rm -f zk-dev
 
 # Custom SSH port
 podman run -d --name zk-dev \
+  --userns=keep-id \
   -e SSH_PORT=3333 -p 3333:3333 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
   -v ~/zk_vault:/home/user/zettelkasten:Z \
