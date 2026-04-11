@@ -3,6 +3,9 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestGenerateBasicNote_Untethered(t *testing.T) {
@@ -245,5 +248,68 @@ status: "closed"
 	}
 	if strings.Contains(s, "completed") {
 		t.Error("Expected completed field to be removed")
+	}
+}
+
+func TestNewV7WithTime(t *testing.T) {
+	target := time.Date(2026, 4, 10, 12, 0, 0, 0, time.UTC)
+	id := newV7WithTime(target)
+
+	// Should be valid UUID
+	u, err := uuid.Parse(id)
+	if err != nil {
+		t.Fatalf("newV7WithTime produced invalid UUID: %v", err)
+	}
+
+	// Should be version 7
+	if u.Version() != 7 {
+		t.Errorf("expected version 7, got %d", u.Version())
+	}
+
+	// Should be 36 chars
+	if len(id) != 36 {
+		t.Errorf("expected 36 chars, got %d", len(id))
+	}
+
+	// Round-trip: extract time back
+	extracted, err := timeFromID(id)
+	if err != nil {
+		t.Fatalf("timeFromID failed: %v", err)
+	}
+	if extracted.Unix() != target.Unix() {
+		t.Errorf("expected time %v, got %v", target, extracted)
+	}
+}
+
+func TestTimeFromID_Legacy(t *testing.T) {
+	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	got, err := timeFromID(id)
+	if err != nil {
+		t.Fatalf("timeFromID failed: %v", err)
+	}
+	expected := time.Date(2026, 2, 13, 10, 45, 0, 0, time.UTC)
+	if got.Unix() != expected.Unix() {
+		t.Errorf("expected %v, got %v", expected, got)
+	}
+}
+
+func TestTimeFromID_UUIDv7(t *testing.T) {
+	id := uuid.Must(uuid.NewV7()).String()
+	now := time.Now()
+	got, err := timeFromID(id)
+	if err != nil {
+		t.Fatalf("timeFromID failed: %v", err)
+	}
+	// Should be within 1 second of now
+	diff := now.Sub(got)
+	if diff < -time.Second || diff > time.Second {
+		t.Errorf("extracted time %v differs from now %v by %v", got, now, diff)
+	}
+}
+
+func TestTimeFromID_Invalid(t *testing.T) {
+	_, err := timeFromID("not-a-valid-id")
+	if err == nil {
+		t.Error("expected error for invalid ID")
 	}
 }

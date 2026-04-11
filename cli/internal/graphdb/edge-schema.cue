@@ -7,7 +7,7 @@
 //   - tagged: zettel-to-tag association
 
 #Edge: {
-	from:      =~"^[0-9]{14}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+	from:      =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 	predicate: "links_to" | "parent_of" | "child_of" | "tagged"
 	to:        string & !=""
 }

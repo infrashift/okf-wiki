@@ -125,6 +125,19 @@ parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	}
 }
 
+func TestValidateZettelYAML_ValidUUIDv7(t *testing.T) {
+	validYAML := `
+id: "019680f0-7e00-7abc-8def-1234567890ab"
+title: "UUIDv7 Zettel"
+category: "untethered"
+tags: []
+created: "2026-04-10T12:00:00Z"
+`
+	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateZettelYAML() UUIDv7 should be valid, got error = %v", err)
+	}
+}
+
 func TestValidateZettelYAML_InvalidID(t *testing.T) {
 	invalidYAML := `
 id: "12345"
@@ -316,8 +329,8 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 		t.Fatalf("ParseAndValidate() error = %v", err)
 	}
 
-	if z.ID != "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" {
-		t.Errorf("ID = %q, want %q", z.ID, "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	if z.ID != "019680f0-7e00-7abc-8def-1234567890ab" {
+		t.Errorf("ID = %q, want %q", z.ID, "019680f0-7e00-7abc-8def-1234567890ab")
 	}
 }
 
@@ -332,8 +345,8 @@ func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 		t.Fatalf("ParseAndValidate() error = %v", err)
 	}
 
-	if z.Parent != "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" {
-		t.Errorf("Parent = %q, want %q", z.Parent, "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+	if z.Parent != "019680f0-7e00-7abc-8def-1234567890ab" {
+		t.Errorf("Parent = %q, want %q", z.Parent, "019680f0-7e00-7abc-8def-1234567890ab")
 	}
 }
 

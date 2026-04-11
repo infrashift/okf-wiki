@@ -111,6 +111,27 @@ Duplicate [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] should be dedu
 	}
 }
 
+func TestExtractLinks_UUIDv7(t *testing.T) {
+	content := `Link to [[019680f0-7e00-7abc-8def-1234567890ab]] and
+also [[01968109-4700-7def-9abc-ffffffffffff|Title Here]].
+Duplicate [[019680f0-7e00-7abc-8def-1234567890ab]] should be deduplicated.`
+
+	links := ExtractLinks(content)
+	if len(links) != 2 {
+		t.Errorf("Expected 2 unique UUIDv7 links, got %d: %v", len(links), links)
+	}
+}
+
+func TestExtractLinks_MixedFormats(t *testing.T) {
+	content := `Legacy [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] and
+UUIDv7 [[019680f0-7e00-7abc-8def-1234567890ab]] together.`
+
+	links := ExtractLinks(content)
+	if len(links) != 2 {
+		t.Errorf("Expected 2 links (mixed formats), got %d: %v", len(links), links)
+	}
+}
+
 func TestExtractLinks_NoLinks(t *testing.T) {
 	links := ExtractLinks("No links in this content")
 	if len(links) != 0 {
@@ -483,6 +504,19 @@ func TestTransformLinks_NoTitle(t *testing.T) {
 	content := "See [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] here."
 	result := TransformLinks(content, nodeMap)
 	expected := "See [" + id + "](" + id + ".md) here."
+	if result != expected {
+		t.Errorf("Expected %q, got %q", expected, result)
+	}
+}
+
+func TestTransformLinks_UUIDv7(t *testing.T) {
+	id := "019680f0-7e00-7abc-8def-1234567890ab"
+	nodeMap := map[string]*Node{
+		id: {ID: id, Title: "UUIDv7 Note"},
+	}
+	content := "See [[019680f0-7e00-7abc-8def-1234567890ab]] here."
+	result := TransformLinks(content, nodeMap)
+	expected := "See [UUIDv7 Note](019680f0-7e00-7abc-8def-1234567890ab.md) here."
 	if result != expected {
 		t.Errorf("Expected %q, got %q", expected, result)
 	}

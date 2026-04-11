@@ -19,14 +19,14 @@
 #Zettel: #UntetheredZettel | #TetheredZettel
 
 #UntetheredZettel: {
-	id:       =~"^[0-9]{14}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" // Enforce YYYYMMDDHHmmss-UUIDv4
+	id:       =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" // UUIDv7 or legacy YYYYMMDDHHmmss-UUID
 	title:    string & !=""
 	type:     *"note" | "todo" | "daily-note" | "issue" // Default to "note"
 	category: "untethered"
 	project?: string // Optional for untethered notes
 	tags: [...(string & !="")]
 	created: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.*" // ISO 8601 required
-	parent?: =~"^[0-9]{14}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"                                              // Optional link to parent zettel
+	parent?: =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"                                              // Optional link to parent zettel
 
 	// Todo-specific fields (optional in schema; status required when type=="todo" enforced by code)
 	status?:    "open" | "in_progress" | "closed"
@@ -36,14 +36,14 @@
 }
 
 #TetheredZettel: {
-	id:       =~"^[0-9]{14}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" // Enforce YYYYMMDDHHmmss-UUIDv4
+	id:       =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" // UUIDv7 or legacy YYYYMMDDHHmmss-UUID
 	title:    string & !=""
 	type:     *"note" | "todo" | "daily-note" | "issue" // Default to "note"
 	category: "tethered"
 	project:  string & !="" // Required for tethered notes
 	tags: [...(string & !="")]
 	created: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.*" // ISO 8601 required
-	parent?: =~"^[0-9]{14}-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"                                              // Optional link to parent zettel
+	parent?: =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"                                              // Optional link to parent zettel
 
 	// Todo-specific fields (optional in schema; status required when type=="todo" enforced by code)
 	status?:    "open" | "in_progress" | "closed"

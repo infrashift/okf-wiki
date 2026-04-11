@@ -1,5 +1,5 @@
 ---
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Test Zettel"
 project: "zettelkasten-cli"
 category: "untethered"

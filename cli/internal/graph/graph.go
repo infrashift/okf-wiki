@@ -431,8 +431,11 @@ func GenerateMermaid(nodes []*Node, edges []Edge) string {
 	return sb.String()
 }
 
+// idPattern matches either UUIDv7 or legacy YYYYMMDDHHmmss-UUID format.
+const idPattern = `(?:[0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+
 // linkReplacePattern captures both the ID and optional display text from [[id]] or [[id|title]] links.
-var linkReplacePattern = regexp.MustCompile(`\[\[([0-9]{14}-[0-9a-f-]{36})(?:\|([^\]]+))?\]\]`)
+var linkReplacePattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|([^\]]+))?\]\]`)
 
 // TransformLinks converts [[id]] and [[id|title]] links to portable [title](id.md) markdown links
 // for IDs present in nodeMap. Links to IDs not in nodeMap are left unchanged.
@@ -462,7 +465,7 @@ func TransformLinks(content string, nodeMap map[string]*Node) string {
 }
 
 // ExtractLinks finds all [[id]] or [[id|title]] style links in content.
-var linkPattern = regexp.MustCompile(`\[\[([0-9]{14}-[0-9a-f-]{36})(?:\|[^\]]+)?\]\]`)
+var linkPattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|[^\]]+)?\]\]`)
 
 func ExtractLinks(content string) []string {
 	matches := linkPattern.FindAllStringSubmatch(content, -1)

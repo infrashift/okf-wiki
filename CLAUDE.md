@@ -26,7 +26,7 @@ go test ./cli/... -count=1   # Run all tests
 
 ## Data Model
 
-Notes are markdown files with YAML frontmatter. ID format: `YYYYMMDDHHmmss-UUIDv4`.
+Notes are markdown files with YAML frontmatter. ID format: UUIDv7 (RFC 9562). Legacy notes may use `YYYYMMDDHHmmss-UUIDv4`; both formats are accepted.
 
 Categories: `untethered` (quick captures, project optional) or `tethered` (refined, project required).
 Types: `note` (default), `todo`, `daily-note`, `issue`.

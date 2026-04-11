@@ -19,6 +19,19 @@ func TestValidateEdge_Valid(t *testing.T) {
 	}
 }
 
+func TestValidateEdge_UUIDv7(t *testing.T) {
+	edges := []EdgeRecord{
+		{From: "019680f0-7e00-7abc-8def-1234567890ab", Predicate: PredicateLinksTo, To: "01968109-4700-7def-9abc-ffffffffffff"},
+		{From: "019680f0-7e00-7abc-8def-1234567890ab", Predicate: PredicateTagged, To: "golang"},
+	}
+
+	for _, e := range edges {
+		if err := ValidateEdge(e); err != nil {
+			t.Errorf("expected valid UUIDv7 edge %s -[%s]-> %s, got error: %v", e.From, e.Predicate, e.To, err)
+		}
+	}
+}
+
 func TestValidateEdge_InvalidFrom(t *testing.T) {
 	e := EdgeRecord{From: "not-a-uuid", Predicate: PredicateLinksTo, To: "20260214100000-11111111-2222-3333-4444-555555555555"}
 	if err := ValidateEdge(e); err == nil {

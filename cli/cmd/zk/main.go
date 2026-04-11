@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -67,7 +68,7 @@ Examples:
 			title := args[0]
 
 			// Generate ID
-			id := time.Now().Format("20060102150405") + "-" + uuid.New().String()
+			id := uuid.Must(uuid.NewV7()).String()
 
 			var content string
 			var category string
@@ -868,7 +869,7 @@ Examples:
 			}
 
 			title := args[0]
-			id := time.Now().Format("20060102150405") + "-" + uuid.New().String()
+			id := uuid.Must(uuid.NewV7()).String()
 
 			cwd, _ := os.Getwd()
 			project := zettel.GetGitContext(cwd)
@@ -2083,7 +2084,7 @@ func backlinksToJSON(backlinks interface{}) (string, error) {
 
 // createOrOpenDaily creates or opens a daily note for the given date
 func createOrOpenDaily(cfg *config.Config, targetDate time.Time) error {
-	id := targetDate.Format("20060102000000") + "-" + uuid.New().String()
+	id := newV7WithTime(targetDate)
 	dateStr := targetDate.Format("2006-01-02")
 	dayName := targetDate.Format("Monday")
 	title := fmt.Sprintf("%s %s", dateStr, dayName)
@@ -2183,15 +2184,10 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 			return nil
 		}
 
-		// Parse date from filename (YYYYMMDDHHmmss-UUID.md)
+		// Parse date from filename (UUIDv7 or legacy YYYYMMDDHHmmss-UUID format)
 		baseName := strings.TrimSuffix(filepath.Base(path), ".md")
-		if len(baseName) < 14 {
-			return nil
-		}
-		datePrefix := baseName[:14]
-		fileDate, err := time.Parse("20060102150405", datePrefix)
+		fileDate, err := timeFromID(baseName)
 		if err != nil {
-			// Not a daily note filename format, skip
 			return nil
 		}
 
@@ -2687,4 +2683,40 @@ func gitDeleteBranch(path, branch string) error {
 	cmd := exec.Command("git", "branch", "-d", branch)
 	cmd.Dir = path
 	return cmd.Run()
+}
+
+// newV7WithTime constructs a UUIDv7 with a specific timestamp instead of time.Now().
+func newV7WithTime(t time.Time) string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(fmt.Sprintf("crypto/rand failed: %v", err))
+	}
+	ms := t.UnixMilli()
+	b[0] = byte(ms >> 40)
+	b[1] = byte(ms >> 32)
+	b[2] = byte(ms >> 24)
+	b[3] = byte(ms >> 16)
+	b[4] = byte(ms >> 8)
+	b[5] = byte(ms)
+	b[6] = (b[6] & 0x0F) | 0x70 // version 7
+	b[8] = (b[8] & 0x3F) | 0x80 // variant 10
+	return uuid.UUID(b).String()
+}
+
+// timeFromID extracts creation time from either ID format:
+//   - Legacy: "YYYYMMDDHHmmss-UUID" → parse 14-char prefix
+//   - UUIDv7: parse first 48 bits as Unix milliseconds
+func timeFromID(id string) (time.Time, error) {
+	if len(id) > 36 && id[14] == '-' {
+		t, err := time.Parse("20060102150405", id[:14])
+		if err == nil {
+			return t, nil
+		}
+	}
+	u, err := uuid.Parse(id)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid ID: %s", id)
+	}
+	ms := int64(u[0])<<40 | int64(u[1])<<32 | int64(u[2])<<24 | int64(u[3])<<16 | int64(u[4])<<8 | int64(u[5])
+	return time.UnixMilli(ms), nil
 }
