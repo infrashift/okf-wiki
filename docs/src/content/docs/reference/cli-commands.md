@@ -85,7 +85,7 @@ zk index path/to/note.md
 
 ### Index all notes in a directory
 ```bash
-zk index ~/zettelkasten/
+zk index ~/zk_vault/
 zk index .
 ```
 
@@ -165,7 +165,7 @@ zk search --type todo --status open --project my-project --priority high
 
 ### Generate a graph from a directory
 ```bash
-zk graph ~/zettelkasten/
+zk graph ~/zk_vault/
 zk graph .
 ```
 
@@ -185,10 +185,52 @@ zk graph . --start 20260219143000-a1b2c3d4
 zk graph . --depth 3
 ```
 
-The graph command prints an ASCII tree to stdout showing:
-- Note hierarchy with titles and IDs
-- Category indicators (untethered/tethered)
-- Link relationships between notes
+### Sync graph database before querying
+```bash
+zk graph --sync
+```
+
+The graph command outputs Mermaid flowchart syntax to stdout. When a graph database (`.zk_graph.db`) exists, it uses indexed data for faster queries. Use `--sync` to force a fresh sync before querying.
+
+---
+
+## Graph Database
+
+The graph database (`.zk_graph.db`) enables O(1) indexed backlink lookups and fast traversals. It is optional — all commands fall back to filesystem scanning when the database doesn't exist.
+
+### Sync the graph database
+```bash
+zk graph-sync                    # Sync from configured root
+zk graph-sync ~/zk_vault/        # Sync from explicit path
+zk graph-sync --validate         # Sync + validate edge integrity
+```
+
+Output shows added, updated, deleted counts. With `--validate`, reports dangling edges (links to non-existent notes) and structurally invalid edges.
+
+### Query backlinks (indexed)
+```bash
+zk graph-query backlinks <id>
+zk graph-query backlinks <id> --json
+```
+
+### Query connected cluster (N-depth BFS)
+```bash
+zk graph-query cluster <id>
+zk graph-query cluster <id> --depth 2 --limit 20
+zk graph-query cluster <id> --json
+```
+
+### Query by tag
+```bash
+zk graph-query tag golang
+zk graph-query tag golang --json
+```
+
+### Find dangling edges
+```bash
+zk graph-query dangling
+zk graph-query dangling --json
+```
 
 ---
 
@@ -462,8 +504,27 @@ Usage: `zk validate <file>`
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--limit` | `-l` | `10` | Maximum number of nodes to display |
-| `--start` | `-s` | - | Start tree from a specific note ID |
-| `--depth` | `-d` | `0` (unlimited) | Maximum tree depth |
+| `--start` | | - | Start tree from a specific note ID |
+| `--depth` | | `0` (unlimited) | Maximum tree depth |
+| `--sync` | | `false` | Sync graph database before querying |
+| `--help` | `-h` | - | Show help |
+
+### `zk graph-sync`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--validate` | | `false` | Run CUE edge validation and report integrity issues |
+| `--help` | `-h` | - | Show help |
+
+### `zk graph-query`
+
+Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--json` | | `false` | Output as JSON |
+| `--depth` | | `0` (unlimited) | Maximum BFS depth (cluster only) |
+| `--limit` | `-l` | `10` | Maximum number of nodes (cluster only) |
 | `--help` | `-h` | - | Show help |
 
 ### `zk backlinks`
@@ -571,7 +632,7 @@ parent: "YYYYMMDDHHMM"  # optional
 Default layout (configurable):
 
 ```
-~/zettelkasten/
+~/zk_vault/
 ├── untethered/         # Quick captures, ideas
 │   └── 202602131045.md
 ├── tethered/           # Refined, linked notes
@@ -605,23 +666,23 @@ zk create "Interesting pattern in auth flow"
 
 ### Add project context later
 ```bash
-zk set-project ~/zettelkasten/untethered/202602131045.md my-project
+zk set-project ~/zk_vault/untethered/202602131045.md my-project
 ```
 
 ### Tether an untethered note
 ```bash
 # Review and refine the untethered note, then tether
-zk tether ~/zettelkasten/untethered/202602131045.md --project my-project
+zk tether ~/zk_vault/untethered/202602131045.md --project my-project
 
 # Or if in a git repo, project is auto-detected
 cd ~/projects/my-project
-zk tether ~/zettelkasten/untethered/202602131045.md
+zk tether ~/zk_vault/untethered/202602131045.md
 ```
 
 ### Untether a tethered note
 ```bash
 # Revert a tethered note back to untethered
-zk untether ~/zettelkasten/tethered/202602131100.md
+zk untether ~/zk_vault/tethered/202602131100.md
 ```
 
 ### Build a note chain

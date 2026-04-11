@@ -38,7 +38,6 @@ export default defineConfig({
           label: 'Tutorials',
           items: [
             { label: 'NeoVim ZK Plugin Tutorial', slug: 'tutorial' },
-            { label: 'ZK MCP Server Tutorial', slug: 'tutorial/mcp-server' },
           ],
         },
         {
@@ -49,12 +48,6 @@ export default defineConfig({
             { label: 'Notes Workflow', slug: 'neovim/notes-workflow' },
             { label: 'Daily Notes Workflow', slug: 'neovim/daily-notes-workflow' },
             { label: 'Todo Workflow', slug: 'neovim/todo-workflow' },
-          ],
-        },
-        {
-          label: 'Integrations',
-          items: [
-            { label: 'MCP Server', slug: 'integrations/mcp-server' },
           ],
         },
         {

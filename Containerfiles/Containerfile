@@ -10,7 +10,6 @@ RUN go mod download
 
 COPY . .
 RUN CGO_ENABLED=0 go build -o zk ./cli/cmd/zk
-RUN CGO_ENABLED=0 go build -o zk-mcp ./cli/cmd/zk-mcp
 
 # --------------------------------------------------------------------------
 # Stage 2: Final image — headless devcontainer
@@ -18,8 +17,9 @@ RUN CGO_ENABLED=0 go build -o zk-mcp ./cli/cmd/zk-mcp
 FROM registry.fedoraproject.org/fedora-minimal:43
 
 # ── 1. User setup ─────────────────────────────────────────────────────────
+ARG USER_UID=1001
 USER root
-RUN id -u user &>/dev/null || useradd -u 1001 -g 0 -m -s /bin/bash user && \
+RUN id -u user &>/dev/null || useradd -u ${USER_UID} -g 0 -m -s /bin/bash user && \
     mkdir -p /home/user/.local/bin /home/user/.config/nvim/lua/config \
              /home/user/.config/nvim/lua/plugins /home/user/.terminfo && \
     chown -R user:0 /home/user && \
@@ -94,7 +94,6 @@ RUN nvim --headless "+Lazy! sync" +qa 2>&1 || true
 
 # ── 14. Copy zk binary from builder ─────────────────────────────────────
 COPY --from=builder --chown=user:0 /src/zk /home/user/.local/bin/zk
-COPY --from=builder --chown=user:0 /src/zk-mcp /home/user/.local/bin/zk-mcp
 
 # ── 15. Environment ─────────────────────────────────────────────────────
 ENV TERM=xterm-256color

@@ -414,7 +414,7 @@ Index zettels for searching.
 
 ```lua
 require("zk").index()  -- Index cwd
-require("zk").index("~/zettelkasten/")
+require("zk").index("~/zk_vault/")
 ```
 
 ### `graph(opts)`
@@ -432,7 +432,7 @@ Generate an ASCII tree visualization of note relationships.
 
 ```lua
 require("zk").graph()  -- Graph cwd with defaults
-require("zk").graph({ limit = 20, path = "~/zettelkasten/" })
+require("zk").graph({ limit = 20, path = "~/zk_vault/" })
 ```
 
 ### `preview_note(file_path)`

@@ -1,15 +1,21 @@
-.PHONY: build build-mcp test lint fmt clean install install-mcp tidy ui-check integration-test docs-dev
+.PHONY: build test lint fmt clean install tidy ui-check integration-test docs-dev image run-dev stop-dev
 
 BINARY_NAME=zk
 CMD_PATH=./cli/cmd/zk
-MCP_BINARY_NAME=zk-mcp
-MCP_CMD_PATH=./cli/cmd/zk-mcp
+
+# Container settings
+CONTAINER_ENGINE=podman
+CONTAINER_FILE=Containerfiles/Containerfile
+IMAGE_NAME=zk-devcontainer
+IMAGE_TAG=latest
+CONTAINER_NAME=zk-dev
+SSH_PORT=2222
+SSH_PUBKEY=$(HOME)/.ssh/id_ed25519.pub
+ZK_VAULT=$(HOME)/zk_vault
+USER_UID=$(shell id -u)
 
 build:
 	go build -o $(BINARY_NAME) $(CMD_PATH)
-
-build-mcp:
-	go build -o $(MCP_BINARY_NAME) $(MCP_CMD_PATH)
 
 test:
 	@echo "Running Go tests..."
@@ -30,9 +36,6 @@ fmt:
 install: build
 	mv $(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
 
-install-mcp: build-mcp
-	mv $(MCP_BINARY_NAME) $(GOPATH)/bin/$(MCP_BINARY_NAME)
-
 ui-check:
 	@echo "Checking Lua syntax..."
 	luacheck lua/
@@ -43,7 +46,7 @@ integration-test: build
 	nvim --headless -u NONE -c "luafile test/integration_test.lua"
 
 clean:
-	rm -f $(BINARY_NAME) $(MCP_BINARY_NAME)
+	rm -f $(BINARY_NAME)
 	rm -rf .zk_index/
 
 tidy:
@@ -51,3 +54,16 @@ tidy:
 
 docs-dev:
 	cd docs && bun --bun run dev
+
+build-image:
+	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+
+run-container:
+	$(CONTAINER_ENGINE) run -d --name $(CONTAINER_NAME) \
+		-p $(SSH_PORT):2222 \
+		-v $(SSH_PUBKEY):/home/user/.ssh/authorized_keys:ro,Z \
+		-v $(ZK_VAULT):/home/user/zk_vault:Z \
+		$(IMAGE_NAME):$(IMAGE_TAG)
+
+stop-container:
+	$(CONTAINER_ENGINE) stop $(CONTAINER_NAME) && $(CONTAINER_ENGINE) rm $(CONTAINER_NAME)

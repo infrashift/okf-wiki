@@ -58,7 +58,7 @@ This tutorial will show you how to:
 Ensure you have:
 - NeoVim 0.9+ with the zk plugin installed
 - The `zk` CLI binary in your PATH
-- A zettelkasten directory (default: `~/zettelkasten/`)
+- A zettelkasten directory (default: `~/zk_vault/`)
 
 Verify your setup:
 ```vim
@@ -92,7 +92,7 @@ Note Title: Interesting error handling pattern in auth module
 
 The plugin creates a new note and shows you the path:
 ```
-Created: ~/zettelkasten/untethered/202602131423.md
+Created: ~/zk_vault/untethered/202602131423.md
 ```
 
 **What just happened:**
@@ -161,7 +161,7 @@ Save the file (`:w`).
 
 Before you can search, index your notes:
 ```vim
-:ZkIndex ~/zettelkasten/
+:ZkIndex ~/zk_vault/
 ```
 
 Or index just the current directory:

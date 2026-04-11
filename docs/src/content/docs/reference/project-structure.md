@@ -25,18 +25,19 @@ make ui-check
 ## Source Layout
 
 ```
-zettelkasten/
+zettelkasten-cli/
 ├── cli/
-│   ├── cmd/zk/          # CLI entry point
+│   ├── cmd/zk/          # CLI entry point (Cobra commands)
 │   ├── internal/
 │   │   ├── config/      # CUE schemas and config loading
-│   │   ├── graph/       # Note relationship graph
-│   │   ├── index/       # Bleve search index
-│   │   └── zettel/      # Note utilities
+│   │   ├── graph/       # In-memory graph (BFS, ASCII tree, Mermaid)
+│   │   ├── graphdb/     # Persistent graph store (bbolt)
+│   │   ├── index/       # Bleve full-text search index
+│   │   ├── templates/   # Embedded note templates
+│   │   └── zettel/      # Note utilities (git context)
 │   └── testdata/        # Test fixtures
-├── lua/zk/              # NeoVim plugin
+├── lua/zk/              # NeoVim plugin (snacks-based pickers)
 ├── plugin/              # NeoVim autoload
-├── doc/                 # NeoVim help
 ├── after/               # NeoVim ftplugin
 ├── go.mod, go.sum       # Go module (stays at root)
 └── Makefile

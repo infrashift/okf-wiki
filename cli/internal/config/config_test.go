@@ -36,7 +36,7 @@ func TestLoadDefaultConfig(t *testing.T) {
 
 	// Check defaults
 	home, _ := os.UserHomeDir()
-	expectedRoot := filepath.Join(home, "zettelkasten")
+	expectedRoot := filepath.Join(home, "zk_vault")
 	if cfg.RootPath != expectedRoot {
 		t.Errorf("RootPath = %q, want %q", cfg.RootPath, expectedRoot)
 	}

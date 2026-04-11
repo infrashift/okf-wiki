@@ -13,6 +13,7 @@ import (
 	"time"
 	"zk/cli/internal/config"
 	"zk/cli/internal/graph"
+	"zk/cli/internal/graphdb"
 	"zk/cli/internal/index"
 	"zk/cli/internal/templates"
 	"zk/cli/internal/zettel"
@@ -290,6 +291,7 @@ Examples:
 
 	var graphStartFlag string
 	var graphDepthFlag int
+	var graphSyncFlag bool
 
 	var graphCmd = &cobra.Command{
 		Use:   "graph [path]",
@@ -301,13 +303,16 @@ or piped to other tools. A summary line (N nodes, M edges) is printed to
 stderr so it does not pollute piped output.
 
 If no path is given, the configured zettelkasten root directory is used.
+When a graph database (.zk_graph.db) exists, it is used for fast queries.
+Use --sync to force a fresh sync before querying.
 
 Examples:
   zk graph                             # Tree from zettelkasten root
   zk graph ~/zettelkasten              # Tree of all zettels in directory
   zk graph --start 20260213-abc-123    # Tree centered on a specific zettel
   zk graph --depth 3                   # Traverse up to 3 hops from start
-  zk graph --limit 20                  # Show up to 20 nodes (default: 10)`,
+  zk graph --limit 20                  # Show up to 20 nodes (default: 10)
+  zk graph --sync                      # Sync graph DB before querying`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -320,9 +325,36 @@ Examples:
 				path = args[0]
 			}
 
-			g, err := buildGraphFromPath(path)
-			if err != nil {
-				return err
+			// Try to use persistent graph store.
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			_, dbErr := os.Stat(dbPath)
+			useStore := dbErr == nil || graphSyncFlag
+
+			var g *graph.Graph
+			if useStore {
+				store, err := graphdb.Open(dbPath)
+				if err != nil {
+					return err
+				}
+				defer store.Close()
+
+				if graphSyncFlag || os.IsNotExist(dbErr) {
+					result, err := store.Sync(path)
+					if err != nil {
+						return fmt.Errorf("graph sync failed: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "Synced: %d added, %d updated, %d deleted\n", result.Added, result.Updated, result.Deleted)
+				}
+
+				g, err = store.ToGraph()
+				if err != nil {
+					return err
+				}
+			} else {
+				g, err = buildGraphFromPath(path)
+				if err != nil {
+					return err
+				}
 			}
 
 			nodes, err := queryGraph(g, graphStartFlag, graphLimitFlag, graphDepthFlag)
@@ -495,6 +527,7 @@ you must provide it via --project flag or be in a git repository.`,
 		Long: `Find all zettels that contain links to the specified zettel.
 
 Links are detected in the format [[id]] or [[id|title]].
+When a graph database exists, uses O(1) indexed lookup instead of filesystem scan.
 
 Examples:
   zk backlinks 202602131045           # Find backlinks by ID
@@ -525,35 +558,6 @@ Examples:
 				targetTitle = z.Title
 			}
 
-			// Determine search path
-			searchPath := cfg.RootPath
-			if searchPath == "" {
-				searchPath, _ = os.Getwd()
-			}
-			// If root_path doesn't exist, use current directory
-			if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-				searchPath, _ = os.Getwd()
-			}
-
-			// Collect all markdown files
-			var files []string
-			err = filepath.Walk(searchPath, func(p string, fi os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-				if fi.IsDir() && fi.Name() == "ephemeral" {
-					return filepath.SkipDir
-				}
-				if !fi.IsDir() && strings.HasSuffix(p, ".md") {
-					files = append(files, p)
-				}
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("failed to walk directory: %w", err)
-			}
-
-			// Find backlinks
 			type Backlink struct {
 				ID       string `json:"id"`
 				Title    string `json:"title"`
@@ -563,33 +567,88 @@ Examples:
 			}
 
 			var backlinks []Backlink
-			for _, filePath := range files {
-				content, err := os.ReadFile(filePath)
+
+			// Try indexed lookup via graph store.
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			if _, err := os.Stat(dbPath); err == nil {
+				store, err := graphdb.Open(dbPath)
 				if err != nil {
-					continue
+					return err
+				}
+				defer store.Close()
+
+				nodes, err := store.GetBacklinks(targetID)
+				if err != nil {
+					return fmt.Errorf("backlink query failed: %w", err)
+				}
+				for _, n := range nodes {
+					backlinks = append(backlinks, Backlink{
+						ID:       n.ID,
+						Title:    n.Title,
+						Project:  n.Project,
+						Category: n.Category,
+						FilePath: n.FilePath,
+					})
+				}
+				// Get target title if we don't have it yet.
+				if targetTitle == "" {
+					if target, _ := store.GetNode(targetID); target != nil {
+						targetTitle = target.Title
+					}
+				}
+			} else {
+				// Fall back to filesystem scan.
+				searchPath := cfg.RootPath
+				if searchPath == "" {
+					searchPath, _ = os.Getwd()
+				}
+				if _, err := os.Stat(searchPath); os.IsNotExist(err) {
+					searchPath, _ = os.Getwd()
 				}
 
-				// Check if this file links to the target
-				body := extractBody(content)
-				links := graph.ExtractLinks(body)
+				var files []string
+				err = filepath.Walk(searchPath, func(p string, fi os.FileInfo, err error) error {
+					if err != nil {
+						return err
+					}
+					if fi.IsDir() && fi.Name() == "ephemeral" {
+						return filepath.SkipDir
+					}
+					if !fi.IsDir() && strings.HasSuffix(p, ".md") {
+						files = append(files, p)
+					}
+					return nil
+				})
+				if err != nil {
+					return fmt.Errorf("failed to walk directory: %w", err)
+				}
 
-				for _, linkID := range links {
-					if linkID == targetID {
-						// This file links to our target
-						z, err := config.ParseFrontmatter(content)
-						if err != nil {
-							continue
+				for _, filePath := range files {
+					content, err := os.ReadFile(filePath)
+					if err != nil {
+						continue
+					}
+
+					body := extractBody(content)
+					links := graph.ExtractLinks(body)
+
+					for _, linkID := range links {
+						if linkID == targetID {
+							z, err := config.ParseFrontmatter(content)
+							if err != nil {
+								continue
+							}
+
+							absPath, _ := filepath.Abs(filePath)
+							backlinks = append(backlinks, Backlink{
+								ID:       z.ID,
+								Title:    z.Title,
+								Project:  z.Project,
+								Category: z.Category,
+								FilePath: absPath,
+							})
+							break
 						}
-
-						absPath, _ := filepath.Abs(filePath)
-						backlinks = append(backlinks, Backlink{
-							ID:       z.ID,
-							Title:    z.Title,
-							Project:  z.Project,
-							Category: z.Category,
-							FilePath: absPath,
-						})
-						break
 					}
 				}
 			}
@@ -717,6 +776,7 @@ Examples:
 	graphCmd.Flags().IntVarP(&graphLimitFlag, "limit", "l", 10, "Maximum number of nodes to display")
 	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific zettel ID")
 	graphCmd.Flags().IntVar(&graphDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
+	graphCmd.Flags().BoolVar(&graphSyncFlag, "sync", false, "Sync graph database before querying")
 
 	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of notes to export")
 	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Start export from a specific zettel ID")
@@ -1460,11 +1520,258 @@ Examples:
 		},
 	}
 
+	// --- graph-sync command ---
+	var graphSyncValidateFlag bool
+
+	var graphSyncCmd = &cobra.Command{
+		Use:   "graph-sync [path]",
+		Short: "Sync the persistent graph database from filesystem",
+		Long: `Walk the zettelkasten directory and synchronize the persistent graph database.
+
+Adds new notes, updates changed notes, and purges deleted notes.
+The graph database enables fast O(1) backlink lookups and indexed traversals.
+
+Examples:
+  zk graph-sync                    # Sync from configured root
+  zk graph-sync ~/zettelkasten     # Sync from explicit path
+  zk graph-sync --validate         # Sync and validate edge integrity`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			path := cfg.RootPath
+			if len(args) > 0 {
+				path = args[0]
+			}
+
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			store, err := graphdb.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			// Ensure graph DB is gitignored.
+			ensureGitignore(cfg.RootPath, cfg.GraphPath)
+
+			result, err := store.Sync(path)
+			if err != nil {
+				return fmt.Errorf("sync failed: %w", err)
+			}
+
+			fmt.Printf("Graph synced: %d total, %d added, %d updated, %d deleted\n",
+				result.Total, result.Added, result.Updated, result.Deleted)
+
+			if result.Dangling > 0 {
+				fmt.Printf("Warning: %d dangling edge(s) detected\n", result.Dangling)
+			}
+
+			if graphSyncValidateFlag {
+				integrity, err := store.ValidateIntegrity()
+				if err != nil {
+					return fmt.Errorf("integrity check failed: %w", err)
+				}
+				fmt.Print(integrity.String())
+			}
+
+			return nil
+		},
+	}
+	graphSyncCmd.Flags().BoolVar(&graphSyncValidateFlag, "validate", false, "Run CUE edge validation and report integrity issues")
+
+	// --- graph-query command ---
+	var graphQueryDepthFlag int
+	var graphQueryLimitFlag int
+	var graphQueryJSONFlag bool
+
+	var graphQueryCmd = &cobra.Command{
+		Use:   "graph-query <subcommand> <arg>",
+		Short: "Query the persistent graph database",
+		Long: `Query the graph database for backlinks, clusters, tags, or dangling edges.
+
+All subcommands support --json for machine-readable output (e.g. for Neovim integration).
+
+Examples:
+  zk graph-query backlinks <id>            # Find backlinks
+  zk graph-query cluster <id> --depth 2    # N-depth cluster
+  zk graph-query tag <tag>                 # Notes by tag
+  zk graph-query dangling                  # Dangling edges`,
+	}
+
+	var gqBacklinksCmd = &cobra.Command{
+		Use:   "backlinks <id>",
+		Short: "Find all notes linking to a node",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			store, err := graphdb.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			nodes, err := store.GetBacklinks(args[0])
+			if err != nil {
+				return err
+			}
+
+			if graphQueryJSONFlag {
+				data, _ := json.MarshalIndent(nodes, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				if len(nodes) == 0 {
+					fmt.Println("No backlinks found")
+				} else {
+					for _, n := range nodes {
+						fmt.Printf("  %s: %s [%s]\n", n.ID, n.Title, n.Category)
+					}
+					fmt.Printf("\nFound %d backlink(s)\n", len(nodes))
+				}
+			}
+			return nil
+		},
+	}
+
+	var gqClusterCmd = &cobra.Command{
+		Use:   "cluster <id>",
+		Short: "Find connected nodes within N hops",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			store, err := graphdb.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			nodes, edges, err := store.GetCluster(args[0], graphQueryDepthFlag, graphQueryLimitFlag)
+			if err != nil {
+				return err
+			}
+
+			if graphQueryJSONFlag {
+				result := struct {
+					Nodes []graphdb.NodeRecord `json:"nodes"`
+					Edges []graphdb.EdgeRecord `json:"edges"`
+				}{Nodes: nodes, Edges: edges}
+				data, _ := json.MarshalIndent(result, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				for _, n := range nodes {
+					fmt.Printf("  %s: %s [%s]\n", n.ID, n.Title, n.Category)
+				}
+				fmt.Printf("\n%d nodes, %d edges\n", len(nodes), len(edges))
+			}
+			return nil
+		},
+	}
+	gqClusterCmd.Flags().IntVar(&graphQueryDepthFlag, "depth", 0, "Maximum BFS depth (0 = unlimited)")
+	gqClusterCmd.Flags().IntVarP(&graphQueryLimitFlag, "limit", "l", 10, "Maximum number of nodes")
+
+	var gqTagCmd = &cobra.Command{
+		Use:   "tag <tag>",
+		Short: "Find all notes with a given tag",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			store, err := graphdb.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			nodes, err := store.GetByTag(args[0])
+			if err != nil {
+				return err
+			}
+
+			if graphQueryJSONFlag {
+				data, _ := json.MarshalIndent(nodes, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				if len(nodes) == 0 {
+					fmt.Printf("No notes tagged %q\n", args[0])
+				} else {
+					for _, n := range nodes {
+						fmt.Printf("  %s: %s [%s]\n", n.ID, n.Title, n.Category)
+					}
+					fmt.Printf("\nFound %d note(s) tagged %q\n", len(nodes), args[0])
+				}
+			}
+			return nil
+		},
+	}
+
+	var gqDanglingCmd = &cobra.Command{
+		Use:   "dangling",
+		Short: "Find edges pointing to non-existent notes",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+			store, err := graphdb.Open(dbPath)
+			if err != nil {
+				return err
+			}
+			defer store.Close()
+
+			edges, err := store.GetDanglingEdges()
+			if err != nil {
+				return err
+			}
+
+			if graphQueryJSONFlag {
+				data, _ := json.MarshalIndent(edges, "", "  ")
+				fmt.Println(string(data))
+			} else {
+				if len(edges) == 0 {
+					fmt.Println("No dangling edges found")
+				} else {
+					for _, e := range edges {
+						fmt.Printf("  %s -[%s]-> %s (target not found)\n", e.From, e.Predicate, e.To)
+					}
+					fmt.Printf("\nFound %d dangling edge(s)\n", len(edges))
+				}
+			}
+			return nil
+		},
+	}
+
+	graphQueryCmd.PersistentFlags().BoolVar(&graphQueryJSONFlag, "json", false, "Output as JSON")
+	graphQueryCmd.AddCommand(gqBacklinksCmd)
+	graphQueryCmd.AddCommand(gqClusterCmd)
+	graphQueryCmd.AddCommand(gqTagCmd)
+	graphQueryCmd.AddCommand(gqDanglingCmd)
+
 	rootCmd.AddCommand(createCmd)
 	rootCmd.AddCommand(templatesCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(graphCmd)
+	rootCmd.AddCommand(graphSyncCmd)
+	rootCmd.AddCommand(graphQueryCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(tetherCmd)
 	rootCmd.AddCommand(untetherCmd)

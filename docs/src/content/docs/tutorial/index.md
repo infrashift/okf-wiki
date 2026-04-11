@@ -97,10 +97,10 @@ preserved.
 
 ## 4. Where Are Notes Stored?
 
-All notes live under `~/zettelkasten/` inside the container, organized as:
+All notes live under `~/zk_vault/` inside the container, organized as:
 
 ```
-~/zettelkasten/
+~/zk_vault/
   untethered/                  Untethered notes (quick captures)
     <id>.md
     daily/                     Daily notes
@@ -130,7 +130,7 @@ To **persist notes across container restarts**, mount a host directory:
 podman run -d --name zk-dev \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/zettelkasten:/home/user/zettelkasten:Z \
+  -v ~/zk_vault:/home/user/zettelkasten:Z \
   zk-devcontainer:latest
 ```
 
@@ -140,8 +140,8 @@ SSH into the container and switch to the bash pane (click it or press `Ctrl-b`
 then right-arrow). Initialize the zettelkasten directory:
 
 ```bash
-mkdir -p ~/zettelkasten
-cd ~/zettelkasten
+mkdir -p ~/zk_vault
+cd ~/zk_vault
 git init
 git config user.email "you@example.com"
 git config user.name "Your Name"
@@ -414,7 +414,7 @@ real-time.
 Switch to the bash pane and search from the command line:
 
 ```bash
-cd ~/zettelkasten
+cd ~/zk_vault
 
 # Full-text search
 zk search "atomic notes"
@@ -446,13 +446,13 @@ visual graph.
 From the CLI:
 
 ```bash
-zk graph ~/zettelkasten --limit 20
+zk graph ~/zk_vault --limit 20
 ```
 
 You can also start the tree from a specific note and control depth:
 
 ```bash
-zk graph ~/zettelkasten --start 20260219143000-a1b2c3d4 --depth 3
+zk graph ~/zk_vault --start 20260219143000-a1b2c3d4 --depth 3
 ```
 
 ## 16. Manage Todos
@@ -548,7 +548,7 @@ reindex everything:
 Or from the CLI:
 
 ```bash
-zk index ~/zettelkasten
+zk index ~/zk_vault
 ```
 
 ## 20. Day Start / Day End (Git Workflow)
@@ -656,6 +656,6 @@ podman rm -f zk-dev
 podman run -d --name zk-dev \
   -e SSH_PORT=3333 -p 3333:3333 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/zettelkasten:/home/user/zettelkasten:Z \
+  -v ~/zk_vault:/home/user/zettelkasten:Z \
   zk-devcontainer:latest
 ```

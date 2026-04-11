@@ -321,7 +321,7 @@ vim.keymap.set("n", "<leader>zw", "<cmd>ZkDailyList!<cr>", { desc = "This week's
 Daily notes are stored in a structured hierarchy:
 
 ```
-~/zettelkasten/
+~/zk_vault/
 └── untethered/
     └── daily/
         └── 2026/

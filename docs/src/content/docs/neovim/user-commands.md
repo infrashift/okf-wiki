@@ -226,7 +226,7 @@ Index zettels for full-text search. Indexes the current directory by default.
 :ZkIndex
 
 " Index specific path
-:ZkIndex ~/zettelkasten/
+:ZkIndex ~/zk_vault/
 ```
 
 ### `:ZkRefreshTags`
