@@ -65,10 +65,10 @@ func ValidateEdges(edges []EdgeRecord) []error {
 
 // IntegrityResult reports referential integrity issues.
 type IntegrityResult struct {
-	DanglingEdges  []EdgeRecord
-	InvalidEdges   []string // CUE validation errors
-	TotalEdges     int
-	TotalNodes     int
+	DanglingEdges []EdgeRecord
+	InvalidEdges  []string // CUE validation errors
+	TotalEdges    int
+	TotalNodes    int
 }
 
 // ValidateIntegrity checks all edges for structural validity (CUE) and

@@ -1,29 +1,29 @@
--- zk.nvim - Zettelkasten CLI integration for NeoVim
+-- okfw.nvim - Zettelkasten CLI integration for NeoVim
 -- This file is auto-loaded by NeoVim when the plugin is installed
 
 -- Prevent loading twice
-if vim.g.loaded_zk then
+if vim.g.loaded_okfw then
     return
 end
-vim.g.loaded_zk = true
+vim.g.loaded_okfw = true
 
 -- Minimum NeoVim version check
 if vim.fn.has("nvim-0.9") ~= 1 then
-    vim.notify("zk.nvim requires NeoVim 0.9+", vim.log.levels.ERROR)
+    vim.notify("okfw.nvim requires NeoVim 0.9+", vim.log.levels.ERROR)
     return
 end
 
 -- User commands
 local function create_commands()
     -- Daily notes
-    vim.api.nvim_create_user_command("ZkDaily", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwDaily", function(opts)
+        local okfw = require("okfw")
         if opts.args == "yesterday" then
-            zk.daily({ date = "yesterday" })
+            okfw.daily({ date = "yesterday" })
         elseif opts.args ~= "" then
-            zk.daily({ date = opts.args })
+            okfw.daily({ date = opts.args })
         else
-            zk.daily()
+            okfw.daily()
         end
     end, {
         nargs = "?",
@@ -33,12 +33,12 @@ local function create_commands()
         desc = "Open or create daily note",
     })
 
-    vim.api.nvim_create_user_command("ZkDailyList", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwDailyList", function(opts)
+        local okfw = require("okfw")
         if opts.bang then
-            zk.daily_picker({ week = true })
+            okfw.daily_picker({ week = true })
         else
-            zk.daily_picker()
+            okfw.daily_picker()
         end
     end, {
         bang = true,
@@ -46,8 +46,8 @@ local function create_commands()
     })
 
     -- Note creation
-    vim.api.nvim_create_user_command("ZkNote", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwNote", function(opts)
+        local okfw = require("okfw")
         local args_parsed = {}
 
         -- Parse args
@@ -71,7 +71,7 @@ local function create_commands()
             args_parsed.note_type = "untethered"
         end
 
-        zk.create_note(args_parsed)
+        okfw.create_note(args_parsed)
     end, {
         nargs = "*",
         complete = function(_, line)
@@ -101,11 +101,11 @@ local function create_commands()
             end
             return completions
         end,
-        desc = "Create new zettel (--category untethered/tethered --project NAME)",
+        desc = "Create new concept (--category untethered/tethered --project NAME)",
     })
 
-    vim.api.nvim_create_user_command("ZkTemplate", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwTemplate", function(opts)
+        local okfw = require("okfw")
         local args_parsed = {}
 
         -- Parse args
@@ -126,9 +126,9 @@ local function create_commands()
         end
 
         if args_parsed.template then
-            zk.create_from_template(args_parsed)
+            okfw.create_from_template(args_parsed)
         else
-            zk.template_picker()
+            okfw.template_picker()
         end
     end, {
         nargs = "*",
@@ -147,7 +147,7 @@ local function create_commands()
             for _, a in ipairs(args) do
                 if a == "--project" then
                     has_project = true
-                elseif not a:match("^%-%-") and a ~= "" and a ~= "ZkTemplate" then
+                elseif not a:match("^%-%-") and a ~= "" and a ~= "OkfwTemplate" then
                     has_template = true
                 end
             end
@@ -155,8 +155,8 @@ local function create_commands()
             local completions = {}
             -- Offer template names if none selected yet
             if not has_template then
-                local zk = require("zk")
-                for _, tmpl in ipairs(zk.templates) do
+                local okfw = require("okfw")
+                for _, tmpl in ipairs(okfw.templates) do
                     table.insert(completions, tmpl.name)
                 end
             end
@@ -169,7 +169,7 @@ local function create_commands()
     })
 
     -- Search and navigation
-    vim.api.nvim_create_user_command("ZkSearch", function(opts)
+    vim.api.nvim_create_user_command("OkfwSearch", function(opts)
         local search_opts = {}
         local query_parts = {}
 
@@ -220,12 +220,12 @@ local function create_commands()
         local has_snacks = pcall(require, "snacks")
         if has_snacks then
             if opts.bang then
-                require("zk.picker").live_search(search_opts)
+                require("okfw.picker").live_search(search_opts)
             else
-                require("zk.picker").search(search_opts)
+                require("okfw.picker").search(search_opts)
             end
         else
-            require("zk").search(query, search_opts)
+            require("okfw").search(query, search_opts)
         end
     end, {
         nargs = "*",
@@ -264,12 +264,12 @@ local function create_commands()
             end
             return completions
         end,
-        desc = "Search zettels (! for live search)",
+        desc = "Search concepts (! for live search)",
     })
 
     -- Graph
-    vim.api.nvim_create_user_command("ZkGraph", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwGraph", function(opts)
+        local okfw = require("okfw")
         local graph_opts = {}
 
         -- Parse args for --depth N, --start ID, --limit N, or plain number
@@ -296,7 +296,7 @@ local function create_commands()
             end
         end
 
-        zk.graph(graph_opts)
+        okfw.graph(graph_opts)
     end, {
         nargs = "*",
         complete = function(_, line)
@@ -324,8 +324,8 @@ local function create_commands()
     })
 
     -- Export
-    vim.api.nvim_create_user_command("ZkExport", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwExport", function(opts)
+        local okfw = require("okfw")
         local export_opts = {}
 
         -- Parse args for --depth N, --start ID, --limit N, or plain number
@@ -352,7 +352,7 @@ local function create_commands()
             end
         end
 
-        zk.export(export_opts)
+        okfw.export(export_opts)
     end, {
         nargs = "*",
         complete = function(_, line)
@@ -379,26 +379,26 @@ local function create_commands()
     })
 
     -- Index
-    vim.api.nvim_create_user_command("ZkIndex", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwIndex", function(opts)
+        local okfw = require("okfw")
         local path = opts.args ~= "" and opts.args or nil
-        zk.index(path)
+        okfw.index(path)
     end, {
         nargs = "?",
         complete = "dir",
-        desc = "Index zettels",
+        desc = "Index concepts",
     })
 
     -- Tags
-    vim.api.nvim_create_user_command("ZkRefreshTags", function()
-        require("zk").refresh_tags()
+    vim.api.nvim_create_user_command("OkfwRefreshTags", function()
+        require("okfw").refresh_tags()
     end, {
         desc = "Refresh tag cache",
     })
 
     -- Todo commands
-    vim.api.nvim_create_user_command("ZkTodo", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwTodo", function(opts)
+        local okfw = require("okfw")
         local args_parsed = {}
 
         -- Parse args for --due, --priority, --project
@@ -426,7 +426,7 @@ local function create_commands()
             args_parsed.title = table.concat(title_parts, " ")
         end
 
-        zk.todo(args_parsed)
+        okfw.todo(args_parsed)
     end, {
         nargs = "*",
         complete = function(_, line)
@@ -461,8 +461,8 @@ local function create_commands()
         desc = "Create new todo (--due DATE --priority high/medium/low --project NAME)",
     })
 
-    vim.api.nvim_create_user_command("ZkTodoList", function(opts)
-        local zk = require("zk")
+    vim.api.nvim_create_user_command("OkfwTodoList", function(opts)
+        local okfw = require("okfw")
         local list_opts = {}
 
         if opts.args == "today" then
@@ -473,7 +473,7 @@ local function create_commands()
             list_opts.project = opts.args
         end
 
-        zk.todo_list(list_opts)
+        okfw.todo_list(list_opts)
     end, {
         nargs = "?",
         complete = function()
@@ -487,14 +487,14 @@ end
 create_commands()
 
 -- Provide a convenient setup function that auto-configures everything
--- Users can call require("zk").setup() for more control
+-- Users can call require("okfw").setup() for more control
 vim.api.nvim_create_autocmd("User", {
     pattern = "VeryLazy",
     callback = function()
         -- If user hasn't called setup() yet, do a minimal setup
-        local zk = require("zk")
-        if not zk.config then
-            zk.setup()
+        local okfw = require("okfw")
+        if not okfw.config then
+            okfw.setup()
         end
     end,
 })

@@ -6,7 +6,7 @@ export default defineConfig({
   base: '/zettelkasten',
   integrations: [
     starlight({
-      title: 'Zettelkasten CLI',
+      title: 'OKF Wiki',
       social: [
         {
           icon: 'github',
@@ -37,7 +37,7 @@ export default defineConfig({
         {
           label: 'Tutorials',
           items: [
-            { label: 'NeoVim ZK Plugin Tutorial', slug: 'tutorial' },
+            { label: 'NeoVim okfw Plugin Tutorial', slug: 'tutorial' },
           ],
         },
         {

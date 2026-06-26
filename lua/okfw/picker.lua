@@ -1,4 +1,4 @@
--- snacks.nvim picker integration for zk
+-- snacks.nvim picker integration for okfw
 -- Requires snacks.nvim to be installed
 
 local M = {}
@@ -8,13 +8,13 @@ if not has_snacks then
     return M
 end
 
--- Get the zk config from the main module
+-- Get the okfw config from the main module
 local function get_config()
-    local ok, zk = pcall(require, "zk")
-    if ok and zk.config then
-        return zk.config
+    local ok, okfw = pcall(require, "okfw")
+    if ok and okfw.config then
+        return okfw.config
     end
-    return { bin = "zk" }
+    return { bin = "okfw" }
 end
 
 -- Parse JSON search results
@@ -77,8 +77,8 @@ local function build_search_args(opts, query)
     return args
 end
 
--- Format a zettel entry for display
-local function format_zettel_display(entry)
+-- Format a concept entry for display
+local function format_concept_display(entry)
     local title = entry.title or entry.id or ""
     local project = (entry.project and entry.project ~= "") and entry.project or ""
     local category = entry.category or ""
@@ -94,7 +94,7 @@ local function format_zettel_display(entry)
 end
 
 -- Build the ordinal string for fuzzy matching
-local function format_zettel_ordinal(entry)
+local function format_concept_ordinal(entry)
     local title = entry.title or ""
     local project = (entry.project and entry.project ~= "") and entry.project or ""
     local tags = (type(entry.tags) == "table") and entry.tags or {}
@@ -105,24 +105,24 @@ end
 local function preview_action(picker, item)
     if item and item.file then
         picker:close()
-        local zk = require("zk")
-        zk.preview_note(item.file)
+        local okfw = require("okfw")
+        okfw.preview_note(item.file)
     end
 end
 
 local function insert_link_action(picker, item)
     if item and item.data then
         picker:close()
-        local zk = require("zk")
-        zk.insert_link(item.data.id, item.data.title, false)
+        local okfw = require("okfw")
+        okfw.insert_link(item.data, false)
     end
 end
 
 local function insert_titled_link_action(picker, item)
     if item and item.data then
         picker:close()
-        local zk = require("zk")
-        zk.insert_link(item.data.id, item.data.title, true)
+        local okfw = require("okfw")
+        okfw.insert_link(item.data, true)
     end
 end
 
@@ -135,7 +135,7 @@ local function search_keys()
     }
 end
 
--- Search zettels with optional filters
+-- Search concepts with optional filters
 M.search = function(opts)
     opts = opts or {}
     local config = get_config()
@@ -160,7 +160,7 @@ M.search = function(opts)
     local results = parse_results(results_json)
 
     if #results == 0 then
-        vim.notify("No zettels found", vim.log.levels.INFO)
+        vim.notify("No concepts found", vim.log.levels.INFO)
         return
     end
 
@@ -169,15 +169,15 @@ M.search = function(opts)
     for idx, entry in ipairs(results) do
         table.insert(items, {
             idx = idx,
-            text = format_zettel_ordinal(entry),
-            display = format_zettel_display(entry),
+            text = format_concept_ordinal(entry),
+            display = format_concept_display(entry),
             file = entry.file_path,
             data = entry,
         })
     end
 
     Snacks.picker.pick({
-        source = "zk",
+        source = "okfw",
         title = opts.prompt_title or "Zettels",
         items = items,
         format = function(item, _picker)
@@ -211,7 +211,7 @@ M.live_search = function(opts)
     local config = get_config()
 
     Snacks.picker.pick({
-        source = "zk_live",
+        source = "okfw_live",
         title = opts.prompt_title or "Search Zettels",
         live = true,
         finder = function(fopts, ctx)
@@ -240,8 +240,8 @@ M.live_search = function(opts)
             for idx, entry in ipairs(results) do
                 table.insert(items, {
                     idx = idx,
-                    text = format_zettel_ordinal(entry),
-                    display = format_zettel_display(entry),
+                    text = format_concept_ordinal(entry),
+                    display = format_concept_display(entry),
                     file = entry.file_path,
                     data = entry,
                 })
@@ -300,8 +300,8 @@ end
 -- Insert link picker (dedicated function for linking)
 M.insert_link = function(opts)
     opts = opts or {}
-    local zk = require("zk")
-    zk.link_picker(opts)
+    local okfw = require("okfw")
+    okfw.link_picker(opts)
 end
 
 return M

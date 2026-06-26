@@ -105,7 +105,7 @@ func TestExtractLinks(t *testing.T) {
 also [[20260214100000-6ba7b810-9dad-11d1-80b4-00c04fd430c8|My Title]] here.
 Duplicate [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] should be deduplicated.`
 
-	links := ExtractLinks(content)
+	links := ExtractWikiLinkIDs(content)
 	if len(links) != 2 {
 		t.Errorf("Expected 2 unique links, got %d: %v", len(links), links)
 	}
@@ -116,7 +116,7 @@ func TestExtractLinks_UUIDv7(t *testing.T) {
 also [[01968109-4700-7def-9abc-ffffffffffff|Title Here]].
 Duplicate [[019680f0-7e00-7abc-8def-1234567890ab]] should be deduplicated.`
 
-	links := ExtractLinks(content)
+	links := ExtractWikiLinkIDs(content)
 	if len(links) != 2 {
 		t.Errorf("Expected 2 unique UUIDv7 links, got %d: %v", len(links), links)
 	}
@@ -126,14 +126,14 @@ func TestExtractLinks_MixedFormats(t *testing.T) {
 	content := `Legacy [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] and
 UUIDv7 [[019680f0-7e00-7abc-8def-1234567890ab]] together.`
 
-	links := ExtractLinks(content)
+	links := ExtractWikiLinkIDs(content)
 	if len(links) != 2 {
 		t.Errorf("Expected 2 links (mixed formats), got %d: %v", len(links), links)
 	}
 }
 
 func TestExtractLinks_NoLinks(t *testing.T) {
-	links := ExtractLinks("No links in this content")
+	links := ExtractWikiLinkIDs("No links in this content")
 	if len(links) != 0 {
 		t.Errorf("Expected 0 links, got %d", len(links))
 	}
@@ -440,99 +440,75 @@ func TestGenerateMermaid_DeterministicOutput(t *testing.T) {
 	}
 }
 
-// --- TransformLinks tests ---
 
-func TestTransformLinks_BareLink_InSet(t *testing.T) {
-	nodeMap := map[string]*Node{
-		"20260213143000-550e8400-e29b-41d4-a716-446655440000": {
-			ID:    "20260213143000-550e8400-e29b-41d4-a716-446655440000",
-			Title: "My Note",
-		},
+// --- Markdown link helpers (OKF) ---
+
+func TestExtractLinkTargets(t *testing.T) {
+	body := `See [Customers](/tables/customers.md) and [neighbor](./other.md).
+Repeat [Customers](/tables/customers.md) is deduplicated.
+External [site](https://example.com/x.md) is excluded.
+Anchored [x](/a/b.md#section) keeps the bare path.`
+
+	got := ExtractLinkTargets(body)
+	want := []string{"/tables/customers.md", "./other.md", "/a/b.md"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d targets, got %d: %v", len(want), len(got), got)
 	}
-	content := "See [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] for details."
-	result := TransformLinks(content, nodeMap)
-	expected := "See [My Note](20260213143000-550e8400-e29b-41d4-a716-446655440000.md) for details."
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("target[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
-func TestTransformLinks_DisplayLink_InSet(t *testing.T) {
-	nodeMap := map[string]*Node{
-		"20260213143000-550e8400-e29b-41d4-a716-446655440000": {
-			ID:    "20260213143000-550e8400-e29b-41d4-a716-446655440000",
-			Title: "My Note",
-		},
+func TestNormalizeTarget(t *testing.T) {
+	cases := []struct {
+		href, fromDir, want string
+	}{
+		{"/tables/customers.md", "untethered", "tables/customers.md"},
+		{"./other.md", "untethered", "untethered/other.md"},
+		{"../tethered/x.md", "untethered", "tethered/x.md"},
+		{"foo.md", "", "foo.md"},
+		{"/a/b.md#frag", "", "a/b.md"},
+		{"https://example.com/x.md", "", ""},
 	}
-	content := "See [[20260213143000-550e8400-e29b-41d4-a716-446655440000|Custom Display]] for details."
-	result := TransformLinks(content, nodeMap)
-	expected := "See [Custom Display](20260213143000-550e8400-e29b-41d4-a716-446655440000.md) for details."
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
-
-func TestTransformLinks_NotInSet(t *testing.T) {
-	nodeMap := map[string]*Node{}
-	content := "See [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] for details."
-	result := TransformLinks(content, nodeMap)
-	if result != content {
-		t.Errorf("Expected content unchanged, got %q", result)
+	for _, c := range cases {
+		if got := NormalizeTarget(c.href, c.fromDir); got != c.want {
+			t.Errorf("NormalizeTarget(%q, %q) = %q, want %q", c.href, c.fromDir, got, c.want)
+		}
 	}
 }
 
-func TestTransformLinks_Mixed(t *testing.T) {
-	nodeMap := map[string]*Node{
-		"20260213143000-550e8400-e29b-41d4-a716-446655440000": {
-			ID:    "20260213143000-550e8400-e29b-41d4-a716-446655440000",
-			Title: "Note A",
-		},
-	}
-	content := "Link to [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] and [[20260214100000-6ba7b810-9dad-11d1-80b4-00c04fd430c8|External]]."
-	result := TransformLinks(content, nodeMap)
-	expected := "Link to [Note A](20260213143000-550e8400-e29b-41d4-a716-446655440000.md) and [[20260214100000-6ba7b810-9dad-11d1-80b4-00c04fd430c8|External]]."
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
-
-func TestTransformLinks_NoTitle(t *testing.T) {
-	id := "20260213143000-550e8400-e29b-41d4-a716-446655440000"
-	nodeMap := map[string]*Node{
-		id: {ID: id, Title: ""},
-	}
-	content := "See [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] here."
-	result := TransformLinks(content, nodeMap)
-	expected := "See [" + id + "](" + id + ".md) here."
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
+func TestRewriteLinks(t *testing.T) {
+	body := "See [A](/dir/a.md) and [B](./b.md) and [ext](https://x/y.md)."
+	out := RewriteLinks(body, func(href string) string {
+		if href == "/dir/a.md" {
+			return "a-uuid.md"
+		}
+		return href
+	})
+	want := "See [A](a-uuid.md) and [B](./b.md) and [ext](https://x/y.md)."
+	if out != want {
+		t.Errorf("RewriteLinks = %q, want %q", out, want)
 	}
 }
 
-func TestTransformLinks_UUIDv7(t *testing.T) {
+func TestTransformWikiLinks(t *testing.T) {
 	id := "019680f0-7e00-7abc-8def-1234567890ab"
-	nodeMap := map[string]*Node{
-		id: {ID: id, Title: "UUIDv7 Note"},
-	}
-	content := "See [[019680f0-7e00-7abc-8def-1234567890ab]] here."
-	result := TransformLinks(content, nodeMap)
-	expected := "See [UUIDv7 Note](019680f0-7e00-7abc-8def-1234567890ab.md) here."
-	if result != expected {
-		t.Errorf("Expected %q, got %q", expected, result)
-	}
-}
-
-func TestTransformLinks_NoLinks(t *testing.T) {
-	nodeMap := map[string]*Node{
-		"20260213143000-550e8400-e29b-41d4-a716-446655440000": {
-			ID:    "20260213143000-550e8400-e29b-41d4-a716-446655440000",
-			Title: "Note A",
-		},
-	}
-	content := "No links in this content at all."
-	result := TransformLinks(content, nodeMap)
-	if result != content {
-		t.Errorf("Expected content unchanged, got %q", result)
+	content := "Bare [[" + id + "]] and titled [[" + id + "|Custom]]."
+	out := TransformWikiLinks(content, func(gotID, display string) string {
+		if gotID != id {
+			t.Errorf("unexpected id %q", gotID)
+		}
+		title := display
+		if title == "" {
+			title = "Fallback"
+		}
+		return "[" + title + "](/notes/" + gotID + ".md)"
+	})
+	want := "Bare [Fallback](/notes/" + id + ".md) and titled [Custom](/notes/" + id + ".md)."
+	if out != want {
+		t.Errorf("TransformWikiLinks = %q, want %q", out, want)
 	}
 }
 

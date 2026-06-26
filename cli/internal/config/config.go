@@ -14,8 +14,8 @@ import (
 //go:embed config-schema.cue
 var configSchema string
 
-//go:embed zettel-schema.cue
-var zettelSchema string
+//go:embed concept-schema.cue
+var conceptSchema string
 
 // Config represents the application configuration.
 type Config struct {
@@ -44,14 +44,14 @@ func LoadSchema() (cue.Value, error) {
 	return val.LookupPath(cue.ParsePath("#Config")), nil
 }
 
-// LoadZettelSchema compiles and returns the #Zettel CUE definition.
-func LoadZettelSchema() (cue.Value, error) {
+// LoadConceptSchema compiles and returns the #Concept CUE definition.
+func LoadConceptSchema() (cue.Value, error) {
 	ctx := cuecontext.New()
-	val := ctx.CompileString(zettelSchema)
+	val := ctx.CompileString(conceptSchema)
 	if val.Err() != nil {
-		return cue.Value{}, fmt.Errorf("failed to compile zettel schema: %w", val.Err())
+		return cue.Value{}, fmt.Errorf("failed to compile concept schema: %w", val.Err())
 	}
-	return val.LookupPath(cue.ParsePath("#Zettel")), nil
+	return val.LookupPath(cue.ParsePath("#Concept")), nil
 }
 
 // Load loads the configuration from the specified path.
@@ -107,9 +107,9 @@ func Load(configPath string) (*Config, error) {
 	return &cfg, nil
 }
 
-// ValidateZettelYAML validates YAML frontmatter against the #Zettel schema.
-func ValidateZettelYAML(frontmatter []byte) error {
-	schema, err := LoadZettelSchema()
+// ValidateConceptYAML validates YAML frontmatter against the #Concept schema.
+func ValidateConceptYAML(frontmatter []byte) error {
+	schema, err := LoadConceptSchema()
 	if err != nil {
 		return err
 	}

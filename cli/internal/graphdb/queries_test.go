@@ -14,9 +14,9 @@ func TestGetBacklinks(t *testing.T) {
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 	idC := "20260215100000-22222222-3333-4444-5555-666666666666"
 
-	writeZettel(t, dir, idA, "Note A", "", "untethered", nil, "", []string{idB}, "")
-	writeZettel(t, dir, idB, "Note B", "", "untethered", nil, "", nil, "")
-	writeZettel(t, dir, idC, "Note C", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idA, "Note A", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idB, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idC, "Note C", "", "untethered", nil, "", []string{idB}, "")
 
 	s.Sync(dir)
 
@@ -42,7 +42,7 @@ func TestGetBacklinks_None(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeZettel(t, dir, id, "Isolated", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id, "Isolated", "", "untethered", nil, "", nil, "")
 	s.Sync(dir)
 
 	backlinks, err := s.GetBacklinks(id)
@@ -64,10 +64,10 @@ func TestGetCluster(t *testing.T) {
 	idD := "20260216100000-33333333-4444-5555-6666-777777777777"
 
 	// A -> B -> C -> D (linear chain)
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
-	writeZettel(t, dir, idB, "B", "", "untethered", nil, "", []string{idC}, "")
-	writeZettel(t, dir, idC, "C", "", "untethered", nil, "", []string{idD}, "")
-	writeZettel(t, dir, idD, "D", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idB, "B", "", "untethered", nil, "", []string{idC}, "")
+	writeConcept(t, dir, idC, "C", "", "untethered", nil, "", []string{idD}, "")
+	writeConcept(t, dir, idD, "D", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -110,9 +110,9 @@ func TestGetCluster_WithLimit(t *testing.T) {
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 	idC := "20260215100000-22222222-3333-4444-5555-666666666666"
 
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{idB, idC}, "")
-	writeZettel(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
-	writeZettel(t, dir, idC, "C", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, "", []string{idB, idC}, "")
+	writeConcept(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idC, "C", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -133,8 +133,8 @@ func TestGetCluster_ReverseLinks(t *testing.T) {
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 
 	// B links to A, so from A we should discover B via backlinks.
-	writeZettel(t, dir, idA, "Target", "", "untethered", nil, "", nil, "")
-	writeZettel(t, dir, idB, "Linker", "", "untethered", nil, "", []string{idA}, "")
+	writeConcept(t, dir, idA, "Target", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idB, "Linker", "", "untethered", nil, "", []string{idA}, "")
 
 	s.Sync(dir)
 
@@ -163,9 +163,9 @@ func TestGetByTag(t *testing.T) {
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 	idC := "20260215100000-22222222-3333-4444-5555-666666666666"
 
-	writeZettel(t, dir, idA, "A", "", "untethered", []string{"golang", "test"}, "", nil, "")
-	writeZettel(t, dir, idB, "B", "", "untethered", []string{"golang"}, "", nil, "")
-	writeZettel(t, dir, idC, "C", "", "untethered", []string{"rust"}, "", nil, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", []string{"golang", "test"}, "", nil, "")
+	writeConcept(t, dir, idB, "B", "", "untethered", []string{"golang"}, "", nil, "")
+	writeConcept(t, dir, idC, "C", "", "untethered", []string{"rust"}, "", nil, "")
 
 	s.Sync(dir)
 
@@ -196,7 +196,7 @@ func TestGetDanglingEdges(t *testing.T) {
 	nonExistent := "20260214100000-11111111-2222-3333-4444-555555555555"
 
 	// A links to a non-existent node.
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{nonExistent}, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, nonExistent, nil, "")
 
 	s.Sync(dir)
 
@@ -219,8 +219,8 @@ func TestToGraph(t *testing.T) {
 	idA := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, idA, "Note A", "", "untethered", nil, "", []string{idB}, "")
-	writeZettel(t, dir, idB, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idA, "Note A", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idB, "Note B", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -248,8 +248,8 @@ func TestExportJSON_Full(t *testing.T) {
 	idA := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
-	writeZettel(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 

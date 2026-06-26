@@ -1,6 +1,6 @@
-# zk - Zettelkasten CLI
+# okfw - OKF Wiki
 
-A fast, opinionated command-line tool for managing a Zettelkasten note-taking system. Built with Go, validated with CUE schemas, and integrated with NeoVim.
+A fast, opinionated command-line tool for managing a personal knowledge base using the Zettelkasten method. Built with Go, validated with CUE schemas, and integrated with NeoVim. Concepts are stored as plain markdown that conforms to the Open Knowledge Format (OKF).
 
 ---
 
@@ -10,13 +10,13 @@ A fast, opinionated command-line tool for managing a Zettelkasten note-taking sy
 - **Git-aware** - Automatically detects project context from git repositories
 - **Bleve full-text search** - Fast, local search index with structured field queries
 - **Graph visualization** - ASCII tree showing note relationships
-- **Backlinks discovery** - Find all notes that link to any zettel
+- **Backlinks discovery** - Find all concepts that link to any concept
 - **Note templates** - Built-in templates for meetings, user stories, features, and more
 - **Daily notes** - Idempotent daily capture with review workflows
 - **Todo management** - Task tracking with status, due dates, priority, and generated lists
 - **NeoVim integration** - Lua plugin for seamless note creation from your editor
-- **Hierarchical notes** - Support for parent-child relationships between zettels
-- **Universal linking** - Link any zettel to any other zettel (todos, notes, daily notes)
+- **Hierarchical notes** - Support for parent-child relationships between concepts
+- **Universal linking** - Link any concept to any other concept (todos, notes, daily notes)
 - **Git workflow** - Dated branch management with `hello` and `goodbye` commands
 
 To improve this section, I’ve refined the flow to distinguish between **Pre-requisites** (the reading) and the **Quick Start** (the action). I also polished the note to sound more like a seasoned engineer sharing a "pro-tip" rather than an afterthought.
@@ -25,7 +25,7 @@ To improve this section, I’ve refined the flow to distinguish between **Pre-re
 
 ## Getting Started
 
-Follow these steps to transition from theory to a fully functional, containerized Zettelkasten environment.
+Follow these steps to transition from theory to a fully functional, containerized OKF Wiki environment.
 
 ### 1. Research & Methodology
 
@@ -46,7 +46,7 @@ git clone https://github.com/infrashift/zettelkasten.git && cd zettelkasten
 
 
 2. **Spin up the environment:**
-Build and run the OCI container. This image comes pre-configured with `tmux`, `LazyVim`, the `Zettelkasten` CLI, and the `ZK` Neovim plugin.
+Build and run the OCI container. This image comes pre-configured with `tmux`, `LazyVim`, the `OKF Wiki` CLI, and the `okfw` Neovim plugin.
 3. **Execute Workflows:**
 Open Neovim within the container and follow the interactive workflows defined in the tutorial.
 
@@ -68,19 +68,19 @@ Open Neovim within the container and follow the interactive workflows defined in
 ### Build from source
 
 ```bash
-git clone https://github.com/infrashift/zettelkasten-cli.git
-cd zettelkasten-cli
+git clone https://github.com/infrashift/zettelkasten.git
+cd zettelkasten
 make build
 make install  # Installs to $GOPATH/bin
 ```
 
 ## Configuration
 
-Create a config file at `~/.config/zk/config.cue`:
+Create a config file at `~/.config/okfw/config.cue`:
 
 ```cue
-root_path:  "~/zettelkasten"
-index_path: ".zk_index"
+root_path:  "~/okfw"
+index_path: ".okfw_index"
 editor:     "nvim"
 folders: {
     untethered: "untethered"
@@ -93,8 +93,8 @@ folders: {
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `root_path` | `~/zettelkasten` | Root directory for all notes |
-| `index_path` | `.zk_index` | Location of Bleve search index |
+| `root_path` | `~/okfw` | Root directory for all concepts |
+| `index_path` | `.okfw_index` | Location of Bleve search index |
 | `editor` | `nvim` | Editor for opening notes |
 | `folders.untethered` | `untethered` | Subdirectory for untethered notes |
 | `folders.tethered` | `tethered` | Subdirectory for tethered notes |
@@ -128,14 +128,14 @@ make ui-check
 ```
 zettelkasten/
 ├── cli/
-│   ├── cmd/zk/          # CLI entry point
+│   ├── cmd/okfw/        # CLI entry point
 │   ├── internal/
 │   │   ├── config/      # CUE schemas and config loading
 │   │   ├── graph/       # Note relationship graph
 │   │   ├── index/       # Bleve search index
 │   │   └── zettel/      # Note utilities
 │   └── testdata/        # Test fixtures
-├── lua/zk/              # NeoVim plugin
+├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload
 ├── doc/                 # NeoVim help
 ├── after/               # NeoVim ftplugin

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"zk/cli/internal/graph"
+	"okfw/cli/internal/graph"
 
 	bolt "go.etcd.io/bbolt"
 )

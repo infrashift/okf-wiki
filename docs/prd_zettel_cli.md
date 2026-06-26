@@ -1,7 +1,7 @@
-# PRD: zk - Zettelkasten CLI for Neovim
+# PRD: okfw - OKF Wiki for Neovim
 
 ## 1. Overview
-A high-performance Zettelkasten management system consisting of a Go CLI (`zk`) and a Neovim integration. The system prioritizes data integrity, structured search, and interconnected knowledge.
+A high-performance Zettelkasten management system consisting of a Go CLI (`okfw`) and a Neovim integration. The system prioritizes data integrity, structured search, and interconnected knowledge.
 
 ## 2. Technical Stack
 - **CLI**: Go 1.22+ (using `cobra`)

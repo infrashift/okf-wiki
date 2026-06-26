@@ -1,5 +1,5 @@
 ---
-title: NeoVim ZK Plugin Tutorial
+title: NeoVim okfw Plugin Tutorial
 description: Walk through building the devcontainer, connecting via SSH, and using the full Zettelkasten workflow with the NeoVim plugin.
 ---
 
@@ -22,10 +22,10 @@ Clone the repository and build the image:
 git clone https://github.com/infrashift/zettelkasten.git
 cd zettelkasten
 
-podman build -f Containerfiles/Containerfile -t zk-devcontainer:latest .
+podman build -f Containerfiles/Containerfile -t okfw-devcontainer:latest .
 ```
 
-The build compiles the `zk` Go binary, installs NeoVim, Claude Code, tmux, and
+The build compiles the `okfw` Go binary, installs NeoVim, Claude Code, tmux, and
 all plugins. It takes a few minutes the first time.
 
 ## 2. Start the Container
@@ -36,27 +36,27 @@ The container runs an SSH server on port 2222. You need to mount an
 **Using the included test key** (for local development only):
 
 ```bash
-podman run -d --name zk-dev \
+podman run -d --name okfw-dev \
   --userns=keep-id \
   -p 2222:2222 \
   -v ./Containerfiles/config/test_ssh_key.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  zk-devcontainer:latest
+  okfw-devcontainer:latest
 ```
 
 **Using your own SSH key** (recommended):
 
 ```bash
-podman run -d --name zk-dev \
+podman run -d --name okfw-dev \
   --userns=keep-id \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  zk-devcontainer:latest
+  okfw-devcontainer:latest
 ```
 
 Verify the container started:
 
 ```bash
-podman logs zk-dev
+podman logs okfw-dev
 # Should show: Starting sshd on port 2222...
 #              Server listening on 0.0.0.0 port 2222.
 ```
@@ -99,20 +99,35 @@ preserved.
 
 ## 4. Where Are Notes Stored?
 
-All notes live under `~/zk_vault/` inside the container, organized as:
+All notes live under `~/okfw/` inside the container, organized by topic and
+project:
 
 ```
-~/zk_vault/
-  untethered/                  Untethered notes (quick captures)
-    <id>.md
-    daily/                     Daily notes
-      2026/
-        02/
-          <id>.md
-  tethered/                    Tethered notes (refined knowledge)
-    <id>.md
-  .zk_index/                   Full-text search index (auto-managed)
+~/okfw/                        Bundle root
+  index.md                     Directory listing (reserved; carries okf_version)
+  log.md                       Update history (reserved)
+  infra/                       A project folder (concepts grouped by project)
+    index.md
+    my-note-title--019f0494.md
+  daily/                       Daily notes, grouped by year/month
+    2026/
+      06/
+        2026-06-26--019f04a1.md
+  any-other-folder/            Concepts may live in any directory you choose
+    another-concept--019f04b8.md
+  ephemeral/                   Exports (gitignored)
+  .okfw_index/                 Full-text search index (auto-managed)
+  .okfw_graph.db               Persistent graph database (auto-managed)
 ```
+
+Concept files are named `slug--shortid.md`, where the short id is the leading
+hex of the concept's UUID. `index.md` and `log.md` are **reserved filenames**
+that carry no concept frontmatter: `index.md` is a directory listing (for
+progressive disclosure) and `log.md` is an update history generated from git.
+
+Concepts are placed by topic and project, not by maturity. With no `--path`, a
+concept lands in a top-level folder named after its project (or the bundle root
+when there is no project); `--path <subdir>` overrides that.
 
 **Untethered notes** are quick captures: ideas, meeting notes, snippets. They
 don't require a project.
@@ -120,21 +135,28 @@ don't require a project.
 **Tethered notes** are refined, rewritten knowledge that you've decided to
 keep. They require a project tag.
 
-**Daily notes** are date-stamped journal entries stored under `untethered/daily/`
-in a `YYYY/MM/` directory hierarchy.
+A note's `category` (`untethered`/`tethered`) is a maturity marker stored in
+frontmatter; it is metadata only and does not affect where the file lives.
 
-Each note has an ID in the format `YYYYMMDDHHmmss-UUIDv4`, which combines a
-timestamp for natural sorting with a UUID to prevent collisions.
+**Daily notes** are date-stamped journal entries stored at the bundle root under
+`daily/` in a `YYYY/MM/` directory hierarchy.
+
+Each note has a UUIDv7 `id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
+embeds a timestamp for natural sorting while remaining collision-free. Legacy
+`YYYYMMDDHHmmss-UUID` IDs are still accepted. A concept's **OKF id is its
+bundle-relative path minus `.md`** — for example the file
+`infra/my-note-title--019f0494.md` has the id
+`infra/my-note-title--019f0494`.
 
 To **persist notes across container restarts**, mount a host directory:
 
 ```bash
-podman run -d --name zk-dev \
+podman run -d --name okfw-dev \
   --userns=keep-id \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/zk_vault:/home/user/zettelkasten:Z \
-  zk-devcontainer:latest
+  -v ~/okfw:/home/user/okfw:Z \
+  okfw-devcontainer:latest
 ```
 
 ## 5. Initialize Your Zettelkasten
@@ -143,22 +165,31 @@ SSH into the container and switch to the bash pane (click it or press `Ctrl-b`
 then right-arrow). Initialize the zettelkasten directory:
 
 ```bash
-mkdir -p ~/zk_vault
-cd ~/zk_vault
+mkdir -p ~/okfw
+cd ~/okfw
 git init
 git config user.email "you@example.com"
 git config user.name "Your Name"
 ```
 
-The `zk` tool auto-creates the folder structure (`untethered/`, `tethered/`,
-etc.) on first use.
+The `okfw` tool creates folders on demand as you add concepts — a top-level
+folder per project (or whatever `--path` you pass), plus `daily/` for daily
+notes. It does not create or require `untethered/`/`tethered/` folders.
+
+:::note
+**Migrating a legacy vault?** If you have an existing vault from the pre-OKF
+tool, run `okfw migrate-okf` to convert it: it relocates the legacy vault to the
+new `~/okfw` bundle root, renames files to `slug--shortid.md`, rewrites old
+wiki-style links to vanilla markdown links, and rebuilds the graph and index.
+Add `--dry-run` to preview the changes first. The command is idempotent.
+:::
 
 ## 6. Start Your Day with a Daily Note
 
 Switch to the NeoVim pane and create your first daily note:
 
 ```vim
-:ZkDaily
+:OkfwDaily
 ```
 
 NeoVim opens today's daily note. It has YAML frontmatter at the top and
@@ -166,13 +197,15 @@ sections for your morning plan, tasks, notes, and end-of-day reflection:
 
 ```markdown
 ---
-id: "20260219143000-a1b2c3d4-..."
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Daily Note - 2026-02-19"
-type: daily-note
+type: "daily-note"
+kind: "daily-note"
 category: untethered
 tags:
   - daily
 created: "2026-02-19T14:30:00Z"
+timestamp: "2026-02-19T14:30:00Z"
 ---
 
 # Daily Note - 2026-02-19
@@ -198,13 +231,13 @@ is automatically indexed for search.
 You can also view yesterday's daily note:
 
 ```vim
-:ZkDaily yesterday
+:OkfwDaily yesterday
 ```
 
 Or browse all daily notes with a picker:
 
 ```vim
-:ZkDailyList
+:OkfwDailyList
 ```
 
 ## 7. Create an Untethered Note
@@ -212,7 +245,7 @@ Or browse all daily notes with a picker:
 Capture a quick idea. In NeoVim:
 
 ```vim
-:ZkNote
+:OkfwNote
 ```
 
 You are prompted for a title. Type `Learning Zettelkasten Method` and press
@@ -236,7 +269,7 @@ Save with `:w`.
 Templates give notes structure. Open the template picker:
 
 ```vim
-:ZkTemplate
+:OkfwTemplate
 ```
 
 Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`,
@@ -245,7 +278,7 @@ Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-
 Create a meeting note:
 
 ```vim
-:ZkTemplate meeting
+:OkfwTemplate meeting
 ```
 
 Enter a title like `Team Standup - Knowledge Management`. The template provides
@@ -255,7 +288,7 @@ it in and save.
 Create a code snippet note:
 
 ```vim
-:ZkTemplate snippet
+:OkfwTemplate snippet
 ```
 
 Title it `Bash - Find Files by Extension`. Fill in the code block with a useful
@@ -263,8 +296,10 @@ snippet and save.
 
 ## 9. Link Notes Together
 
-Notes become powerful when connected. Open the meeting note you just created,
-place your cursor where you want a link, and insert one:
+Notes become powerful when connected. Links are **vanilla markdown links** that
+point at a concept's file path — a concept's OKF id is its path minus `.md`.
+Open the meeting note you just created, place your cursor where you want a link,
+and insert one:
 
 ```vim
 \l
@@ -273,23 +308,36 @@ place your cursor where you want a link, and insert one:
 (`\` is the local leader key followed by `l`)
 
 A picker opens showing all your notes. Select `Learning Zettelkasten
-Method` and press Enter. A `[[id]]` link is inserted at your cursor.
+Method` and press Enter. A markdown link is inserted at your cursor. By default
+it uses a bundle-relative absolute path (a leading `/` means the bundle root):
 
-To insert a link that shows the title (more readable):
+```markdown
+[learning-zettelkasten-method--019f0494](/infra/learning-zettelkasten-method--019f0494.md)
+```
+
+To insert a link that uses the title as link text (more readable):
 
 ```vim
 \L
 ```
 
-This inserts `[[id|Learning Zettelkasten Method]]` instead.
+This inserts:
 
-You can also insert links from the search picker. Run `:ZkSearch`,
+```markdown
+[Learning Zettelkasten Method](/infra/learning-zettelkasten-method--019f0494.md)
+```
+
+You can also write relative links by hand, e.g. `[text](./other-note--019f04a1.md)`.
+Broken links are tolerated. To **follow a link**, place your cursor on it and
+press `gf` (go to file).
+
+You can also insert links from the search picker. Run `:OkfwSearch`,
 highlight a note, and press `Ctrl-l` to insert its link at the cursor.
 
 ## 10. Create More Related Notes
 
 To build a meaningful graph, create several connected notes. Here is a suggested
-set. For each one, use `:ZkNote`, write content, and link to related notes using
+set. For each one, use `:OkfwNote`, write content, and link to related notes using
 `\l`:
 
 **Note 2: "Atomic Notes"**
@@ -397,7 +445,7 @@ You can set or change a project on any note with `\p`:
 ### Quick search
 
 ```vim
-:ZkSearch zettelkasten
+:OkfwSearch zettelkasten
 ```
 
 A picker shows matching notes. Select one and press Enter to open it,
@@ -406,7 +454,7 @@ or `Ctrl-p` to preview.
 ### Live search (updates as you type)
 
 ```vim
-:ZkSearch!
+:OkfwSearch!
 ```
 
 The `!` (bang) enables live search mode. Start typing and results filter in
@@ -417,19 +465,19 @@ real-time.
 Switch to the bash pane and search from the command line:
 
 ```bash
-cd ~/zk_vault
+cd ~/okfw
 
 # Full-text search
-zk search "atomic notes"
+okfw search "atomic notes"
 
 # JSON output (for scripting)
-zk search --json --limit 5
+okfw search --json --limit 5
 
 # Filter by category
-zk search --category tethered
+okfw search --category tethered
 
 # Filter by tag
-zk search --tag daily
+okfw search --tag daily
 ```
 
 ## 15. Generate a Graph
@@ -437,25 +485,25 @@ zk search --tag daily
 Visualize how your notes connect. In NeoVim:
 
 ```vim
-:ZkGraph 20
+:OkfwGraph 20
 ```
 
 This generates a [Mermaid](https://mermaid.js.org/) flowchart showing up to 20
 connected notes and opens it in a scratch buffer. Each node is labeled with its
-title and every `[[id]]` link in note bodies becomes an arrow. Copy the output
+title and every markdown link between concept files becomes an arrow. Copy the output
 into [mermaid.live](https://mermaid.live) or any Mermaid renderer to see the
 visual graph.
 
 From the CLI:
 
 ```bash
-zk graph ~/zk_vault --limit 20
+okfw graph ~/okfw --limit 20
 ```
 
 You can also start the tree from a specific note and control depth:
 
 ```bash
-zk graph ~/zk_vault --start 20260219143000-a1b2c3d4 --depth 3
+okfw graph ~/okfw --start infra/learning-zettelkasten-method--019f0494 --depth 3
 ```
 
 ## 16. Manage Todos
@@ -463,13 +511,13 @@ zk graph ~/zk_vault --start 20260219143000-a1b2c3d4 --depth 3
 ### Create a todo
 
 ```vim
-:ZkTodo Buy a notebook for handwritten zettel drafts
+:OkfwTodo Buy a notebook for handwritten concept drafts
 ```
 
 Or with a due date and priority:
 
 ```vim
-:ZkTodo Review meeting notes --due 2026-02-21 --priority high
+:OkfwTodo Review meeting notes --due 2026-02-21 --priority high
 ```
 
 ### Change todo status
@@ -484,7 +532,7 @@ With the todo open in the editor, press `\s` to open the status picker. Choose f
 Create a markdown summary of your todos:
 
 ```vim
-:ZkTodoList
+:OkfwTodoList
 ```
 
 This generates a markdown summary and opens it in a split.
@@ -496,7 +544,7 @@ Beyond the meeting and snippet templates shown earlier, try these:
 **Book review** (creates a tethered note, requires a project):
 
 ```vim
-:ZkTemplate book-review --project reading-list
+:OkfwTemplate book-review --project reading-list
 ```
 
 Sections: author, rating, summary, key takeaways, favorite quotes.
@@ -504,7 +552,7 @@ Sections: author, rating, summary, key takeaways, favorite quotes.
 **Project idea:**
 
 ```vim
-:ZkTemplate project-idea
+:OkfwTemplate project-idea
 ```
 
 Sections: problem statement, proposed solution, goals, non-goals, success
@@ -513,7 +561,7 @@ metrics.
 **Feature spec:**
 
 ```vim
-:ZkTemplate feature
+:OkfwTemplate feature
 ```
 
 Sections: requirements, design, API changes, testing strategy, rollout plan.
@@ -521,7 +569,7 @@ Sections: requirements, design, API changes, testing strategy, rollout plan.
 **Issue (bug report or enhancement):**
 
 ```vim
-:ZkTemplate issue
+:OkfwTemplate issue
 ```
 
 Sections: type (bug/enhancement/question), description, steps to reproduce,
@@ -536,7 +584,7 @@ autocompletion from all tags used across your zettelkasten.
 Refresh the tag cache if you've added new tags externally:
 
 ```vim
-:ZkRefreshTags
+:OkfwRefreshTags
 ```
 
 ## 19. Index Your Notes
@@ -545,13 +593,13 @@ Notes are automatically indexed when you save them in NeoVim. To manually
 reindex everything:
 
 ```vim
-:ZkIndex
+:OkfwIndex
 ```
 
 Or from the CLI:
 
 ```bash
-zk index ~/zk_vault
+okfw index ~/okfw
 ```
 
 ## 20. Day Start / Day End (Git Workflow)
@@ -561,7 +609,7 @@ The CLI includes two convenience commands for a daily git workflow:
 **Start your day:**
 
 ```bash
-zk hello
+okfw hello
 ```
 
 This pulls the latest `main` branch and creates a new branch named with today's
@@ -570,7 +618,7 @@ date (e.g., `20260219`).
 **End your day:**
 
 ```bash
-zk goodbye
+okfw goodbye
 ```
 
 This stages all changes, commits with a dated message, merges to main, and
@@ -582,32 +630,33 @@ cleans up the dated branch.
 
 | Command | Description |
 |---|---|
-| `:ZkDaily` | Open/create today's daily note |
-| `:ZkDaily yesterday` | Open yesterday's daily note |
-| `:ZkDailyList` | Browse daily notes |
-| `:ZkNote` | Create a new untethered note |
-| `:ZkNote tethered` | Create a new tethered note |
-| `:ZkTemplate [name]` | Create from template |
-| `:ZkSearch [query]` | Search notes |
-| `:ZkSearch!` | Live search (updates as you type) |
+| `:OkfwDaily` | Open/create today's daily note |
+| `:OkfwDaily yesterday` | Open yesterday's daily note |
+| `:OkfwDailyList` | Browse daily notes |
+| `:OkfwNote` | Create a new untethered note |
+| `:OkfwNote tethered` | Create a new tethered note |
+| `:OkfwTemplate [name]` | Create from template |
+| `:OkfwSearch [query]` | Search notes |
+| `:OkfwSearch!` | Live search (updates as you type) |
 | `:Glow` | Render current note as styled Markdown |
-| `:ZkGraph [limit]` | Show Mermaid graph |
-| `:ZkTodo [title]` | Create a todo |
-| `:ZkTodoList` | Generate todo list markdown |
-| `:ZkIndex` | Reindex all notes |
-| `:ZkRefreshTags` | Refresh tag cache |
+| `:OkfwGraph [limit]` | Show Mermaid graph |
+| `:OkfwTodo [title]` | Create a todo |
+| `:OkfwTodoList` | Generate todo list markdown |
+| `:OkfwIndex` | Reindex all notes |
+| `:OkfwRefreshTags` | Refresh tag cache |
 
-### Keybindings (in zettel markdown files)
+### Keybindings (in concept markdown files)
 
 | Key | Action |
 |---|---|
-| `\l` | Insert `[[id]]` link |
-| `\L` | Insert `[[id\|title]]` link |
+| `\l` | Insert a markdown link (`[path](/path/to/note.md)`) |
+| `\L` | Insert a markdown link using the concept title as link text |
+| `gf` | Follow the link under the cursor |
 | `\b` | Toggle backlinks panel |
 | `\p` | Set project (note and todo types) |
 | `\t` | Tether / Untether (note and todo types) |
-| `\a` | Add tags (all zettel types) |
-| `\v` | Validate frontmatter (all zettel types) |
+| `\a` | Add tags (all concept types) |
+| `\v` | Validate frontmatter (all concept types) |
 | `\s` | Set todo status (todo-type only) |
 | `Ctrl-x Ctrl-t` | Tag completion (insert mode) |
 
@@ -623,43 +672,48 @@ cleans up the dated branch.
 
 | Command | Description |
 |---|---|
-| `zk create [title]` | Create a note |
-| `zk daily` | Create/open daily note |
-| `zk todo [title]` | Create a todo |
-| `zk todos` | List todos |
-| `zk set-status [file] [status]` | Set todo status (open/in_progress/closed) |
-| `zk search [query]` | Search notes |
-| `zk graph [path]` | Show graph tree |
-| `zk tether [file]` | Tether a note |
-| `zk untether [file]` | Untether a note |
-| `zk backlinks [file]` | Show backlinks |
-| `zk add-tags <file> <tag1> [tag2...]` | Add tags to a zettel |
-| `zk validate <file>` | Validate frontmatter against CUE schema |
-| `zk index [path]` | Index notes |
-| `zk templates` | List templates |
-| `zk hello` | Start-of-day git workflow |
-| `zk goodbye` | End-of-day git workflow |
+| `okfw create [title]` | Create a note |
+| `okfw daily` | Create/open daily note |
+| `okfw todo [title]` | Create a todo |
+| `okfw todos` | List todos |
+| `okfw set-status [file] [status]` | Set todo status (open/in_progress/closed) |
+| `okfw search [query]` | Search notes |
+| `okfw graph [path]` | Show graph tree |
+| `okfw tether [file]` | Tether a note |
+| `okfw untether [file]` | Untether a note |
+| `okfw backlinks [file]` | Show backlinks |
+| `okfw add-tags <file> <tag1> [tag2...]` | Add tags to a concept |
+| `okfw validate <file>` | Validate frontmatter against CUE schema |
+| `okfw validate --okf [path]` | Validate whole-bundle OKF conformance |
+| `okfw index [path]` | Index notes |
+| `okfw index-md [path]` | Generate OKF `index.md` directory listings |
+| `okfw log [path]` | Generate OKF `log.md` from git history |
+| `okfw migrate-okf [path]` | Migrate a legacy bundle to OKF conventions |
+| `okfw root` | Print the configured bundle root path |
+| `okfw templates` | List templates |
+| `okfw hello` | Start-of-day git workflow |
+| `okfw goodbye` | End-of-day git workflow |
 
 ## Container Management
 
 ```bash
 # Stop the container
-podman stop zk-dev
+podman stop okfw-dev
 
 # Start it again (notes and tmux session preserved)
-podman start zk-dev
+podman start okfw-dev
 
 # SSH reconnects to the same tmux session
 ssh -p 2222 user@localhost
 
 # Remove the container
-podman rm -f zk-dev
+podman rm -f okfw-dev
 
 # Custom SSH port
-podman run -d --name zk-dev \
+podman run -d --name okfw-dev \
   --userns=keep-id \
   -e SSH_PORT=3333 -p 3333:3333 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/zk_vault:/home/user/zettelkasten:Z \
-  zk-devcontainer:latest
+  -v ~/okfw:/home/user/okfw:Z \
+  okfw-devcontainer:latest
 ```

@@ -40,7 +40,7 @@ type Template struct {
 	Name        string
 	Description string
 	Category    string
-	Type        string   // "note" (default) or "todo"
+	Kind        string // structured kind: "note" (default), "todo", "daily-note", "issue"
 	Tags        []string
 	Body        string
 }
@@ -108,7 +108,7 @@ var BuiltinTemplates = map[string]*Template{
 		Name:        "daily",
 		Description: "Daily note for capturing thoughts, tasks, and reflections",
 		Category:    "untethered",
-		Type:        "daily-note",
+		Kind:        "daily-note",
 		Tags:        []string{"daily"},
 		Body:        dailyTemplate,
 	},
@@ -116,7 +116,7 @@ var BuiltinTemplates = map[string]*Template{
 		Name:        "todo",
 		Description: "Actionable task with status tracking",
 		Category:    "untethered",
-		Type:        "todo",
+		Kind:        "todo",
 		Tags:        []string{"todo"},
 		Body:        todoTemplate,
 	},
@@ -124,7 +124,7 @@ var BuiltinTemplates = map[string]*Template{
 		Name:        "issue",
 		Description: "Issue tracking like GitHub (bug, enhancement, question)",
 		Category:    "untethered",
-		Type:        "issue",
+		Kind:        "issue",
 		Tags:        []string{"issue"},
 		Body:        issueTemplate,
 	},
@@ -189,14 +189,24 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 		}
 	}
 
+	kind := t.Kind
+	if kind == "" {
+		kind = "note"
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	buf.WriteString(fmt.Sprintf("id: %q\n", id))
 	buf.WriteString(fmt.Sprintf("title: %q\n", title))
 
-	// Add type if not "note" (default)
-	if t.Type != "" && t.Type != "note" {
-		buf.WriteString(fmt.Sprintf("type: %q\n", t.Type))
+	// OKF requires a non-empty `type` on every concept. Default it to the
+	// structured kind; callers may override with a descriptive value later.
+	buf.WriteString(fmt.Sprintf("type: %q\n", kind))
+
+	// Write the structured `kind` only when it differs from the default,
+	// to keep plain-note frontmatter clean.
+	if kind != "note" {
+		buf.WriteString(fmt.Sprintf("kind: %q\n", kind))
 	}
 
 	if project != "" {
@@ -206,7 +216,7 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 	buf.WriteString(fmt.Sprintf("category: %q\n", t.Category))
 
 	// Todo-specific fields
-	if t.Type == "todo" {
+	if kind == "todo" {
 		status := "open"
 		if todoOpts != nil && todoOpts.Status != "" {
 			status = todoOpts.Status
@@ -227,7 +237,9 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 		buf.WriteString(fmt.Sprintf("  - %q\n", tag))
 	}
 
-	buf.WriteString(fmt.Sprintf("created: %q\n", now.Format(time.RFC3339)))
+	stamp := now.Format(time.RFC3339)
+	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
+	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
 	buf.WriteString("---\n\n")
 
 	return buf.String()

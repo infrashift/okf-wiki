@@ -49,7 +49,7 @@ The discipline of converting fleeting notes to permanent notes forces you to act
 
 ## Why This Tool?
 
-`zk` is built around these principles:
+`okfw` (OKF Wiki) is built around these principles:
 
 ### Git-Aware Projects
 

@@ -2,24 +2,25 @@ package graph
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
 )
 
-// Node represents a zettel in the graph.
+// Node represents a concept in the graph.
 type Node struct {
 	ID       string
 	Title    string
 	FilePath string
 	Project  string
 	Category string
-	Parent   string   // Optional parent zettel ID
-	Children []string // Child zettel IDs
+	Parent   string   // Optional parent concept ID
+	Children []string // Child concept IDs
 	Links    []string // Links found in body content via [[id]] or [[id|title]] scanning (not from frontmatter)
 }
 
-// Graph represents the zettelkasten link graph.
+// Graph represents the bundle link graph.
 type Graph struct {
 	nodes map[string]*Node
 }
@@ -434,44 +435,17 @@ func GenerateMermaid(nodes []*Node, edges []Edge) string {
 // idPattern matches either UUIDv7 or legacy YYYYMMDDHHmmss-UUID format.
 const idPattern = `(?:[0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
 
-// linkReplacePattern captures both the ID and optional display text from [[id]] or [[id|title]] links.
-var linkReplacePattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|([^\]]+))?\]\]`)
+// --- Legacy wiki-link helpers ([[id]] / [[id|title]]) ---
+// Retained for the one-time `migrate-okf` conversion to vanilla markdown links.
 
-// TransformLinks converts [[id]] and [[id|title]] links to portable [title](id.md) markdown links
-// for IDs present in nodeMap. Links to IDs not in nodeMap are left unchanged.
-func TransformLinks(content string, nodeMap map[string]*Node) string {
-	return linkReplacePattern.ReplaceAllStringFunc(content, func(match string) string {
-		sub := linkReplacePattern.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		id := sub[1]
-		display := sub[2] // may be empty
+var wikiLinkPattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|[^\]]+)?\]\]`)
+var wikiReplacePattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|([^\]]+))?\]\]`)
 
-		node, ok := nodeMap[id]
-		if !ok {
-			return match
-		}
-
-		if display == "" {
-			display = node.Title
-			if display == "" {
-				display = id
-			}
-		}
-
-		return fmt.Sprintf("[%s](%s.md)", display, id)
-	})
-}
-
-// ExtractLinks finds all [[id]] or [[id|title]] style links in content.
-var linkPattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|[^\]]+)?\]\]`)
-
-func ExtractLinks(content string) []string {
-	matches := linkPattern.FindAllStringSubmatch(content, -1)
+// ExtractWikiLinkIDs finds all [[id]] / [[id|title]] IDs in content (legacy format).
+func ExtractWikiLinkIDs(content string) []string {
+	matches := wikiLinkPattern.FindAllStringSubmatch(content, -1)
 	var links []string
 	seen := make(map[string]bool)
-
 	for _, match := range matches {
 		if len(match) >= 2 {
 			id := match[1]
@@ -481,6 +455,89 @@ func ExtractLinks(content string) []string {
 			}
 		}
 	}
-
 	return links
+}
+
+// TransformWikiLinks rewrites each [[id]] / [[id|title]] occurrence using replace,
+// which receives the captured id and optional display text and returns the full
+// replacement markdown. If replace returns "", the original match is left intact.
+func TransformWikiLinks(content string, replace func(id, display string) string) string {
+	return wikiReplacePattern.ReplaceAllStringFunc(content, func(match string) string {
+		sub := wikiReplacePattern.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		out := replace(sub[1], sub[2])
+		if out == "" {
+			return match
+		}
+		return out
+	})
+}
+
+// --- Vanilla markdown link helpers (OKF) ---
+
+// mdLinkPattern matches markdown links whose target ends in .md, optionally with
+// a #fragment. Capture group 1 is the bare target path (without any fragment).
+var mdLinkPattern = regexp.MustCompile(`\[[^\]]*\]\(\s*([^)>\s#]+\.md)(?:#[^)\s]*)?\s*\)`)
+
+// ExtractLinkTargets returns the deduplicated href targets of internal markdown
+// links in body (in order of first appearance). External links (with a scheme)
+// are excluded.
+func ExtractLinkTargets(body string) []string {
+	matches := mdLinkPattern.FindAllStringSubmatch(body, -1)
+	var out []string
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		href := m[1]
+		if strings.Contains(href, "://") {
+			continue
+		}
+		if !seen[href] {
+			seen[href] = true
+			out = append(out, href)
+		}
+	}
+	return out
+}
+
+// NormalizeTarget converts a markdown href into a clean bundle-relative path
+// (forward slashes, no leading slash). Relative hrefs resolve against fromDir,
+// the linking file's bundle-relative directory. Returns "" for external links.
+func NormalizeTarget(href, fromDir string) string {
+	if strings.Contains(href, "://") {
+		return ""
+	}
+	if i := strings.IndexByte(href, '#'); i >= 0 {
+		href = href[:i]
+	}
+	href = strings.TrimSpace(href)
+	if href == "" {
+		return ""
+	}
+	var p string
+	if strings.HasPrefix(href, "/") {
+		p = path.Clean(strings.TrimPrefix(href, "/"))
+	} else {
+		p = path.Clean(path.Join(fromDir, href))
+	}
+	return strings.TrimPrefix(p, "/")
+}
+
+// RewriteLinks applies rewrite to the target of every internal markdown link in
+// body. rewrite receives the raw href and returns a replacement href; returning
+// "" or the same value leaves the link unchanged.
+func RewriteLinks(body string, rewrite func(href string) string) string {
+	return mdLinkPattern.ReplaceAllStringFunc(body, func(match string) string {
+		sub := mdLinkPattern.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		href := sub[1]
+		nh := rewrite(href)
+		if nh == "" || nh == href {
+			return match
+		}
+		return strings.Replace(match, href, nh, 1)
+	})
 }

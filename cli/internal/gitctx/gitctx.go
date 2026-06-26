@@ -1,4 +1,4 @@
-package zettel
+package gitctx
 
 import (
 	"os/exec"

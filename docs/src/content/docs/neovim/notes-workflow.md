@@ -1,9 +1,9 @@
 ---
 title: Notes Workflow
-description: A hands-on tutorial for using zk to build a personal knowledge base directly from NeoVim.
+description: A hands-on tutorial for using okfw to build a personal knowledge base directly from NeoVim.
 ---
 
-A hands-on tutorial for using `zk` to build a personal knowledge base directly from your editor.
+A hands-on tutorial for using `okfw` to build a personal knowledge base directly from your editor.
 
 ---
 
@@ -23,7 +23,7 @@ You're a developer. You read documentation, solve problems, attend meetings, and
 - Searchable, indexed knowledge
 - Works from your editor - no context switching
 
-`zk` brings the Zettelkasten method into NeoVim, so your knowledge base grows while you work.
+`okfw` brings the Zettelkasten method into NeoVim, so your knowledge base grows while you work.
 
 ---
 
@@ -56,13 +56,13 @@ This tutorial will show you how to:
 ## Prerequisites
 
 Ensure you have:
-- NeoVim 0.9+ with the zk plugin installed
-- The `zk` CLI binary in your PATH
-- A zettelkasten directory (default: `~/zk_vault/`)
+- NeoVim 0.9+ with the okfw plugin installed
+- The `okfw` CLI binary in your PATH
+- A zettelkasten directory (default: `~/okfw/`)
 
 Verify your setup:
 ```vim
-:ZkTemplate
+:OkfwTemplate
 ```
 
 You should see a picker with available templates.
@@ -77,12 +77,12 @@ You're reading code and notice an interesting pattern. Capture it immediately.
 
 **From NeoVim:**
 ```vim
-:ZkNote untethered
+:OkfwNote untethered
 ```
 
 Or using the Lua API:
 ```vim
-:lua require("zk").create_note("untethered")
+:lua require("okfw").create_note("untethered")
 ```
 
 You'll be prompted for a title:
@@ -90,13 +90,13 @@ You'll be prompted for a title:
 Note Title: Interesting error handling pattern in auth module
 ```
 
-The plugin creates a new note and shows you the path:
+The plugin creates a new note and shows you the path. Files are named `slug--shortid.md`, where the short id is the leading hex of the concept's UUID:
 ```
-Created: ~/zk_vault/untethered/202602131423.md
+Created: ~/okfw/error-handling-pattern--019f0494.md
 ```
 
 **What just happened:**
-- A new markdown file was created with a unique timestamp ID
+- A new markdown file was created with a UUIDv7 `id` and a `slug--shortid.md` filename
 - YAML frontmatter was generated with metadata
 - The note is categorized as "untethered" (quick capture)
 - No project context required - just capture the thought
@@ -105,7 +105,7 @@ Created: ~/zk_vault/untethered/202602131423.md
 
 Open the note to add content:
 ```vim
-:ZkSearch
+:OkfwSearch
 ```
 
 Find your note in the picker and press `<CR>` to open it.
@@ -113,12 +113,14 @@ Find your note in the picker and press `<CR>` to open it.
 The file looks like this:
 ```markdown
 ---
-id: "202602131423"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
+type: "note"
 category: "untethered"
 tags:
   - ""
 created: "2026-02-13T14:23:45-06:00"
+timestamp: "2026-02-13T14:23:45-06:00"
 ---
 
 # Interesting error handling pattern in auth module
@@ -131,13 +133,15 @@ Fill in your thoughts while they're fresh:
 
 ```markdown
 ---
-id: "202602131423"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
+type: "note"
 category: "untethered"
 tags:
   - "go"
   - "error-handling"
 created: "2026-02-13T14:23:45-06:00"
+timestamp: "2026-02-13T14:23:45-06:00"
 ---
 
 # Interesting error handling pattern in auth module
@@ -161,12 +165,12 @@ Save the file (`:w`).
 
 Before you can search, index your notes:
 ```vim
-:ZkIndex ~/zk_vault/
+:OkfwIndex ~/okfw/
 ```
 
 Or index just the current directory:
 ```vim
-:ZkIndex
+:OkfwIndex
 ```
 
 ### Step 5: Tether the Note
@@ -198,15 +202,22 @@ project: "my-project"
 
 Later, you write another note about Go best practices. Link back to your error handling note.
 
-While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted:
+Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. By default it uses a bundle-relative absolute path — a leading `/` means the bundle root:
 ```markdown
-See also [[202602131423]] for error wrapping patterns.
+See also [error wrapping](/error-handling-pattern--019f0494.md) for the pattern.
 ```
 
-Or press `\L` to include the title:
+Or press `\L` to use the concept title as the link text:
 ```markdown
-See [[202602131423|Interesting error handling pattern in auth module]].
+See [Interesting error handling pattern in auth module](/error-handling-pattern--019f0494.md).
 ```
+
+You can also write relative links by hand:
+```markdown
+See [the pattern](./error-handling-pattern--019f0494.md).
+```
+
+Broken links are tolerated — if a target moves or is removed, the link simply doesn't resolve. To **follow a link**, place your cursor on it and press `gf` (go to file).
 
 ### Step 7: Find Backlinks
 
@@ -225,7 +236,7 @@ Templates provide structure for common note types. They save time and ensure con
 
 ### Available Templates
 
-Use `:ZkTemplate` without arguments to open a picker showing all templates:
+Use `:OkfwTemplate` without arguments to open a picker showing all templates:
 
 `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `todo`, `issue`
 
@@ -234,7 +245,7 @@ Use `:ZkTemplate` without arguments to open a picker showing all templates:
 You're about to join a sprint planning meeting.
 
 ```vim
-:ZkTemplate meeting
+:OkfwTemplate meeting
 ```
 
 Enter the title:
@@ -246,12 +257,14 @@ The note opens with a pre-filled structure:
 
 ```markdown
 ---
-id: "202602131500"
+id: "019f04a1-2b3c-7456-8def-0123456789ab"
 title: "Sprint 14 Planning"
+type: "note"
 category: "untethered"
 tags:
   - "meeting"
 created: "2026-02-13T15:00:00-06:00"
+timestamp: "2026-02-13T15:00:00-06:00"
 ---
 
 # Sprint 14 Planning
@@ -283,20 +296,22 @@ Fill it in during the meeting. You have a consistent format every time.
 Product wants a new feature. Capture it properly:
 
 ```vim
-:ZkTemplate user-story
+:OkfwTemplate user-story
 ```
 
 Title: `Add password reset flow`
 
 ```markdown
 ---
-id: "202602131530"
+id: "019f04b8-7e9a-7012-3456-789abcdef012"
 title: "Add password reset flow"
+type: "note"
 category: "untethered"
 tags:
   - "user-story"
   - "requirements"
 created: "2026-02-13T15:30:00-06:00"
+timestamp: "2026-02-13T15:30:00-06:00"
 ---
 
 # Add password reset flow
@@ -328,7 +343,7 @@ created: "2026-02-13T15:30:00-06:00"
 
 ## Related Stories
 
-- [[202602131100|User authentication epic]]
+- [User authentication epic](/auth/user-authentication-epic--019f0312.md)
 ```
 
 ### Example: Code Snippet
@@ -336,7 +351,7 @@ created: "2026-02-13T15:30:00-06:00"
 You found a useful snippet you want to remember:
 
 ```vim
-:ZkTemplate snippet
+:OkfwTemplate snippet
 ```
 
 Title: `Go context with timeout pattern`
@@ -352,7 +367,7 @@ The template includes sections for:
 Don't remember template names? Use the picker:
 
 ```vim
-:ZkTemplate
+:OkfwTemplate
 ```
 
 The picker shows all templates with descriptions. Select one and continue.
@@ -365,45 +380,48 @@ The picker shows all templates with descriptions. Select one and continue.
 
 Find notes containing specific terms:
 ```vim
-:ZkSearch authentication
+:OkfwSearch authentication
 ```
 
 ### Live Search
 
 Search as you type:
 ```vim
-:ZkSearch!
+:OkfwSearch!
 ```
 
 ### Search with Flags
 
-`:ZkSearch` supports flags for filtering by any indexed field:
+`:OkfwSearch` supports flags for filtering by any indexed field:
 
 ```vim
 " Filter by category or project
-:ZkSearch --category tethered
-:ZkSearch --project my-project
+:OkfwSearch --category tethered
+:OkfwSearch --project my-project
 
-" Filter by type
-:ZkSearch --type todo
-:ZkSearch --type daily-note
+" Filter by structured kind (note/todo/daily-note/issue)
+:OkfwSearch --kind todo
+:OkfwSearch --kind daily-note
+
+" Filter by the free-form OKF type field
+:OkfwSearch --type note
 
 " Filter by status and priority (useful for todos)
-:ZkSearch --type todo --status open
-:ZkSearch --type todo --priority high
+:OkfwSearch --kind todo --status open
+:OkfwSearch --kind todo --priority high
 
 " Filter by due date
-:ZkSearch --due-before 2026-03-01
-:ZkSearch --due-after 2026-02-01
+:OkfwSearch --due-before 2026-03-01
+:OkfwSearch --due-after 2026-02-01
 
 " Combine flags with a text query
-:ZkSearch --project my-project --type todo authentication
+:OkfwSearch --project my-project --kind todo authentication
 
 " Combine flags with live search
-:ZkSearch! --type todo
+:OkfwSearch! --kind todo
 
 " Filter by tag
-:ZkSearch --tag golang --tag api
+:OkfwSearch --tag golang --tag api
 ```
 
 Flags support tab completion — press `<Tab>` after typing a flag name to see valid values.
@@ -412,7 +430,7 @@ Flags support tab completion — press `<Tab>` after typing a flag name to see v
 
 See how your notes connect:
 ```vim
-:ZkGraph 20
+:OkfwGraph 20
 ```
 
 This generates an ASCII tree showing up to 20 notes and their relationships.
@@ -466,25 +484,25 @@ Add these to your NeoVim configuration:
 
 ```lua
 -- Daily notes
-vim.keymap.set("n", "<leader>zd", "<cmd>ZkDaily<cr>", { desc = "Today's daily" })
-vim.keymap.set("n", "<leader>zD", "<cmd>ZkDaily yesterday<cr>", { desc = "Yesterday's daily" })
+vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily" })
+vim.keymap.set("n", "<leader>zD", "<cmd>OkfwDaily yesterday<cr>", { desc = "Yesterday's daily" })
 
 -- Note creation
 vim.keymap.set("n", "<leader>zf", function()
-    require("zk").create_note("untethered")
+    require("okfw").create_note("untethered")
 end, { desc = "New untethered note" })
 
-vim.keymap.set("n", "<leader>zt", "<cmd>ZkTemplate<cr>", { desc = "New from template" })
+vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTemplate<cr>", { desc = "New from template" })
 
 -- Search
-vim.keymap.set("n", "<leader>zz", "<cmd>ZkSearch<cr>", { desc = "Search notes" })
-vim.keymap.set("n", "<leader>z/", "<cmd>ZkSearch!<cr>", { desc = "Live search" })
+vim.keymap.set("n", "<leader>zz", "<cmd>OkfwSearch<cr>", { desc = "Search notes" })
+vim.keymap.set("n", "<leader>z/", "<cmd>OkfwSearch!<cr>", { desc = "Live search" })
 
 -- Graph
-vim.keymap.set("n", "<leader>zg", "<cmd>ZkGraph<cr>", { desc = "Graph" })
+vim.keymap.set("n", "<leader>zg", "<cmd>OkfwGraph<cr>", { desc = "Graph" })
 
 -- Management
-vim.keymap.set("n", "<leader>zi", "<cmd>ZkIndex<cr>", { desc = "Index notes" })
+vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" })
 ```
 
 ---
@@ -493,19 +511,19 @@ vim.keymap.set("n", "<leader>zi", "<cmd>ZkIndex<cr>", { desc = "Index notes" })
 
 | Action | Command | Keymap Suggestion |
 |--------|---------|-------------------|
-| New untethered note | `:ZkNote untethered` | `<leader>zf` |
-| New from template | `:ZkTemplate` | `<leader>zt` |
-| Today's daily | `:ZkDaily` | `<leader>zd` |
-| Search notes | `:ZkSearch` | `<leader>zz` |
-| Live search | `:ZkSearch!` | `<leader>z/` |
-| Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on zettels |
-| Toggle backlinks | `\b` (buffer-local) | Auto-mapped on zettels |
+| New untethered note | `:OkfwNote untethered` | `<leader>zf` |
+| New from template | `:OkfwTemplate` | `<leader>zt` |
+| Today's daily | `:OkfwDaily` | `<leader>zd` |
+| Search notes | `:OkfwSearch` | `<leader>zz` |
+| Live search | `:OkfwSearch!` | `<leader>z/` |
+| Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on concepts |
+| Toggle backlinks | `\b` (buffer-local) | Auto-mapped on concepts |
 | Set project | `\p` (buffer-local) | Auto-mapped on note/todo |
 | Tether / Untether | `\t` (buffer-local) | Auto-mapped on note/todo |
-| Add tags | `\a` (buffer-local) | Auto-mapped on all zettels |
-| Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all zettels |
-| Generate graph | `:ZkGraph` | `<leader>zg` |
-| Index notes | `:ZkIndex` | `<leader>zi` |
+| Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
+| Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
+| Generate graph | `:OkfwGraph` | `<leader>zg` |
+| Index notes | `:OkfwIndex` | `<leader>zi` |
 
 ---
 
@@ -522,7 +540,7 @@ Daily notes are the foundation of a sustainable practice. They provide:
 
 ### Manage Tasks with Todos
 
-Todos are a special type of zettel for actionable tasks. They integrate with daily notes and provide:
+Todos are a special type of concept for actionable tasks. They integrate with daily notes and provide:
 - Status tracking (open, in progress, closed)
 - Due dates and priorities
 - Links to related notes
@@ -531,7 +549,7 @@ Todos are a special type of zettel for actionable tasks. They integrate with dai
 
 ### Master the CLI
 
-The NeoVim plugin wraps the `zk` CLI. For scripting, automation, or terminal use:
+The NeoVim plugin wraps the `okfw` CLI. For scripting, automation, or terminal use:
 
 **Read:** [CLI Commands](/zettelkasten/reference/cli-commands/) for the complete command reference.
 
@@ -539,14 +557,14 @@ The NeoVim plugin wraps the `zk` CLI. For scripting, automation, or terminal use
 
 Full documentation is available in NeoVim:
 ```vim
-:help zk
+:help okfw
 ```
 
 CLI help:
 ```bash
-zk --help
-zk create --help
-zk daily --help
+okfw --help
+okfw create --help
+okfw daily --help
 ```
 
 ---

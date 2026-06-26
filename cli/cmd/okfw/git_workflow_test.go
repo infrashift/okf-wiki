@@ -13,7 +13,7 @@ func setupTestRepo(t *testing.T) string {
 	t.Helper()
 
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "zk-test-*")
+	tmpDir, err := os.MkdirTemp("", "okfw-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -204,12 +204,12 @@ func TestIsDateBranch(t *testing.T) {
 		{"main", false},
 		{"master", false},
 		{"feature-branch", false},
-		{"2026021", false},  // Too short
-		{"202602131", false}, // Too long
+		{"2026021", false},    // Too short
+		{"202602131", false},  // Too long
 		{"2026-02-13", false}, // Wrong format
-		{"abcdefgh", false},  // Not a date
-		{"20261301", false},  // Invalid month
-		{"20260230", false},  // Invalid day (Feb 30)
+		{"abcdefgh", false},   // Not a date
+		{"20261301", false},   // Invalid month
+		{"20260230", false},   // Invalid day (Feb 30)
 		{"", false},
 	}
 

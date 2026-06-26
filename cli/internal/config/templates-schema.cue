@@ -1,5 +1,5 @@
 // Template schema definitions
-// All templates must produce zettels that conform to #Zettel
+// All templates must produce concepts that conform to #Zettel
 
 // Template metadata
 #TemplateMeta: {

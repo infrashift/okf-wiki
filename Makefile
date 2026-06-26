@@ -1,17 +1,17 @@
-.PHONY: build test lint fmt clean install tidy ui-check integration-test docs-dev image run-dev stop-dev
+.PHONY: build test lint fmt clean install tidy ui-check integration-test e2e docs-dev image run-dev stop-dev
 
-BINARY_NAME=zk
-CMD_PATH=./cli/cmd/zk
+BINARY_NAME=okfw
+CMD_PATH=./cli/cmd/okfw
 
 # Container settings
 CONTAINER_ENGINE=podman
 CONTAINER_FILE=Containerfiles/Containerfile
-IMAGE_NAME=zk-devcontainer
+IMAGE_NAME=okfw-devcontainer
 IMAGE_TAG=latest
-CONTAINER_NAME=zk-dev
+CONTAINER_NAME=okfw-dev
 SSH_PORT=2222
 SSH_PUBKEY=$(HOME)/.ssh/id_ed25519.pub
-ZK_VAULT=$(HOME)/zk_vault
+OKFW_BUNDLE=$(HOME)/okfw
 USER_UID=$(shell id -u)
 
 build:
@@ -22,7 +22,7 @@ test:
 	go test -v -cover ./cli/...
 	@echo "Validating CUE schemas..."
 	cue vet ./cli/internal/config/config-schema.cue
-	cue vet ./cli/internal/config/zettel-schema.cue
+	cue vet ./cli/internal/config/concept-schema.cue
 
 lint:
 	@echo "Running linters..."
@@ -45,9 +45,14 @@ integration-test: build
 	@test -d /tmp/nvim-test-plugins/plenary.nvim || git clone --depth 1 https://github.com/nvim-lua/plenary.nvim /tmp/nvim-test-plugins/plenary.nvim
 	nvim --headless -u NONE -c "luafile test/integration_test.lua"
 
+e2e:
+	@echo "Building containerized e2e image (runs the integration test inside the container)..."
+	$(CONTAINER_ENGINE) build -f Containerfiles/Containerfile.e2e -t okfw-e2e:latest .
+	@echo "e2e build succeeded — okfw CLI + NeoVim plugin pass end-to-end in-container."
+
 clean:
 	rm -f $(BINARY_NAME)
-	rm -rf .zk_index/
+	rm -rf .okfw_index/
 
 tidy:
 	go mod tidy
@@ -63,7 +68,7 @@ run-container:
 		--userns=keep-id \
 		-p $(SSH_PORT):2222 \
 		-v $(SSH_PUBKEY):/home/user/.ssh/authorized_keys:ro,Z \
-		-v $(ZK_VAULT):/home/user/zk_vault:Z \
+		-v $(OKFW_BUNDLE):/home/user/okfw:Z \
 		$(IMAGE_NAME):$(IMAGE_TAG)
 
 stop-container:

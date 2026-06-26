@@ -1,0 +1,40 @@
+# --------------------------------------------------------------------------
+# End-to-end test image: exercises the okfw CLI + NeoVim plugin together,
+# headlessly, inside a container. The integration test runs as a build step,
+# so a failed assertion (cq 1) fails the image build — `make e2e` is the gate.
+# --------------------------------------------------------------------------
+
+# Stage 1: build the okfw binary
+FROM docker.io/library/golang:1.24 AS builder
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/okfw ./cli/cmd/okfw
+
+# Stage 2: NeoVim + plenary + the plugin + the built CLI, then run the test
+FROM registry.fedoraproject.org/fedora-minimal:43
+
+RUN dnf install -y --setopt=tsflags=nodocs git curl tar gzip ncurses findutils && \
+    dnf clean all
+
+# NeoVim (matches the devcontainer version)
+RUN curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-x86_64.tar.gz \
+        | tar xz -C /opt && \
+    ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+
+# plenary.nvim at the path the integration test expects
+RUN git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
+        /tmp/nvim-test-plugins/plenary.nvim
+
+WORKDIR /src
+COPY . .
+COPY --from=builder /out/okfw /src/okfw
+ENV PATH="/src:${PATH}"
+
+# The integration test loads the plugin (lua/okfw), drives the okfw CLI via
+# plenary.job, and exercises markdown link insertion / follow. It calls cq 1 on
+# any failed assertion, which fails this RUN (and therefore the build).
+RUN nvim --headless -u NONE -c "luafile test/integration_test.lua"
+
+CMD ["bash", "-lc", "nvim --headless -u NONE -c 'luafile test/integration_test.lua'"]

@@ -233,3 +233,31 @@ func TestGenerateNote(t *testing.T) {
 		t.Errorf("Note should contain Acceptance Criteria section")
 	}
 }
+
+func TestGenerateFrontmatter_OKFFields(t *testing.T) {
+	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	// A plain note: OKF `type` is always written and defaults to "note";
+	// the structured `kind` is omitted (note is the default); timestamp present.
+	note, _ := Get("meeting")
+	fm := note.GenerateFrontmatter(id, "M", "p", nil)
+	if !strings.Contains(fm, `type: "note"`) {
+		t.Error("note should always write OKF type")
+	}
+	if strings.Contains(fm, "kind:") {
+		t.Error("note frontmatter should omit the default kind")
+	}
+	if !strings.Contains(fm, "timestamp:") {
+		t.Error("frontmatter should include timestamp")
+	}
+
+	// A todo: both `type` and `kind` are written.
+	todo, _ := Get("todo")
+	fm = todo.GenerateFrontmatterWithOptions(id, "T", "p", nil, &TodoOptions{Status: "open"})
+	if !strings.Contains(fm, `type: "todo"`) || !strings.Contains(fm, `kind: "todo"`) {
+		t.Errorf("todo should write both type and kind:\n%s", fm)
+	}
+	if !strings.Contains(fm, "timestamp:") {
+		t.Error("todo frontmatter should include timestamp")
+	}
+}

@@ -1,25 +1,25 @@
 ---
 title: User Commands
-description: Complete reference for all :Zk user commands available in NeoVim.
+description: Complete reference for all :Okfw user commands available in NeoVim.
 ---
 
-The plugin registers user commands that you can run from NeoVim's command line (`:ZkCommand`). All commands support tab completion for flags and values.
+The plugin registers user commands that you can run from NeoVim's command line (`:OkfwCommand`). All commands support tab completion for flags and values.
 
 ## Note Creation
 
-### `:ZkNote`
+### `:OkfwNote`
 
-Create a new zettel. Defaults to untethered if no category is given.
+Create a new concept. Defaults to untethered if no category is given.
 
 ```vim
 " Create an untethered note (default)
-:ZkNote
+:OkfwNote
 
 " Create an untethered note (explicit)
-:ZkNote --category untethered
+:OkfwNote --category untethered
 
 " Create a tethered note with a project
-:ZkNote --category tethered --project my-project
+:OkfwNote --category tethered --project my-project
 ```
 
 **Flags:**
@@ -29,19 +29,19 @@ Create a new zettel. Defaults to untethered if no category is given.
 | `--category` | `untethered`, `tethered` | Note category (default: untethered) |
 | `--project` | any string | Project name (auto-detected from git if omitted) |
 
-### `:ZkTemplate`
+### `:OkfwTemplate`
 
 Create a note from a template. Opens a picker if no template name is given.
 
 ```vim
 " Open template picker
-:ZkTemplate
+:OkfwTemplate
 
 " Create meeting notes
-:ZkTemplate meeting
+:OkfwTemplate meeting
 
 " Create a feature spec for a project
-:ZkTemplate feature --project my-project
+:OkfwTemplate feature --project my-project
 ```
 
 **Available templates:** `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`
@@ -50,35 +50,35 @@ Create a note from a template. Opens a picker if no template name is given.
 
 ## Search
 
-### `:ZkSearch`
+### `:OkfwSearch`
 
-Search zettels. Opens a picker if available, otherwise prints results.
+Search concepts. Opens a picker if available, otherwise prints results.
 Use the bang (`!`) variant for live search that updates as you type.
 
 ```vim
 " Search for a term
-:ZkSearch authentication
+:OkfwSearch authentication
 
 " Live search (updates as you type)
-:ZkSearch!
+:OkfwSearch!
 
 " Live search with an initial query
-:ZkSearch! auth
+:OkfwSearch! auth
 
 " Filter by category and project
-:ZkSearch --category tethered --project my-project
+:OkfwSearch --category tethered --project my-project
 
-" Filter by type and status
-:ZkSearch --type todo --status open
+" Filter by structured kind and status
+:OkfwSearch --kind todo --status open
 
 " Filter by priority and due date
-:ZkSearch --priority high --due-before 2026-03-01
+:OkfwSearch --priority high --due-before 2026-03-01
 
 " Filter by tag
-:ZkSearch --tag security
+:OkfwSearch --tag security
 
 " Combine a query with filters
-:ZkSearch auth --category tethered --tag security
+:OkfwSearch auth --category tethered --tag security
 ```
 
 **Flags:**
@@ -87,7 +87,8 @@ Use the bang (`!`) variant for live search that updates as you type.
 |------|--------|-------------|
 | `--category` | `untethered`, `tethered` | Filter by category |
 | `--project` | any string | Filter by project |
-| `--type` | `note`, `todo`, `daily-note`, `issue` | Filter by note type |
+| `--kind` | `note`, `todo`, `daily-note`, `issue` | Filter by structured kind |
+| `--type` | any string | Filter by the free-form OKF `type` field |
 | `--status` | `open`, `in_progress`, `closed` | Filter by status |
 | `--priority` | `high`, `medium`, `low` | Filter by priority |
 | `--due-before` | `YYYY-MM-DD` | Due before date |
@@ -100,33 +101,33 @@ Use the bang (`!`) variant for live search that updates as you type.
 |-----|--------|
 | `<CR>` | Open note |
 | `<C-p>` | Preview in floating window |
-| `<C-l>` | Insert `[[id]]` link at cursor |
-| `<C-S-l>` | Insert `[[id\|title]]` link at cursor |
+| `<C-l>` | Insert a markdown link at cursor (`[title](/path/to/note.md)`) |
+| `<C-S-l>` | Insert a markdown link using the concept title as link text |
 
 ---
 
 ## Graph Visualization
 
-### `:ZkGraph`
+### `:OkfwGraph`
 
 Generate an ASCII tree visualization of note relationships. Opens in a vertical split.
 
 ```vim
 " Default graph (limit 10 nodes)
-:ZkGraph
+:OkfwGraph
 
 " Limit number of nodes
-:ZkGraph --limit 20
-:ZkGraph 20
+:OkfwGraph --limit 20
+:OkfwGraph 20
 
 " Start from a specific note
-:ZkGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000
+:OkfwGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000
 
 " Set traversal depth
-:ZkGraph --depth 3
+:OkfwGraph --depth 3
 
 " Combine options
-:ZkGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000 --depth 3 --limit 50
+:OkfwGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000 --depth 3 --limit 50
 ```
 
 **Flags:**
@@ -134,57 +135,57 @@ Generate an ASCII tree visualization of note relationships. Opens in a vertical 
 | Flag | Values | Description |
 |------|--------|-------------|
 | `--limit` | number | Maximum nodes to display (default: 10) |
-| `--start` | zettel ID | Start node for the graph |
+| `--start` | concept ID | Start node for the graph |
 | `--depth` | number | Traversal depth |
 
 ---
 
 ## Daily Notes
 
-### `:ZkDaily`
+### `:OkfwDaily`
 
 Open or create a daily note. Daily notes are idempotent — running it twice on the same day opens the same file.
 
 ```vim
 " Today's daily note
-:ZkDaily
+:OkfwDaily
 
 " Yesterday's note (for morning review)
-:ZkDaily yesterday
+:OkfwDaily yesterday
 
 " Specific date
-:ZkDaily 2026-02-10
+:OkfwDaily 2026-02-10
 ```
 
-### `:ZkDailyList`
+### `:OkfwDailyList`
 
 Browse daily notes in a picker. Use the bang variant to show only this week.
 
 ```vim
 " Browse all daily notes
-:ZkDailyList
+:OkfwDailyList
 
 " This week only
-:ZkDailyList!
+:OkfwDailyList!
 ```
 
 ---
 
 ## Todos
 
-### `:ZkTodo`
+### `:OkfwTodo`
 
 Create a new todo. The title is everything that isn't a flag.
 
 ```vim
 " Simple todo
-:ZkTodo Buy a notebook for handwritten zettel drafts
+:OkfwTodo Buy a notebook for handwritten concept drafts
 
 " With due date and priority
-:ZkTodo Review meeting notes --due 2026-02-21 --priority high
+:OkfwTodo Review meeting notes --due 2026-02-21 --priority high
 
 " With project
-:ZkTodo Fix login bug --project my-project --priority medium
+:OkfwTodo Fix login bug --project my-project --priority medium
 ```
 
 **Flags:**
@@ -195,46 +196,46 @@ Create a new todo. The title is everything that isn't a flag.
 | `--priority` | `high`, `medium`, `low` | Priority level |
 | `--project` | any string | Project name |
 
-### `:ZkTodoList`
+### `:OkfwTodoList`
 
 Generate a markdown summary of todos and open it in a split.
 
 ```vim
 " All open todos
-:ZkTodoList
+:OkfwTodoList
 
 " Due today
-:ZkTodoList today
+:OkfwTodoList today
 
 " Due this week
-:ZkTodoList week
+:OkfwTodoList week
 
 " Project-specific list
-:ZkTodoList my-project
+:OkfwTodoList my-project
 ```
 
 ---
 
 ## Index & Tags
 
-### `:ZkIndex`
+### `:OkfwIndex`
 
-Index zettels for full-text search. Indexes the current directory by default.
+Index concepts for full-text search. Indexes the current directory by default.
 
 ```vim
 " Index current directory
-:ZkIndex
+:OkfwIndex
 
 " Index specific path
-:ZkIndex ~/zk_vault/
+:OkfwIndex ~/okfw/
 ```
 
-### `:ZkRefreshTags`
+### `:OkfwRefreshTags`
 
 Clear the tag cache and reload tags from the index.
 
 ```vim
-:ZkRefreshTags
+:OkfwRefreshTags
 ```
 
 ---
@@ -243,13 +244,13 @@ Clear the tag cache and reload tags from the index.
 
 | Command | Description |
 |---------|-------------|
-| `:ZkNote` | Create new zettel |
-| `:ZkTemplate [name]` | Create from template |
-| `:ZkSearch[!] [query]` | Search zettels (! for live search) |
-| `:ZkGraph` | Graph visualization |
-| `:ZkDaily [date]` | Open daily note |
-| `:ZkDailyList[!]` | Browse daily notes (! for this week) |
-| `:ZkTodo [title]` | Create a todo |
-| `:ZkTodoList [filter]` | Generate todo list markdown |
-| `:ZkIndex [path]` | Index zettels |
-| `:ZkRefreshTags` | Refresh tag cache |
+| `:OkfwNote` | Create new concept |
+| `:OkfwTemplate [name]` | Create from template |
+| `:OkfwSearch[!] [query]` | Search concepts (! for live search) |
+| `:OkfwGraph` | Graph visualization |
+| `:OkfwDaily [date]` | Open daily note |
+| `:OkfwDailyList[!]` | Browse daily notes (! for this week) |
+| `:OkfwTodo [title]` | Create a todo |
+| `:OkfwTodoList [filter]` | Generate todo list markdown |
+| `:OkfwIndex [path]` | Index concepts |
+| `:OkfwRefreshTags` | Refresh tag cache |

@@ -17,10 +17,10 @@ func TestLoadSchema(t *testing.T) {
 	}
 }
 
-func TestLoadZettelSchema(t *testing.T) {
-	schema, err := LoadZettelSchema()
+func TestLoadConceptSchema(t *testing.T) {
+	schema, err := LoadConceptSchema()
 	if err != nil {
-		t.Fatalf("LoadZettelSchema() error = %v", err)
+		t.Fatalf("LoadConceptSchema() error = %v", err)
 	}
 
 	if schema.Err() != nil {
@@ -36,13 +36,13 @@ func TestLoadDefaultConfig(t *testing.T) {
 
 	// Check defaults
 	home, _ := os.UserHomeDir()
-	expectedRoot := filepath.Join(home, "zk_vault")
+	expectedRoot := filepath.Join(home, "okfw")
 	if cfg.RootPath != expectedRoot {
 		t.Errorf("RootPath = %q, want %q", cfg.RootPath, expectedRoot)
 	}
 
-	if cfg.IndexPath != ".zk_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".zk_index")
+	if cfg.IndexPath != ".okfw_index" {
+		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".okfw_index")
 	}
 
 	if cfg.Editor != "nvim" {
@@ -89,150 +89,169 @@ editor: "vim"
 	}
 
 	// Defaults should still apply for unset values
-	if cfg.IndexPath != ".zk_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".zk_index")
+	if cfg.IndexPath != ".okfw_index" {
+		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".okfw_index")
 	}
 }
 
-func TestValidateZettelYAML_Valid(t *testing.T) {
+func TestValidateConceptYAML_Valid(t *testing.T) {
 	validYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test Zettel"
+title: "Test Concept"
+type: "note"
 project: "test-project"
 category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_ValidWithParent(t *testing.T) {
+func TestValidateConceptYAML_ValidWithParent(t *testing.T) {
 	validYAML := `
 id: "20260213110000-ffffffff-1111-2222-3333-444444444444"
-title: "Child Zettel"
+title: "Child Concept"
+type: "note"
 project: "test-project"
 category: "tethered"
 tags:
   - "child"
 created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_ValidUUIDv7(t *testing.T) {
+func TestValidateConceptYAML_ValidUUIDv7(t *testing.T) {
 	validYAML := `
 id: "019680f0-7e00-7abc-8def-1234567890ab"
-title: "UUIDv7 Zettel"
+title: "UUIDv7 Concept"
+type: "note"
 category: "untethered"
 tags: []
 created: "2026-04-10T12:00:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() UUIDv7 should be valid, got error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() UUIDv7 should be valid, got error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_InvalidID(t *testing.T) {
+func TestValidateConceptYAML_InvalidID(t *testing.T) {
 	invalidYAML := `
 id: "12345"
 title: "Test"
+type: "note"
 project: "test"
 category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for invalid ID, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for invalid ID, got nil")
 	}
 }
 
-func TestValidateZettelYAML_EmptyTitle(t *testing.T) {
+func TestValidateConceptYAML_EmptyTitle(t *testing.T) {
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: ""
+type: "note"
 project: "test"
 category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for empty title, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for empty title, got nil")
 	}
 }
 
-func TestValidateZettelYAML_UntetheredWithoutProject(t *testing.T) {
+func TestValidateConceptYAML_UntetheredWithoutProject(t *testing.T) {
 	// Untethered notes can omit project entirely
 	validYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Quick Idea"
+type: "note"
 category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() untethered without project should be valid, got error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() untethered without project should be valid, got error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_TetheredRequiresProject(t *testing.T) {
+func TestValidateConceptYAML_TetheredRequiresProject(t *testing.T) {
 	// Tethered notes must have a non-empty project
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 category: "tethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for tethered note without project, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for tethered note without project, got nil")
 	}
 }
 
-func TestValidateZettelYAML_TetheredEmptyProject(t *testing.T) {
+func TestValidateConceptYAML_TetheredEmptyProject(t *testing.T) {
 	// Tethered notes cannot have empty project
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 project: ""
 category: "tethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for tethered note with empty project, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for tethered note with empty project, got nil")
 	}
 }
 
-func TestValidateZettelYAML_InvalidCategory(t *testing.T) {
+func TestValidateConceptYAML_InvalidCategory(t *testing.T) {
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 project: "test"
 category: "draft"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for invalid category, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for invalid category, got nil")
 	}
 }
 
-func TestValidateZettelYAML_MissingCreated(t *testing.T) {
+func TestValidateConceptYAML_MissingCreated(t *testing.T) {
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 project: "test"
 category: "untethered"
 tags: []
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for missing created, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for missing created, got nil")
 	}
 }
 
@@ -240,6 +259,7 @@ func TestExtractFrontmatter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 ---
 
 # Content here
@@ -250,7 +270,8 @@ title: "Test"
 	}
 
 	expected := `id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"`
+title: "Test"
+type: "note"`
 	if string(frontmatter) != expected {
 		t.Errorf("ExtractFrontmatter() = %q, want %q", string(frontmatter), expected)
 	}
@@ -259,6 +280,7 @@ title: "Test"`
 func TestExtractFrontmatter_NoOpeningDelimiter(t *testing.T) {
 	content := []byte(`id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 ---
 `)
 	_, err := ExtractFrontmatter(content)
@@ -271,6 +293,7 @@ func TestExtractFrontmatter_NoClosingDelimiter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 `)
 	_, err := ExtractFrontmatter(content)
 	if err == nil {
@@ -281,12 +304,14 @@ title: "Test"
 func TestParseFrontmatter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test Zettel"
+title: "Test Concept"
+type: "note"
 project: "test-project"
 category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Content
@@ -300,8 +325,8 @@ created: "2026-02-13T10:45:00Z"
 		t.Errorf("ID = %q, want %q", z.ID, "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 	}
 
-	if z.Title != "Test Zettel" {
-		t.Errorf("Title = %q, want %q", z.Title, "Test Zettel")
+	if z.Title != "Test Concept" {
+		t.Errorf("Title = %q, want %q", z.Title, "Test Concept")
 	}
 
 	if z.Project != "test-project" {
@@ -319,7 +344,7 @@ created: "2026-02-13T10:45:00Z"
 
 func TestParseAndValidate_ValidFile(t *testing.T) {
 	// Read the valid test file
-	content, err := os.ReadFile("../../testdata/valid_zettel.md")
+	content, err := os.ReadFile("../../testdata/valid_concept.md")
 	if err != nil {
 		t.Skipf("testdata file not found: %v", err)
 	}
@@ -335,7 +360,7 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 }
 
 func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_zettel_with_parent.md")
+	content, err := os.ReadFile("../../testdata/valid_concept_with_parent.md")
 	if err != nil {
 		t.Skipf("testdata file not found: %v", err)
 	}
@@ -351,7 +376,7 @@ func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 }
 
 func TestParseAndValidate_InvalidFile(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/invalid_zettel.md")
+	content, err := os.ReadFile("../../testdata/invalid_concept.md")
 	if err != nil {
 		t.Skipf("testdata file not found: %v", err)
 	}

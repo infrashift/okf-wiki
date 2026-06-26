@@ -10,17 +10,20 @@ import (
 	"github.com/blevesearch/bleve/v2/search/query"
 )
 
-// ZettelDoc is the structure we feed into the index
-type ZettelDoc struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Type     string   `json:"type"` // "note", "todo", "daily-note", or "issue"
-	Project  string   `json:"project"`
-	Category string   `json:"category"`
-	Tags     []string `json:"tags"`
-	Body     string   `json:"body"`
-	FilePath string   `json:"file_path"`
-	Created  string   `json:"created"`
+// ConceptDoc is the structure we feed into the index
+type ConceptDoc struct {
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Type        string   `json:"type"`                  // OKF free-form concept kind
+	Kind        string   `json:"kind"`                  // structured: "note", "todo", "daily-note", "issue"
+	Description string   `json:"description,omitempty"` // OKF one-sentence summary
+	Project     string   `json:"project"`
+	Category    string   `json:"category"`
+	Tags        []string `json:"tags"`
+	Body        string   `json:"body"`
+	FilePath    string   `json:"file_path"`
+	Created     string   `json:"created"`
+	Timestamp   string   `json:"timestamp,omitempty"` // last meaningful change
 
 	// Todo-specific fields
 	Status    string `json:"status,omitempty"`    // "open", "in_progress", "closed"
@@ -34,6 +37,7 @@ type SearchResult struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`
 	Type     string   `json:"type"`
+	Kind     string   `json:"kind"`
 	Project  string   `json:"project"`
 	Category string   `json:"category"`
 	Tags     []string `json:"tags"`
@@ -53,16 +57,17 @@ type SearchOptions struct {
 	Query    string   // Full-text query
 	Project  string   // Filter by project
 	Category string   // Filter by category (untethered/tethered)
-	Type     string   // Filter by type (note/todo)
+	Type     string   // Filter by OKF type (free-form)
+	Kind     string   // Filter by structured kind (note/todo/daily-note/issue)
 	Tags     []string // Filter by tags (AND)
 	Limit    int      // Max results (default 20)
 	Offset   int      // Pagination offset
 
 	// Todo-specific filters
-	Status       string // Filter by status (open/in_progress/closed)
-	Priority     string // Filter by priority (high/medium/low)
-	DueBefore    string // Filter todos due before this date (YYYY-MM-DD)
-	DueAfter     string // Filter todos due after this date (YYYY-MM-DD)
+	Status          string // Filter by status (open/in_progress/closed)
+	Priority        string // Filter by priority (high/medium/low)
+	DueBefore       string // Filter todos due before this date (YYYY-MM-DD)
+	DueAfter        string // Filter todos due after this date (YYYY-MM-DD)
 	CompletedAfter  string // Filter todos completed after this date
 	CompletedBefore string // Filter todos completed before this date
 }
@@ -81,11 +86,16 @@ func CreateMapping() mapping.IndexMapping {
 	keywordMapping.Analyzer = "keyword"
 	indexMapping.DefaultMapping.AddFieldMappingsAt("id", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("type", keywordMapping)
+	indexMapping.DefaultMapping.AddFieldMappingsAt("kind", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("project", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("category", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("tags", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("file_path", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("created", keywordMapping)
+	indexMapping.DefaultMapping.AddFieldMappingsAt("timestamp", keywordMapping)
+
+	// Description is full-text searchable
+	indexMapping.DefaultMapping.AddFieldMappingsAt("description", textMapping)
 
 	// Todo-specific keyword fields
 	indexMapping.DefaultMapping.AddFieldMappingsAt("status", keywordMapping)
@@ -105,7 +115,7 @@ func OpenOrCreateIndex(path string) (bleve.Index, error) {
 }
 
 // IndexDocument adds or updates a document in the index
-func IndexDocument(idx bleve.Index, doc *ZettelDoc) error {
+func IndexDocument(idx bleve.Index, doc *ConceptDoc) error {
 	return idx.Index(doc.ID, doc)
 }
 
@@ -158,11 +168,18 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		queries = append(queries, tagQuery)
 	}
 
-	// Type filter
+	// Type filter (OKF free-form)
 	if opts.Type != "" {
 		typeQuery := bleve.NewTermQuery(opts.Type)
 		typeQuery.SetField("type")
 		queries = append(queries, typeQuery)
+	}
+
+	// Kind filter (structured)
+	if opts.Kind != "" {
+		kindQuery := bleve.NewTermQuery(opts.Kind)
+		kindQuery.SetField("kind")
+		queries = append(queries, kindQuery)
 	}
 
 	// Status filter (for todos)
@@ -223,7 +240,7 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 	searchRequest := bleve.NewSearchRequest(finalQuery)
 	searchRequest.Size = opts.Limit
 	searchRequest.From = opts.Offset
-	searchRequest.Fields = []string{"id", "title", "type", "project", "category", "tags", "file_path", "status", "due", "completed", "priority"}
+	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "category", "tags", "file_path", "status", "due", "completed", "priority"}
 
 	// Add highlighting for body matches
 	if opts.Query != "" {
@@ -250,6 +267,9 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		}
 		if typ, ok := hit.Fields["type"].(string); ok {
 			result.Type = typ
+		}
+		if kind, ok := hit.Fields["kind"].(string); ok {
+			result.Kind = kind
 		}
 		if project, ok := hit.Fields["project"].(string); ok {
 			result.Project = project

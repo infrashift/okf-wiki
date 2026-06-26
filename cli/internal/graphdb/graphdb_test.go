@@ -20,8 +20,8 @@ func testStore(t *testing.T) *Store {
 	return s
 }
 
-// helper: write a zettel file to disk
-func writeZettel(t *testing.T, dir, id, title, project, category string, tags []string, parent string, links []string, body string) string {
+// helper: write a concept file to disk
+func writeConcept(t *testing.T, dir, id, title, project, category string, tags []string, parent string, links []string, body string) string {
 	t.Helper()
 	filename := id + ".md"
 	path := filepath.Join(dir, filename)
@@ -49,11 +49,12 @@ func writeZettel(t *testing.T, dir, id, title, project, category string, tags []
 
 	content := fm + "# " + title + "\n\n" + body
 	for _, l := range links {
-		content += "\nSee [[" + l + "]] for details.\n"
+		// Vanilla markdown link to the target concept's file (flat test layout).
+		content += "\nSee [link](" + l + ".md) for details.\n"
 	}
 
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
-		t.Fatalf("failed to write zettel: %v", err)
+		t.Fatalf("failed to write concept: %v", err)
 	}
 	return path
 }
@@ -74,10 +75,10 @@ func TestSyncFile(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeZettel(t, dir, id, "Test Note", "myproject", "untethered", []string{"go", "test"}, "", nil, "Hello world")
+	writeConcept(t, dir, id, "Test Note", "myproject", "untethered", []string{"go", "test"}, "", nil, "Hello world")
 
 	path := filepath.Join(dir, id+".md")
-	if err := s.SyncFile(path); err != nil {
+	if err := s.SyncFile(path, dir); err != nil {
 		t.Fatalf("SyncFile error: %v", err)
 	}
 
@@ -106,8 +107,8 @@ func TestSyncFull(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, id1, "Note A", "", "untethered", []string{"alpha"}, "", []string{id2}, "Links to B")
-	writeZettel(t, dir, id2, "Note B", "", "untethered", []string{"beta"}, "", nil, "Standalone")
+	writeConcept(t, dir, id1, "Note A", "", "untethered", []string{"alpha"}, "", []string{id2}, "Links to B")
+	writeConcept(t, dir, id2, "Note B", "", "untethered", []string{"beta"}, "", nil, "Standalone")
 
 	result, err := s.Sync(dir)
 	if err != nil {
@@ -133,7 +134,7 @@ func TestSyncIncremental(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeZettel(t, dir, id, "Original Title", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id, "Original Title", "", "untethered", nil, "", nil, "")
 
 	r1, err := s.Sync(dir)
 	if err != nil {
@@ -160,8 +161,8 @@ func TestSyncDeletesRemovedFiles(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, id1, "Note A", "", "untethered", nil, "", nil, "")
-	writeZettel(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id1, "Note A", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -189,8 +190,8 @@ func TestPurgeNode(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, id1, "Note A", "", "untethered", []string{"go"}, "", []string{id2}, "Links to B")
-	writeZettel(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id1, "Note A", "", "untethered", []string{"go"}, "", []string{id2}, "Links to B")
+	writeConcept(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -219,8 +220,8 @@ func TestParentChildEdges(t *testing.T) {
 	parentID := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	childID := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, parentID, "Parent", "", "untethered", nil, "", nil, "")
-	writeZettel(t, dir, childID, "Child", "", "untethered", nil, parentID, nil, "")
+	writeConcept(t, dir, parentID, "Parent", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, childID, "Child", "", "untethered", nil, parentID, nil, "")
 
 	s.Sync(dir)
 
@@ -248,7 +249,7 @@ func TestExportJSON(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeZettel(t, dir, id, "Test", "", "untethered", []string{"go"}, "", nil, "")
+	writeConcept(t, dir, id, "Test", "", "untethered", []string{"go"}, "", nil, "")
 	s.Sync(dir)
 
 	var buf struct {

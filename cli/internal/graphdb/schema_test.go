@@ -80,7 +80,7 @@ func TestValidateIntegrity(t *testing.T) {
 	idA := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	nonExistent := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{nonExistent}, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, nonExistent, nil, "")
 	s.Sync(dir)
 
 	result, err := s.ValidateIntegrity()
@@ -111,8 +111,8 @@ func TestValidateIntegrity_Clean(t *testing.T) {
 	idA := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	idB := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeZettel(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
-	writeZettel(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, idA, "A", "", "untethered", nil, "", []string{idB}, "")
+	writeConcept(t, dir, idB, "B", "", "untethered", nil, "", nil, "")
 	s.Sync(dir)
 
 	result, err := s.ValidateIntegrity()

@@ -1,4 +1,4 @@
-// Package graphdb provides persistent graph storage for a zettelkasten
+// Package graphdb provides persistent graph storage for a bundle
 // using bbolt as the storage backend.
 package graphdb
 
@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"zk/cli/internal/config"
-	"zk/cli/internal/graph"
+	"okfw/cli/internal/config"
 
 	bolt "go.etcd.io/bbolt"
 )
@@ -34,7 +33,7 @@ const (
 	PredicateTagged   = "tagged"
 )
 
-// NodeRecord represents a zettel node stored in bbolt.
+// NodeRecord represents a concept node stored in bbolt.
 type NodeRecord struct {
 	ID       string   `json:"id"`
 	Title    string   `json:"title"`
@@ -86,7 +85,7 @@ func Open(path string) (*Store, error) {
 	})
 	if err != nil {
 		if err == bolt.ErrTimeout {
-			return nil, fmt.Errorf("graph database is locked by another zk process: %s", path)
+			return nil, fmt.Errorf("graph database is locked by another okfw process: %s", path)
 		}
 		return nil, fmt.Errorf("failed to open graph database: %w", err)
 	}
@@ -129,7 +128,7 @@ func (s *Store) Sync(rootPath string) (*SyncResult, error) {
 		return nil, fmt.Errorf("root path %q is not a directory", rootPath)
 	}
 
-	// Collect all zettel files from filesystem.
+	// Collect all concept files from filesystem.
 	type fileEntry struct {
 		path    string
 		modTime int64
@@ -142,7 +141,7 @@ func (s *Store) Sync(rootPath string) (*SyncResult, error) {
 		if fi.IsDir() && (strings.HasPrefix(fi.Name(), ".") && fi.Name() != "." || fi.Name() == "ephemeral") {
 			return filepath.SkipDir
 		}
-		if !fi.IsDir() && strings.HasSuffix(p, ".md") {
+		if !fi.IsDir() && strings.HasSuffix(p, ".md") && fi.Name() != "index.md" && fi.Name() != "log.md" {
 			files = append(files, fileEntry{path: p, modTime: fi.ModTime().Unix()})
 		}
 		return nil
@@ -158,9 +157,9 @@ func (s *Store) Sync(rootPath string) (*SyncResult, error) {
 
 	// Process each file.
 	for _, f := range files {
-		node, err := parseZettelFile(f.path)
+		node, err := parseConceptFile(f.path, rootPath)
 		if err != nil {
-			continue // skip non-zettel or malformed files
+			continue // skip non-concept or malformed files
 		}
 		node.ModTime = f.modTime
 		fsIDs[node.ID] = true
@@ -213,8 +212,9 @@ func (s *Store) Sync(rootPath string) (*SyncResult, error) {
 	return result, nil
 }
 
-// SyncFile synchronizes a single file into the graph database.
-func (s *Store) SyncFile(filePath string) error {
+// SyncFile synchronizes a single file into the graph database. bundleRoot is the
+// bundle root used to resolve the file's markdown links to target concept IDs.
+func (s *Store) SyncFile(filePath, bundleRoot string) error {
 	fi, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -224,9 +224,9 @@ func (s *Store) SyncFile(filePath string) error {
 		return fmt.Errorf("failed to stat file: %w", err)
 	}
 
-	node, err := parseZettelFile(filePath)
+	node, err := parseConceptFile(filePath, bundleRoot)
 	if err != nil {
-		return fmt.Errorf("failed to parse zettel: %w", err)
+		return fmt.Errorf("failed to parse concept: %w", err)
 	}
 	node.ModTime = fi.ModTime().Unix()
 
@@ -494,8 +494,9 @@ func (s *Store) countDanglingEdges() (int, error) {
 	return count, err
 }
 
-// parseZettelFile parses a zettel markdown file into a NodeRecord.
-func parseZettelFile(filePath string) (*NodeRecord, error) {
+// parseConceptFile parses a concept markdown file into a NodeRecord. bundleRoot
+// is used to resolve the body's vanilla markdown links to target concept IDs.
+func parseConceptFile(filePath, bundleRoot string) (*NodeRecord, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -507,13 +508,13 @@ func parseZettelFile(filePath string) (*NodeRecord, error) {
 	}
 
 	if z.ID == "" {
-		return nil, fmt.Errorf("not a valid zettel: no id field")
+		return nil, fmt.Errorf("not a valid concept: no id field")
 	}
 
-	body := extractBody(content)
-	links := graph.ExtractLinks(body)
-
 	absPath, _ := filepath.Abs(filePath)
+
+	body := extractBody(content)
+	links := config.ResolveBodyLinkIDs(body, absPath, bundleRoot)
 
 	return &NodeRecord{
 		ID:       z.ID,

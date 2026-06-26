@@ -1,42 +1,42 @@
-*zk.txt*  Zettelkasten CLI integration for NeoVim
+*okfw.txt*  OKF Wiki integration for NeoVim
 
 Author:  infrashift
 License: MIT
 
-INTRODUCTION                                                    *zk* *zk.nvim*
+INTRODUCTION                                                *okfw* *okfw.nvim*
 
-zk.nvim provides NeoVim integration for the zk CLI tool, enabling seamless
+okfw.nvim provides NeoVim integration for the okfw CLI tool, enabling seamless
 management of a Zettelkasten note-taking system directly from your editor.
 
 Features:
-  - Create untethered and tethered notes
+  - Create untethered and tethered concepts
   - Daily notes with review workflows
   - Note templates (meeting, user-story, feature, etc.)
   - Full-text search with snacks.nvim picker integration
-  - Graph visualization of note relationships
+  - Graph visualization of concept relationships
   - Backlinks discovery
   - Tag completion in YAML frontmatter
-  - Link insertion between notes
+  - Link insertion between concepts
 
-REQUIREMENTS                                                 *zk-requirements*
+REQUIREMENTS                                               *okfw-requirements*
 
   - NeoVim 0.9+
   - plenary.nvim (required)
   - snacks.nvim (optional, for picker UI)
-  - zk CLI binary in $PATH
+  - okfw CLI binary in $PATH
 
-INSTALLATION                                                 *zk-installation*
+INSTALLATION                                               *okfw-installation*
 
 Using lazy.nvim: >lua
     {
-        "infrashift/zettelkasten-cli",
+        "infrashift/zettelkasten",
         dependencies = {
             "nvim-lua/plenary.nvim",
             "folke/snacks.nvim",
         },
         config = function()
-            require("zk").setup({
-                bin = "zk",
+            require("okfw").setup({
+                bin = "okfw",
             })
         end,
     }
@@ -44,60 +44,60 @@ Using lazy.nvim: >lua
 
 Using packer.nvim: >lua
     use {
-        "infrashift/zettelkasten-cli",
+        "infrashift/zettelkasten",
         requires = { "nvim-lua/plenary.nvim" },
         config = function()
-            require("zk").setup()
+            require("okfw").setup()
         end,
     }
 <
 
-SETUP                                                               *zk-setup*
+SETUP                                                             *okfw-setup*
 
-                                                              *zk.setup()*
-require("zk").setup({opts})
+                                                            *okfw.setup()*
+require("okfw").setup({opts})
 
     Configure the plugin. Call this in your init.lua or plugin config.
 
     Options: ~
-        {bin}    (string)  Path to zk binary. Default: "zk"
+        {bin}    (string)  Path to okfw binary. Default: "okfw"
 
     Example: >lua
-        require("zk").setup({
-            bin = "/usr/local/bin/zk",
+        require("okfw").setup({
+            bin = "/usr/local/bin/okfw",
         })
 <
 
-COMMANDS                                                         *zk-commands*
+COMMANDS                                                       *okfw-commands*
 
-All commands are prefixed with "Zk" for discoverability.
+All commands are prefixed with "Okfw" for discoverability.
 
 Daily Notes ~
-                                                                    *:ZkDaily*
-:ZkDaily [date]         Open or create a daily note.
+                                                                  *:OkfwDaily*
+:OkfwDaily [date]       Open or create a daily note.
                         - No argument: today's note
                         - "yesterday": yesterday's note
                         - YYYY-MM-DD: specific date
 
-                                                                *:ZkDailyList*
-:ZkDailyList[!]         Browse daily notes with picker.
+                                                              *:OkfwDailyList*
+:OkfwDailyList[!]       Browse daily notes with picker.
                         With !: show this week only
 
 Note Creation ~
-                                                                      *:ZkNote*
-:ZkNote [category] [project]
-                        Create a new zettel.
+                                                                   *:OkfwNote*
+:OkfwNote [category] [project]
+                        Create a new concept.
                         {category}: "untethered" (default) or "tethered"
                         {project}: optional project name
 
-                                                                 *:ZkTemplate*
-:ZkTemplate [name]      Create note from template.
+                                                               *:OkfwTemplate*
+:OkfwTemplate [name]    Create note from template.
                         Without argument: opens template picker
 
 Search ~
-                                                                   *:ZkSearch*
-:ZkSearch[!] [flags] [query]
-                        Search zettels with optional filters.
+                                                                 *:OkfwSearch*
+:OkfwSearch[!] [flags] [query]
+                        Search concepts with optional filters.
                         With !: live search (updates as you type)
 
                         Flags: ~
@@ -111,24 +111,24 @@ Search ~
                           --tag {val}        filter by tag (repeatable)
 
                         Examples: >vim
-                          :ZkSearch authentication
-                          :ZkSearch --category tethered
-                          :ZkSearch --type todo --status open
-                          :ZkSearch --project my-project --priority high
-                          :ZkSearch! --type todo
+                          :OkfwSearch authentication
+                          :OkfwSearch --category tethered
+                          :OkfwSearch --type todo --status open
+                          :OkfwSearch --project my-project --priority high
+                          :OkfwSearch! --type todo
 <
 
 Indexing ~
-                                                                    *:ZkIndex*
-:ZkIndex [path]         Index zettels for searching.
+                                                                  *:OkfwIndex*
+:OkfwIndex [path]       Index concepts for searching.
                         Default: current directory
 
 Graph ~
-                                                                    *:ZkGraph*
-:ZkGraph [args]         Show graph in a scratch buffer (Mermaid syntax).
+                                                                  *:OkfwGraph*
+:OkfwGraph [args]       Show graph in a scratch buffer (Mermaid syntax).
                         {limit}: max nodes (default: 10)
                         --depth N: max BFS hops
-                        --start ID: center on a zettel
+                        --start ID: center on a concept
                         Press q to close the buffer.
 
                         Output is Mermaid flowchart syntax: >
@@ -141,160 +141,160 @@ Graph ~
                         A --> B means A has [[B]] in its body.
                         Paste into mermaid.live or any Mermaid renderer.
 
-                                                                   *:ZkExport*
-:ZkExport [args]        Export graph subset as portable markdown.
-                        --limit N: max notes to export (default: 10)
+                                                                 *:OkfwExport*
+:OkfwExport [args]      Export graph subset as portable markdown.
+                        --limit N: max concepts to export (default: 10)
                         --depth N: max BFS hops
-                        --start ID: center on a zettel
+                        --start ID: center on a concept
 
-                        Copies notes into <root>/ephemeral/ with
+                        Copies concepts into <root>/ephemeral/ with
                         [[id|title]] links converted to [title](id.md)
                         relative links. The ephemeral/ directory has a
                         .gitignore that ignores all exported files.
 
-                        Links to notes NOT in the export set are left
+                        Links to concepts NOT in the export set are left
                         unchanged. The directory is wiped on each export.
 
 Tags ~
-                                                              *:ZkRefreshTags*
-:ZkRefreshTags          Refresh tag cache.
+                                                            *:OkfwRefreshTags*
+:OkfwRefreshTags        Refresh tag cache.
 
-LUA API                                                             *zk-api*
+LUA API                                                           *okfw-api*
 
-All functions are available via `require("zk")`.
+All functions are available via `require("okfw")`.
 
 Daily Notes ~
-                                                                  *zk.daily()*
+                                                                *okfw.daily()*
 daily({opts})           Open or create daily note.
                         opts.date: "yesterday" or "YYYY-MM-DD"
 
-                                                            *zk.daily_picker()*
+                                                          *okfw.daily_picker()*
 daily_picker({opts})    Browse daily notes with picker.
                         opts.week: show this week only
                         opts.month: show this month only
 
-                                                             *zk.list_daily()*
+                                                           *okfw.list_daily()*
 list_daily({opts}, {callback})
                         Get daily notes asynchronously.
 
-                                                        *zk.list_daily_sync()*
+                                                      *okfw.list_daily_sync()*
 list_daily_sync({opts}) Get daily notes synchronously.
 
 Note Creation ~
-                                                            *zk.create_note()*
+                                                          *okfw.create_note()*
 create_note({category}, {project})
-                        Create a new zettel.
+                        Create a new concept.
 
-                                                     *zk.create_from_template()*
+                                                   *okfw.create_from_template()*
 create_from_template({opts})
                         Create note from template.
                         opts.template: template name
                         opts.project: project name
 
-                                                         *zk.template_picker()*
+                                                       *okfw.template_picker()*
 template_picker({opts}) Open picker for templates.
 
 Note Management ~
-                                                            *zk.tether_note()*
+                                                          *okfw.tether_note()*
 tether_note({path}, {project})
                         Tether a note (set category to tethered).
 
-                                                          *zk.untether_note()*
+                                                        *okfw.untether_note()*
 untether_note({path})   Untether a note (set category to untethered).
 
-                                                            *zk.set_project()*
+                                                          *okfw.set_project()*
 set_project({path}, {project})
-                        Set project for a zettel.
+                        Set project for a concept.
 
 Search ~
-                                                                 *zk.search()*
-search({query}, {opts}) Search zettels.
+                                                               *okfw.search()*
+search({query}, {opts}) Search concepts.
                         opts.project, opts.category, opts.tags, opts.limit
                         opts.type, opts.status, opts.priority
                         opts.due_before, opts.due_after
                         opts.on_results: callback function
 
-                                                                  *zk.index()*
-index({path})           Index zettels.
+                                                                *okfw.index()*
+index({path})           Index concepts.
 
 Graph ~
-                                                                  *zk.graph()*
+                                                                *okfw.graph()*
 graph({opts})           Show Mermaid graph in scratch buffer.
                         opts.path, opts.limit, opts.depth, opts.start
 
-                                                                 *zk.export()*
+                                                               *okfw.export()*
 export({opts})          Export graph subset as portable markdown.
                         opts.path, opts.limit, opts.depth, opts.start
                         Writes to <root>/ephemeral/ with links converted
                         from [[id|title]] to [title](id.md).
 
 Preview ~
-                                                           *zk.preview_note()*
+                                                         *okfw.preview_note()*
 preview_note({path})    Preview note in floating window.
 
-                                                          *zk.preview_by_id()*
+                                                        *okfw.preview_by_id()*
 preview_by_id({id})     Preview note by ID.
 
 Linking ~
-                                                            *zk.insert_link()*
+                                                          *okfw.insert_link()*
 insert_link({id}, {title}, {include_title})
                         Insert link at cursor.
 
-                                                            *zk.link_picker()*
+                                                          *okfw.link_picker()*
 link_picker({opts})     Open picker for linking.
                         opts.include_title: use [[id|title]] format
 
 Backlinks ~
-                                                          *zk.get_backlinks()*
+                                                        *okfw.get_backlinks()*
 get_backlinks({id}, {callback})
                         Get backlinks asynchronously.
 
-                                                        *zk.backlinks_panel()*
+                                                      *okfw.backlinks_panel()*
 backlinks_panel({opts}) Open floating backlinks panel.
 
-                                                        *zk.backlinks_split()*
+                                                      *okfw.backlinks_split()*
 backlinks_split({opts}) Open backlinks in split.
                         opts.position: "right", "left", "bottom", "top"
 
-                                                       *zk.toggle_backlinks()*
+                                                     *okfw.toggle_backlinks()*
 toggle_backlinks()      Toggle backlinks panel.
 
 Tags ~
-                                                              *zk.add_tags()*
+                                                            *okfw.add_tags()*
 add_tags({tags}, {path})
-                        Add tags to a zettel's frontmatter.
+                        Add tags to a concept's frontmatter.
                         {tags}: string (space-separated) or table
                         {path}: optional file path (default: current buffer)
 
 Validation ~
-                                                              *zk.validate()*
+                                                            *okfw.validate()*
 validate({path})        Validate frontmatter against CUE schema.
                         {path}: optional file path (default: current buffer)
 
-                                                               *zk.get_tags()*
+                                                             *okfw.get_tags()*
 get_tags({callback})    Get all tags asynchronously.
 
-                                                          *zk.get_tags_sync()*
+                                                        *okfw.get_tags_sync()*
 get_tags_sync()         Get all tags synchronously.
 
-                                                          *zk.refresh_tags()*
+                                                        *okfw.refresh_tags()*
 refresh_tags()          Clear and reload tag cache.
 
-                                                         *zk.complete_tags()*
+                                                       *okfw.complete_tags()*
 complete_tags()         Trigger tag completion at cursor.
 
-                                                   *zk.setup_tag_completion()*
+                                                 *okfw.setup_tag_completion()*
 setup_tag_completion()  Set up tag completion for markdown.
 
-                                                              *zk.setup_cmp()*
+                                                            *okfw.setup_cmp()*
 setup_cmp()             Register nvim-cmp source.
 
-PICKER                                                           *zk-picker*
+PICKER                                                         *okfw-picker*
 
 If snacks.nvim is installed, additional functions are available:
 
-require("zk.picker").search({opts})      Search all zettels
-require("zk.picker").live_search({opts}) Live search
+require("okfw.picker").search({opts})      Search all concepts
+require("okfw.picker").live_search({opts}) Live search
 
     Search opts: ~
         {project}     Filter by project name
@@ -305,9 +305,9 @@ require("zk.picker").live_search({opts}) Live search
         {due_before}  Filter due before date (YYYY-MM-DD)
         {due_after}   Filter due after date (YYYY-MM-DD)
         {tags}        Table of tag strings (AND logic)
-require("zk.picker").untethered({opts})  Browse untethered notes
-require("zk.picker").tethered({opts})    Browse tethered notes
-require("zk.picker").insert_link({opts}) Insert link to zettel
+require("okfw.picker").untethered({opts})  Browse untethered concepts
+require("okfw.picker").tethered({opts})    Browse tethered concepts
+require("okfw.picker").insert_link({opts}) Insert link to concept
 
 Picker Keymaps ~
     <CR>        Open note
@@ -315,9 +315,9 @@ Picker Keymaps ~
     <C-l>       Insert link as [[id]]
     <C-S-l>     Insert link as [[id|title]]
 
-FILETYPE SETTINGS                                           *zk-ftplugin*
+FILETYPE SETTINGS                                         *okfw-ftplugin*
 
-When editing a zettel file (markdown with id: in frontmatter), the plugin
+When editing a concept file (markdown with id: in frontmatter), the plugin
 automatically sets up:
 
   - omnifunc for tag completion
@@ -325,39 +325,39 @@ automatically sets up:
   - <localleader>l for link insertion
   - <localleader>L for link insertion with title
   - <localleader>b for backlinks toggle
-  - <localleader>a for adding tags (all zettel types)
-  - <localleader>v for validating frontmatter (all zettel types)
+  - <localleader>a for adding tags (all concept types)
+  - <localleader>v for validating frontmatter (all concept types)
   - <localleader>p for set project (note and todo types)
   - <localleader>t for tether/untether picker (note and todo types)
   - <localleader>s for todo status picker (todo-type only)
 
-SUGGESTED KEYMAPS                                               *zk-keymaps*
+SUGGESTED KEYMAPS                                             *okfw-keymaps*
 
 Add these to your configuration: >lua
 
     -- Daily notes
-    vim.keymap.set("n", "<leader>zd", "<cmd>ZkDaily<cr>")
-    vim.keymap.set("n", "<leader>zD", "<cmd>ZkDaily yesterday<cr>")
-    vim.keymap.set("n", "<leader>zw", "<cmd>ZkDailyList<cr>")
+    vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>")
+    vim.keymap.set("n", "<leader>zD", "<cmd>OkfwDaily yesterday<cr>")
+    vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList<cr>")
 
     -- Note creation
     vim.keymap.set("n", "<leader>zf", function()
-        require("zk").create_note("untethered")
+        require("okfw").create_note("untethered")
     end)
     vim.keymap.set("n", "<leader>zp", function()
-        require("zk").create_note("tethered")
+        require("okfw").create_note("tethered")
     end)
-    vim.keymap.set("n", "<leader>zt", "<cmd>ZkTemplate<cr>")
+    vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTemplate<cr>")
 
     -- Search
-    vim.keymap.set("n", "<leader>zz", "<cmd>ZkSearch<cr>")
-    vim.keymap.set("n", "<leader>z/", "<cmd>ZkSearch!<cr>")
+    vim.keymap.set("n", "<leader>zz", "<cmd>OkfwSearch<cr>")
+    vim.keymap.set("n", "<leader>z/", "<cmd>OkfwSearch!<cr>")
 
     -- Graph
-    vim.keymap.set("n", "<leader>zg", "<cmd>ZkGraph<cr>")
+    vim.keymap.set("n", "<leader>zg", "<cmd>OkfwGraph<cr>")
 <
 
-LICENSE                                                         *zk-license*
+LICENSE                                                       *okfw-license*
 
 MIT License
 

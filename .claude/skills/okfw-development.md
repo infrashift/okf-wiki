@@ -1,31 +1,31 @@
 ---
-description: Development guide for contributing to the zk CLI codebase — building, testing, architecture
+description: Development guide for contributing to the OKF Wiki (okfw) codebase — building, testing, architecture
 globs:
   - "cli/**/*.go"
   - "go.mod"
   - "Makefile"
 ---
 
-# Skill: ZK CLI Development
+# Skill: OKF Wiki Development
 
 ## Build & Test
 
 ```bash
-make build                    # Build ./zk binary
+make build                    # Build ./okfw binary
 make test                     # Go tests + CUE schema validation
 go test ./cli/... -count=1    # All Go tests
 go test ./cli/internal/graphdb/... -v  # Single package, verbose
-go build ./cli/cmd/zk/        # Just compile, no binary output
+go build ./cli/cmd/okfw/      # Just compile, no binary output
 make lint                     # go vet + staticcheck
 make fmt                      # go fmt + cue fmt
 ```
 
 ## Architecture
 
-All CLI commands live in a single file: `cli/cmd/zk/main.go`. Commands are defined as Cobra commands within `main()`.
+All CLI commands live in a single file: `cli/cmd/okfw/main.go`. Commands are defined as Cobra commands within `main()`.
 
 Internal packages:
-- `cli/internal/config/` — Config struct + CUE schema loading + zettel frontmatter parsing/validation
+- `cli/internal/config/` — Config struct + CUE schema loading + concept frontmatter parsing/validation
 - `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, ASCII tree, Mermaid rendering, link extraction)
 - `cli/internal/graphdb/` — Persistent graph store (bbolt). Store, Sync, queries (backlinks, cluster, tag, dangling), CUE edge validation
 - `cli/internal/index/` — Bleve full-text search (ZettelDoc mapping, search with filters)
@@ -78,7 +78,7 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 
 ## Adding a New Command
 
-1. Define the command as a `cobra.Command` inside `main()` in `cli/cmd/zk/main.go`
+1. Define the command as a `cobra.Command` inside `main()` in `cli/cmd/okfw/main.go`
 2. Add flags after the command definition
 3. Register with `rootCmd.AddCommand(myCmd)`
 4. Load config with `config.Load("")` inside RunE
@@ -87,11 +87,11 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 ## Testing Pattern
 
 ```go
-// Use t.TempDir() for test databases and zettel files
+// Use t.TempDir() for test databases and concept files
 func TestMyFeature(t *testing.T) {
     dir := t.TempDir()
     store, _ := graphdb.Open(filepath.Join(dir, "test.db"))
     defer store.Close()
-    // ... write test zettels, sync, query, assert
+    // ... write test concepts, sync, query, assert
 }
 ```

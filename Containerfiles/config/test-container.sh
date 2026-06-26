@@ -16,7 +16,7 @@ section "Environment"
 
 [[ "$TERM" == "xterm-ghostty" ]] && pass "TERM=xterm-ghostty" || fail "TERM" "got $TERM"
 [[ "$EDITOR" == "nvim" ]] && pass "EDITOR=nvim" || fail "EDITOR" "got $EDITOR"
-command -v zk &>/dev/null && pass "zk in PATH" || fail "zk" "not in PATH"
+command -v okfw &>/dev/null && pass "okfw in PATH" || fail "okfw" "not in PATH"
 command -v nvim &>/dev/null && pass "nvim in PATH" || fail "nvim" "not in PATH"
 command -v tmux &>/dev/null && pass "tmux in PATH" || fail "tmux" "not in PATH"
 command -v claude &>/dev/null && pass "claude in PATH" || fail "claude" "not in PATH"
@@ -57,18 +57,18 @@ section "Tmux config"
 [[ -f ~/.tmux.conf ]] && pass "~/.tmux.conf exists" || fail "tmux.conf" "missing"
 grep -q "xterm-ghostty" ~/.tmux.conf && pass "tmux.conf has ghostty override" || fail "tmux.conf" "no ghostty entry"
 
-# ── zk CLI tests ────────────────────────────────────────────────────────
-section "zk CLI"
+# ── okfw CLI tests ──────────────────────────────────────────────────────
+section "okfw CLI"
 
 export HOME=/home/user
-ZKDIR=/home/user/zettelkasten
-mkdir -p "$ZKDIR/.zk" "$ZKDIR/untethered" "$ZKDIR/tethered" "$ZKDIR/daily" "$ZKDIR/todos"
-cd "$ZKDIR"
+OKFWDIR=/home/user/okfw
+mkdir -p "$OKFWDIR/.okfw" "$OKFWDIR/untethered" "$OKFWDIR/tethered" "$OKFWDIR/daily" "$OKFWDIR/todos"
+cd "$OKFWDIR"
 git init -q .
 git config user.email "test@test.com"
 git config user.name "Test"
 
-cat > .zk/config.yaml <<'YAML'
+cat > .okfw/config.yaml <<'YAML'
 root: .
 untethered_dir: untethered
 tethered_dir: tethered
@@ -78,83 +78,83 @@ projects: []
 YAML
 
 # Test: create untethered note
-OUTPUT=$(zk create "Test Note Alpha" --category untethered 2>&1)
+OUTPUT=$(okfw create "Test Note Alpha" --category untethered 2>&1)
 echo "$OUTPUT" | grep -qi "created\|Created" && pass "create untethered note" || fail "create untethered" "$OUTPUT"
 
-UNTETHERED_COUNT=$(find "$ZKDIR/untethered" -name "*.md" 2>/dev/null | wc -l)
+UNTETHERED_COUNT=$(find "$OKFWDIR/untethered" -name "*.md" 2>/dev/null | wc -l)
 [[ "$UNTETHERED_COUNT" -ge 1 ]] && pass "untethered file exists ($UNTETHERED_COUNT files)" || fail "untethered file" "no .md in untethered/"
 
 # Test: create with template
-OUTPUT=$(zk create "Meeting Review" --template meeting 2>&1)
+OUTPUT=$(okfw create "Meeting Review" --template meeting 2>&1)
 echo "$OUTPUT" | grep -qi "created\|Created" && pass "create from template (meeting)" || fail "create template" "$OUTPUT"
 
 # Test: create daily note
-OUTPUT=$(zk daily 2>&1)
+OUTPUT=$(okfw daily 2>&1)
 echo "$OUTPUT" | grep -qi "daily\|note\|created\|Daily" && pass "daily note" || fail "daily" "$OUTPUT"
 
 # Daily notes are stored under untethered/daily/YYYY/MM/
-DAILY_COUNT=$(find "$ZKDIR/untethered/daily" -name "*.md" 2>/dev/null | wc -l)
+DAILY_COUNT=$(find "$OKFWDIR/untethered/daily" -name "*.md" 2>/dev/null | wc -l)
 [[ "$DAILY_COUNT" -ge 1 ]] && pass "daily note file exists ($DAILY_COUNT files)" || fail "daily file" "no .md in untethered/daily/"
 
 # Test: create todo
-OUTPUT=$(zk todo "Fix the thing" 2>&1)
+OUTPUT=$(okfw todo "Fix the thing" 2>&1)
 echo "$OUTPUT" | grep -qi "todo\|created\|Fix" && pass "create todo" || fail "create todo" "$OUTPUT"
 
 # Todos are created as untethered notes in untethered/ (same-minute timestamps may collide)
-ALL_UNTETHERED=$(find "$ZKDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
+ALL_UNTETHERED=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
 [[ "$ALL_UNTETHERED" -ge 1 ]] && pass "todo file exists in untethered/ ($ALL_UNTETHERED files)" || fail "todo file" "expected >=1 .md in untethered/"
 
 # Test: set-status closed
-TODO_FILE=$(find "$ZKDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | tail -1)
+TODO_FILE=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | tail -1)
 if [[ -n "$TODO_FILE" ]]; then
-  OUTPUT=$(zk set-status "$TODO_FILE" closed 2>&1)
+  OUTPUT=$(okfw set-status "$TODO_FILE" closed 2>&1)
   echo "$OUTPUT" | grep -qi "closed\|Closed" && pass "set-status closed" || fail "set-status closed" "$OUTPUT"
 fi
 
 # Test: set-status in_progress
 if [[ -n "$TODO_FILE" ]]; then
-  OUTPUT=$(zk set-status "$TODO_FILE" in_progress 2>&1)
+  OUTPUT=$(okfw set-status "$TODO_FILE" in_progress 2>&1)
   echo "$OUTPUT" | grep -qi "in_progress" && pass "set-status in_progress" || fail "set-status in_progress" "$OUTPUT"
 fi
 
 # Test: set-status open
 if [[ -n "$TODO_FILE" ]]; then
-  OUTPUT=$(zk set-status "$TODO_FILE" open 2>&1)
+  OUTPUT=$(okfw set-status "$TODO_FILE" open 2>&1)
   echo "$OUTPUT" | grep -qi "reopen\|open\|Reopen" && pass "set-status open" || fail "set-status open" "$OUTPUT"
 fi
 
 # Test: add-tags
-NOTE_FILE=$(find "$ZKDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | head -1)
+NOTE_FILE=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | head -1)
 if [[ -n "$NOTE_FILE" ]]; then
-  OUTPUT=$(zk add-tags "$NOTE_FILE" golang api 2>&1)
+  OUTPUT=$(okfw add-tags "$NOTE_FILE" golang api 2>&1)
   echo "$OUTPUT" | grep -qi "added\|Added\|tags" && pass "add-tags" || fail "add-tags" "$OUTPUT"
   grep -q "golang" "$NOTE_FILE" 2>/dev/null && pass "add-tags wrote tag to file" || fail "add-tags file" "tag not found in file"
 fi
 
 # Test: validate
 if [[ -n "$NOTE_FILE" ]]; then
-  OUTPUT=$(zk validate "$NOTE_FILE" 2>&1)
+  OUTPUT=$(okfw validate "$NOTE_FILE" 2>&1)
   echo "$OUTPUT" | grep -qi "valid\|Valid" && pass "validate" || fail "validate" "$OUTPUT"
 fi
 
 # Test: index
-OUTPUT=$(zk index . 2>&1)
+OUTPUT=$(okfw index . 2>&1)
 echo "$OUTPUT" | grep -qi "indexed\|index\|Indexed" && pass "index" || fail "index" "$OUTPUT"
 
 # Test: search
-OUTPUT=$(zk search --json 2>&1)
+OUTPUT=$(okfw search --json 2>&1)
 echo "$OUTPUT" | grep -q "Test Note Alpha\|title" && pass "search finds notes (JSON)" || fail "search" "$OUTPUT"
 
 # Test: search with --limit
-OUTPUT=$(zk search --json --limit 1 2>&1)
+OUTPUT=$(okfw search --json --limit 1 2>&1)
 echo "$OUTPUT" | grep -q "\[" && pass "search --limit 1" || fail "search --limit" "$OUTPUT"
 
 # Test: search with --category
-OUTPUT=$(zk search --json --category untethered 2>&1)
+OUTPUT=$(okfw search --json --category untethered 2>&1)
 echo "$OUTPUT" | grep -q "untethered" && pass "search --category untethered" || fail "search --category" "$OUTPUT"
 
 # Test: templates list
-OUTPUT=$(zk templates 2>&1)
+OUTPUT=$(okfw templates 2>&1)
 echo "$OUTPUT" | grep -q "meeting" && pass "templates lists meeting" || fail "templates" "$OUTPUT"
 echo "$OUTPUT" | grep -q "todo" && pass "templates lists todo" || fail "templates" "$OUTPUT"
 echo "$OUTPUT" | grep -q "snippet" && pass "templates lists snippet" || fail "templates" "$OUTPUT"
@@ -162,9 +162,9 @@ echo "$OUTPUT" | grep -q "daily" && pass "templates lists daily" || fail "templa
 echo "$OUTPUT" | grep -q "book-review" && pass "templates lists book-review" || fail "templates" "$OUTPUT"
 
 # Test: tether (needs an untethered note)
-UNTETHERED_FILE=$(find "$ZKDIR/untethered" -name "*.md" 2>/dev/null | head -1)
+UNTETHERED_FILE=$(find "$OKFWDIR/untethered" -name "*.md" 2>/dev/null | head -1)
 if [[ -n "$UNTETHERED_FILE" ]]; then
-  OUTPUT=$(zk tether "$UNTETHERED_FILE" --project test-proj 2>&1)
+  OUTPUT=$(okfw tether "$UNTETHERED_FILE" --project test-proj 2>&1)
   echo "$OUTPUT" | grep -qi "tethered\|Tethered\|tether" && pass "tether untethered->tethered" || fail "tether" "$OUTPUT"
   # Tether updates frontmatter category in-place (doesn't move file)
   grep -q "tethered" "$UNTETHERED_FILE" 2>/dev/null && pass "tethered file has tethered category" || fail "tethered file" "category not updated"
@@ -173,50 +173,50 @@ else
 fi
 
 # Test: set-project
-PERM_FILE=$(find "$ZKDIR/tethered" -name "*.md" 2>/dev/null | head -1)
+PERM_FILE=$(find "$OKFWDIR/tethered" -name "*.md" 2>/dev/null | head -1)
 if [[ -n "$PERM_FILE" ]]; then
-  OUTPUT=$(zk set-project "$PERM_FILE" new-project 2>&1)
+  OUTPUT=$(okfw set-project "$PERM_FILE" new-project 2>&1)
   echo "$OUTPUT" | grep -qi "project\|updated\|Project" && pass "set-project" || fail "set-project" "$OUTPUT"
 fi
 
 # Test: backlinks
 if [[ -n "$PERM_FILE" ]]; then
-  OUTPUT=$(zk backlinks "$PERM_FILE" --json 2>&1)
+  OUTPUT=$(okfw backlinks "$PERM_FILE" --json 2>&1)
   echo "$OUTPUT" | grep -q "\[" && pass "backlinks (JSON output)" || fail "backlinks" "$OUTPUT"
 fi
 
 # Test: graph (ASCII tree output)
-OUTPUT=$(zk graph . --limit 5 2>&1)
+OUTPUT=$(okfw graph . --limit 5 2>&1)
 echo "$OUTPUT" | grep -q "[├└─]" && pass "graph" || fail "graph" "$OUTPUT"
 
 # ── NeoVim plugin tests ────────────────────────────────────────────────
 section "NeoVim plugin"
 
 # Test: plugins loaded
-for plugin in "zk.nvim" "snacks.nvim" "plenary.nvim" "LazyVim" "which-key.nvim" "mason.nvim"; do
+for plugin in "okfw.nvim" "snacks.nvim" "plenary.nvim" "LazyVim" "which-key.nvim" "mason.nvim"; do
   OUTPUT=$(nvim --headless -c "lua for _, p in ipairs(require('lazy').plugins()) do if p.name == '$plugin' then print('FOUND') end end" -c qa 2>&1)
   echo "$OUTPUT" | grep -q "FOUND" && pass "$plugin loaded" || fail "$plugin" "not found"
 done
 
-# Test: all Zk commands registered
-for cmd in ZkSearch ZkNote ZkDaily ZkTodo ZkTemplate ZkIndex ZkGraph ZkRefreshTags ZkTodoList ZkDailyList; do
+# Test: all Okfw commands registered
+for cmd in OkfwSearch OkfwNote OkfwDaily OkfwTodo OkfwTemplate OkfwIndex OkfwGraph OkfwRefreshTags OkfwTodoList OkfwDailyList; do
   OUTPUT=$(nvim --headless -c "lua if vim.api.nvim_get_commands({})['$cmd'] then print('OK') end" -c qa 2>&1)
   echo "$OUTPUT" | grep -q "OK" && pass ":$cmd command" || fail ":$cmd" "not registered"
 done
 
-# Test: zk module setup with correct binary path
-OUTPUT=$(nvim --headless -c 'lua local zk = require("zk"); if zk.config and zk.config.bin == "/home/user/.local/bin/zk" then print("CONFIGURED") end' -c qa 2>&1)
-echo "$OUTPUT" | grep -q "CONFIGURED" && pass "zk.setup() bin=/home/user/.local/bin/zk" || fail "zk.setup" "$OUTPUT"
+# Test: okfw module setup with correct binary path
+OUTPUT=$(nvim --headless -c 'lua local okfw = require("okfw"); if okfw.config and okfw.config.bin == "/home/user/.local/bin/okfw" then print("CONFIGURED") end' -c qa 2>&1)
+echo "$OUTPUT" | grep -q "CONFIGURED" && pass "okfw.setup() bin=/home/user/.local/bin/okfw" || fail "okfw.setup" "$OUTPUT"
 
-# Test: zk module has expected functions
+# Test: okfw module has expected functions
 for fn in create_note daily todo search index tether_note untether_note set_project set_status add_tags validate graph backlinks_panel toggle_backlinks preview_note insert_link complete_tags; do
-  OUTPUT=$(nvim --headless -c "lua if type(require('zk').$fn) == 'function' then print('OK') end" -c qa 2>&1)
-  echo "$OUTPUT" | grep -q "OK" && pass "zk.$fn() exists" || fail "zk.$fn" "not a function"
+  OUTPUT=$(nvim --headless -c "lua if type(require('okfw').$fn) == 'function' then print('OK') end" -c qa 2>&1)
+  echo "$OUTPUT" | grep -q "OK" && pass "okfw.$fn() exists" || fail "okfw.$fn" "not a function"
 done
 
-# Test: snacks.nvim picker integration loads (via require("zk.picker"))
-OUTPUT=$(nvim --headless -c "lua local ok = pcall(require, 'zk.picker'); print(ok and 'OK' or 'FAIL')" -c qa 2>&1)
-echo "$OUTPUT" | grep -q "OK" && pass "snacks picker integration (require zk.picker)" || fail "snacks picker" "failed to load"
+# Test: snacks.nvim picker integration loads (via require("okfw.picker"))
+OUTPUT=$(nvim --headless -c "lua local ok = pcall(require, 'okfw.picker'); print(ok and 'OK' or 'FAIL')" -c qa 2>&1)
+echo "$OUTPUT" | grep -q "OK" && pass "snacks picker integration (require okfw.picker)" || fail "snacks picker" "failed to load"
 
 # Test: total plugin count
 OUTPUT=$(nvim --headless -c 'lua print(#require("lazy").plugins())' -c qa 2>&1)
@@ -250,7 +250,7 @@ else
 fi
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
-rm -rf "$ZKDIR"
+rm -rf "$OKFWDIR"
 
 # ── Summary ──────────────────────────────────────────────────────────────
 section "SUMMARY"

@@ -1,14 +1,14 @@
 ---
 title: Configuration
-description: Configure the Zettelkasten CLI with a CUE config file.
+description: Configure OKF Wiki with a CUE config file.
 ---
 
-Create a config file at `~/.config/zk/config.cue`:
+Create a config file at `~/.config/okfw/config.cue`:
 
 ```cue
-root_path:  "~/zk_vault"
-index_path: ".zk_index"
-graph_path: ".zk_graph.db"
+root_path:  "~/okfw"
+index_path: ".okfw_index"
+graph_path: ".okfw_graph.db"
 editor:     "nvim"
 folders: {
     untethered: "untethered"
@@ -21,11 +21,11 @@ folders: {
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `root_path` | `~/zk_vault` | Root directory for all notes |
-| `index_path` | `.zk_index` | Location of Bleve search index (relative to root) |
-| `graph_path` | `.zk_graph.db` | Location of persistent graph database (relative to root) |
-| `todos_path` | `.zk_todos` | Directory for generated todo lists (relative to root) |
+| `root_path` | `~/okfw` | Root directory for all notes |
+| `index_path` | `.okfw_index` | Location of Bleve search index (relative to root) |
+| `graph_path` | `.okfw_graph.db` | Location of persistent graph database (relative to root) |
+| `todos_path` | `.okfw_todos` | Directory for generated todo lists (relative to root) |
 | `editor` | `nvim` | Editor for opening notes |
-| `folders.untethered` | `untethered` | Subdirectory for untethered notes |
-| `folders.tethered` | `tethered` | Subdirectory for tethered notes |
+| `folders.untethered` | `untethered` | Legacy field; does **not** control placement. Concepts are placed by `--path` or project, and `category` is metadata only. |
+| `folders.tethered` | `tethered` | Legacy field; does **not** control placement (see above). |
 | `folders.tmp` | `tmp` | Subdirectory for temporary notes |

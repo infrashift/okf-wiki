@@ -1,25 +1,25 @@
 ---
 title: Todo Workflow
-description: A comprehensive guide to managing todos with zk directly from NeoVim.
+description: A comprehensive guide to managing todos with okfw directly from NeoVim.
 ---
 
-A comprehensive guide to managing todos with `zk` directly from your editor. Todos are a special type of zettel designed for actionable tasks with status tracking, due dates, priorities, and links to other notes.
+A comprehensive guide to managing todos with `okfw` directly from your editor. Todos are a special type of concept designed for actionable tasks with status tracking, due dates, priorities, and links to other notes.
 
 ---
 
 ## What Are Todos?
 
-Todos in `zk` are not just checkboxes - they're full zettels with:
+Todos in `okfw` are not just checkboxes - they're full concepts with:
 - **Status tracking** - Open, in progress, or closed
 - **Due dates** - Target completion dates
 - **Priority levels** - High, medium, or low
-- **Links** - Connections to other zettels, including daily notes
+- **Links** - Connections to other concepts, including daily notes
 - **Full-text search** - Todos are indexed and searchable
 - **Rich content** - Descriptions, acceptance criteria, notes
 
 **Key characteristics:**
-- **Type: todo** - A distinct zettel type for actionable tasks
-- **Linkable** - Can link to any other zettel (notes, daily notes, other todos)
+- **Kind: todo** - A distinct structured kind for actionable tasks (`kind: "todo"`)
+- **Linkable** - Can link to any other concept (notes, daily notes, other todos)
 - **Queryable** - Filter by status, priority, due date, project
 - **Persistent** - Never lost, always searchable, even when closed
 
@@ -29,7 +29,7 @@ Todos in `zk` are not just checkboxes - they're full zettels with:
 
 ### Traditional Task Managers
 
-| Feature | Task Managers | zk Todos |
+| Feature | Task Managers | okfw Todos |
 |---------|--------------|----------|
 | Rich descriptions | Limited | Full markdown |
 | Links to knowledge | None | Native linking |
@@ -37,7 +37,7 @@ Todos in `zk` are not just checkboxes - they're full zettels with:
 | Context preservation | Lost on completion | Permanent record |
 | Integration | Separate app | In your editor |
 
-### The zk Advantage
+### The okfw Advantage
 
 1. **Context lives with the task** - Add notes, links, and details directly
 2. **Tasks link to knowledge** - Connect todos to related notes
@@ -48,13 +48,14 @@ Todos in `zk` are not just checkboxes - they're full zettels with:
 
 ## The Todo Structure
 
-`zk` creates todos with this frontmatter:
+`okfw` creates todos with this frontmatter:
 
 ```markdown
 ---
-id: "202602131045"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Fix authentication bug"
 type: "todo"
+kind: "todo"
 project: "my-project"
 category: "untethered"
 status: "open"
@@ -64,6 +65,7 @@ tags:
   - "todo"
   - "bug"
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Fix authentication bug
@@ -85,8 +87,10 @@ Might be related to session timeout configuration.
 
 ## Related
 
-- [[202602120930|Session Management Architecture]]
+- [Session Management Architecture](/auth/session-management-architecture--019f0312.md)
 ```
+
+A todo carries both `kind: "todo"` (the structured kind that drives status/due/priority behavior) and `type: "todo"` (the required, free-form OKF kind, which defaults to the `kind` value). Links such as the one under `## Related` are vanilla markdown links pointing at a concept's file path.
 
 ### Status Values
 
@@ -112,45 +116,45 @@ Might be related to session timeout configuration.
 
 ```vim
 " Basic todo
-:ZkTodo Fix the login bug
+:OkfwTodo Fix the login bug
 
 " With due date
-:ZkTodo Update documentation --due 2026-02-20
+:OkfwTodo Update documentation --due 2026-02-20
 
 " With priority
-:ZkTodo Critical security fix --priority high
+:OkfwTodo Critical security fix --priority high
 
 " With project
-:ZkTodo Refactor auth module --project my-project
+:OkfwTodo Refactor auth module --project my-project
 
 " Multiple options
-:ZkTodo Fix auth --due 2026-02-20 --priority high
+:OkfwTodo Fix auth --due 2026-02-20 --priority high
 ```
 
 ### Managing Todo Status
 
-Use the `\s` keymap (buffer-local on todo zettels) to open a status picker:
+Use the `\s` keymap (buffer-local on todo concepts) to open a status picker:
 
 ```
 \s  →  Pick: open / in_progress / closed
 ```
 
-This calls `zk set-status` under the hood.
+This calls `okfw set-status` under the hood.
 
 ### Generating Todo Lists
 
 ```vim
 " Generate markdown todo list
-:ZkTodoList
+:OkfwTodoList
 
 " Project-specific list
-:ZkTodoList my-project
+:OkfwTodoList my-project
 
 " Due today
-:ZkTodoList today
+:OkfwTodoList today
 
 " Due this week
-:ZkTodoList week
+:OkfwTodoList week
 ```
 
 ---
@@ -161,18 +165,18 @@ This calls `zk set-status` under the hood.
 
 ```lua
 -- Basic todo
-require("zk").todo({ title = "Fix the bug" })
+require("okfw").todo({ title = "Fix the bug" })
 
 -- With options
-require("zk").todo({
+require("okfw").todo({
     title = "Update documentation",
     due = "2026-02-20",
     priority = "high",
     project = "my-project",
 })
 
--- Linked to specific zettels
-require("zk").todo({
+-- Linked to specific concepts
+require("okfw").todo({
     title = "Follow up",
     links = { "202602131045", "202602131100" },
 })
@@ -182,45 +186,45 @@ require("zk").todo({
 
 ```lua
 -- Set status on current buffer's todo
-require("zk").set_status("closed")
-require("zk").set_status("in_progress")
-require("zk").set_status("open")
+require("okfw").set_status("closed")
+require("okfw").set_status("in_progress")
+require("okfw").set_status("open")
 
 -- Set status on a specific file
-require("zk").set_status("closed", "./path/to/todo.md")
+require("okfw").set_status("closed", "./path/to/todo.md")
 ```
 
 ### Browsing Todos
 
 ```lua
 -- Open todos (picker)
-require("zk").todo_picker()
+require("okfw").todo_picker()
 
 -- Closed todos
-require("zk").todo_picker({ closed = true })
+require("okfw").todo_picker({ closed = true })
 
 -- Filtered
-require("zk").todo_picker({
+require("okfw").todo_picker({
     project = "my-project",
     priority = "high",
 })
 
 -- Due this week
-require("zk").todo_picker({ this_week = true })
+require("okfw").todo_picker({ this_week = true })
 
 -- Overdue
-require("zk").todo_picker({ overdue = true })
+require("okfw").todo_picker({ overdue = true })
 
 -- Get todos synchronously
-local todos = require("zk").todos_sync({ this_week = true })
+local todos = require("okfw").todos_sync({ this_week = true })
 ```
 
 ### Generating Lists
 
 ```lua
-require("zk").todo_list()
-require("zk").todo_list({ project = "my-project" })
-require("zk").todo_list({ today = true })
+require("okfw").todo_list()
+require("okfw").todo_list({ project = "my-project" })
+require("okfw").todo_list({ today = true })
 ```
 
 ---
@@ -231,7 +235,7 @@ require("zk").todo_list({ today = true })
 
 1. **Open today's daily note:**
    ```vim
-   :ZkDaily
+   :OkfwDaily
    ```
 
 2. **Review and plan** from your daily note — create todos for tasks.
@@ -240,7 +244,7 @@ require("zk").todo_list({ today = true })
 
 **Capture task from idea:**
 ```vim
-:ZkTodo Investigate the memory leak
+:OkfwTodo Investigate the memory leak
 ```
 
 **Start working on a task:**
@@ -255,7 +259,7 @@ Press `\s` and select `closed` from the picker.
 
 2. **Generate tomorrow's list:**
    ```vim
-   :ZkTodoList today
+   :OkfwTodoList today
    ```
 
 ---
@@ -265,7 +269,7 @@ Press `\s` and select `closed` from the picker.
 ### Link Todos via Lua API
 
 ```lua
-require("zk").todo({
+require("okfw").todo({
     title = "Update auth",
     links = { "202602101200", "202602111430" },
 })
@@ -281,8 +285,8 @@ To see what notes link TO a todo, press `\b` to toggle the backlinks panel.
 
 ```lua
 -- Todo management
-vim.keymap.set("n", "<leader>zt", "<cmd>ZkTodo<cr>", { desc = "New todo" })
--- \s is automatically mapped on todo zettels (status picker)
+vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTodo<cr>", { desc = "New todo" })
+-- \s is automatically mapped on todo concepts (status picker)
 ```
 
 ---
@@ -298,7 +302,7 @@ Daily Note (capture thoughts)
     |
 Identify actionable item
     |
-Create todo (:ZkTodo)
+Create todo (:OkfwTodo)
     |
 Todo tracks the task
 ```
@@ -306,7 +310,7 @@ Todo tracks the task
 ### Review Pattern
 
 ```
-Morning: Open daily note (:ZkDaily)
+Morning: Open daily note (:OkfwDaily)
     |
 Check linked todos from yesterday
     |
@@ -329,7 +333,7 @@ Still searchable (permanent record)
 
 ## Generated Todo Lists
 
-The `:ZkTodoList` command generates a markdown file you can review or share:
+The `:OkfwTodoList` command generates a markdown file you can review or share:
 
 ```markdown
 # Todo List
@@ -338,18 +342,18 @@ Generated: 2026-02-13 15:30
 
 ## High Priority
 
-- [ ] **Fix authentication bug** [[202602131045]]
+- [ ] **Fix authentication bug** [link](/my-project/fix-authentication-bug--019f0494.md)
   - Due: 2026-02-15
   - Project: my-project
 
 ## Medium Priority
 
-- [ ] **Update documentation** [[202602131100]]
+- [ ] **Update documentation** [link](/update-documentation--019f04a1.md)
   - Due: 2026-02-20
 
 ## Other
 
-- [ ] **Refactor tests** [[202602131200]]
+- [ ] **Refactor tests** [link](/refactor-tests--019f04b8.md)
 
 ---
 
@@ -364,11 +368,11 @@ Total: 3 todos
 
 | Action | Command / Keymap | Description |
 |--------|-----------------|-------------|
-| New todo | `:ZkTodo [title]` | Create a new todo |
+| New todo | `:OkfwTodo [title]` | Create a new todo |
 | Set status | `\s` (buffer-local) | Pick open / in_progress / closed |
 | Add tags | `\a` (buffer-local) | Prompt for tags and add to frontmatter |
 | Validate frontmatter | `\v` (buffer-local) | Validate frontmatter against CUE schema |
-| Generate list | `:ZkTodoList` | Markdown summary of open todos |
+| Generate list | `:OkfwTodoList` | Markdown summary of open todos |
 
 ---
 
@@ -379,7 +383,7 @@ Total: 3 todos
 3. **Don't delete, close** - Closed todos are a record of accomplishment
 4. **Add descriptions** - Your future self will thank you
 5. **Link related notes** - Build context around tasks
-6. **Review regularly** - Use `:ZkTodoList` to stay on track
+6. **Review regularly** - Use `:OkfwTodoList` to stay on track
 
 ---
 

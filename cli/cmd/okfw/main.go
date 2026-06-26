@@ -6,18 +6,18 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"okfw/cli/internal/config"
+	"okfw/cli/internal/gitctx"
+	"okfw/cli/internal/graph"
+	"okfw/cli/internal/graphdb"
+	"okfw/cli/internal/index"
+	"okfw/cli/internal/templates"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
-	"zk/cli/internal/config"
-	"zk/cli/internal/graph"
-	"zk/cli/internal/graphdb"
-	"zk/cli/internal/index"
-	"zk/cli/internal/templates"
-	"zk/cli/internal/zettel"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -33,21 +33,23 @@ func main() {
 	var graphLimitFlag int
 	var outputFlag string
 	var templateFlag string
+	var descriptionFlag string
+	var pathFlag string
 	var statusFlag string
 	var priorityFlag string
 
-	var rootCmd = &cobra.Command{Use: "zk"}
+	var rootCmd = &cobra.Command{Use: "okfw"}
 
 	var createCmd = &cobra.Command{
 		Use:   "create [title]",
-		Short: "Create a new zettel",
-		Long: `Create a new zettel with optional template.
+		Short: "Create a new concept",
+		Long: `Create a new concept with optional template.
 
 Examples:
-  zk create "My Note"                                     # Basic untethered note
-  zk create "Meeting Notes" --template meeting             # From template
-  zk create "Feature Spec" -T feature -p myproj            # Template with project
-  zk create "Refined Note" --category tethered -p myproj   # Tethered note`,
+  okfw create "My Note"                                     # Basic untethered note
+  okfw create "Meeting Notes" --template meeting             # From template
+  okfw create "Feature Spec" -T feature -p myproj            # Template with project
+  okfw create "Refined Note" --category tethered -p myproj   # Tethered note`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -61,7 +63,7 @@ Examples:
 			}
 
 			cwd, _ := os.Getwd()
-			project := zettel.GetGitContext(cwd)
+			project := gitctx.GetGitContext(cwd)
 			if projectFlag != "" {
 				project = projectFlag
 			}
@@ -110,12 +112,11 @@ Examples:
 				}
 			}
 
-			// Determine output directory
-			var outputDir string
-			if category == "tethered" {
-				outputDir = filepath.Join(cfg.RootPath, cfg.Folders.Tethered)
-			} else {
-				outputDir = filepath.Join(cfg.RootPath, cfg.Folders.Untethered)
+			// Determine output directory: explicit --path wins, else the project
+			// folder, else the bundle root. Category is metadata, not a path.
+			outputDir, err := conceptDir(cfg, pathFlag, project)
+			if err != nil {
+				return err
 			}
 
 			// Create directory if it doesn't exist
@@ -123,8 +124,17 @@ Examples:
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 
+			// Apply optional OKF description.
+			if descriptionFlag != "" {
+				updated, derr := updateFrontmatter([]byte(content), map[string]string{"description": descriptionFlag})
+				if derr != nil {
+					return fmt.Errorf("failed to set description: %w", derr)
+				}
+				content = string(updated)
+			}
+
 			// Write file
-			filePath := filepath.Join(outputDir, id+".md")
+			filePath := filepath.Join(outputDir, noteFilename(outputDir, title, id))
 			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 				return fmt.Errorf("failed to write file: %w", err)
 			}
@@ -140,6 +150,85 @@ Examples:
 		},
 	}
 
+	var migrateDryRun bool
+	var migrateCmd = &cobra.Command{
+		Use:   "migrate-okf [path]",
+		Short: "Migrate a legacy bundle to OKF conventions",
+		Long: `Convert a legacy bundle to OKF conventions:
+  - relocate ~/zk_vault to the configured bundle root if present
+  - rename concept files to hybrid slug--shortid.md names
+  - rewrite legacy [[id]] / [[id|title]] links to vanilla markdown links
+  - rebuild the graph database and search index
+
+Idempotent and safe to re-run. Use --dry-run to preview changes.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			root := cfg.RootPath
+			if len(args) > 0 {
+				root = args[0]
+			}
+			return runMigrate(cfg, root, migrateDryRun)
+		},
+	}
+
+	var rootPathCmd = &cobra.Command{
+		Use:   "root",
+		Short: "Print the configured bundle root path",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			fmt.Println(cfg.RootPath)
+			return nil
+		},
+	}
+
+	var indexMdCmd = &cobra.Command{
+		Use:   "index-md [path]",
+		Short: "Generate OKF index.md directory listings",
+		Long: `Generate an OKF index.md in every bundle directory for progressive
+disclosure. The root index.md carries the okf_version declaration; all other
+index files have no frontmatter. Safe to re-run (overwrites).`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			root := cfg.RootPath
+			if len(args) > 0 {
+				root = args[0]
+			}
+			return runIndexMd(cfg, root)
+		},
+	}
+
+	var logCmd = &cobra.Command{
+		Use:   "log [path]",
+		Short: "Generate OKF log.md from git history",
+		Long: `Render an OKF log.md at the bundle root from git history, grouped by
+date (newest first). Concept additions/modifications/deletions become
+Creation/Update/Deprecation entries using each commit's message. Requires the
+bundle to be a git repository.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load("")
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+			root := cfg.RootPath
+			if len(args) > 0 {
+				root = args[0]
+			}
+			return runLog(cfg, root)
+		},
+	}
+
 	var templatesCmd = &cobra.Command{
 		Use:   "templates",
 		Short: "List available note templates",
@@ -148,7 +237,7 @@ Examples:
 Templates provide pre-defined structures for common note types like
 meeting notes, book reviews, user stories, and more.
 
-Use with: zk create "title" --template <name>`,
+Use with: okfw create "title" --template <name>`,
 		Run: func(cmd *cobra.Command, args []string) {
 			names := templates.List()
 			sort.Strings(names)
@@ -159,14 +248,14 @@ Use with: zk create "title" --template <name>`,
 				tmpl, _ := templates.Get(name)
 				fmt.Printf("  %-15s %s [%s]\n", name, tmpl.Description, tmpl.Category)
 			}
-			fmt.Println("\nUsage: zk create \"title\" --template <name>")
+			fmt.Println("\nUsage: okfw create \"title\" --template <name>")
 		},
 	}
 
 	var indexCmd = &cobra.Command{
 		Use:   "index [file_path]",
-		Short: "Index a zettel for searching",
-		Long: `Index a single zettel file or all zettels in a directory.
+		Short: "Index a concept for searching",
+		Long: `Index a single concept file or all concepts in a directory.
 
 If given a file, indexes that file.
 If given a directory, indexes all .md files recursively.`,
@@ -198,7 +287,7 @@ If given a directory, indexes all .md files recursively.`,
 					if fi.IsDir() && fi.Name() == "ephemeral" {
 						return filepath.SkipDir
 					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") {
+					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
 						files = append(files, p)
 					}
 					return nil
@@ -225,24 +314,25 @@ If given a directory, indexes all .md files recursively.`,
 	}
 
 	var typeFlag string
+	var kindFlag string
 	var dueBeforeFlag string
 	var dueAfterFlag string
 
 	var searchCmd = &cobra.Command{
 		Use:   "search [query]",
-		Short: "Search zettels",
-		Long: `Search zettels by full-text query and/or field filters.
+		Short: "Search concepts",
+		Long: `Search concepts by full-text query and/or field filters.
 
 Examples:
-  zk search "authentication"              # Full-text search
-  zk search --project myproject           # Filter by project
-  zk search --category tethered           # Filter by category
-  zk search --tag golang --tag api        # Filter by tags (AND)
-  zk search --type todo                   # Filter by type
-  zk search --status open --priority high # Filter todos by status and priority
-  zk search --due-before 2026-03-01       # Todos due before a date
-  zk search --due-after 2026-02-01        # Todos due after a date
-  zk search "auth" --project myproject    # Combined search`,
+  okfw search "authentication"              # Full-text search
+  okfw search --project myproject           # Filter by project
+  okfw search --category tethered           # Filter by category
+  okfw search --tag golang --tag api        # Filter by tags (AND)
+  okfw search --type todo                   # Filter by type
+  okfw search --status open --priority high # Filter todos by status and priority
+  okfw search --due-before 2026-03-01       # Todos due before a date
+  okfw search --due-after 2026-02-01        # Todos due after a date
+  okfw search "auth" --project myproject    # Combined search`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
@@ -259,6 +349,7 @@ Examples:
 				Project:   projectFlag,
 				Category:  categoryFlag,
 				Type:      typeFlag,
+				Kind:      kindFlag,
 				Tags:      tagsFlag,
 				Limit:     limitFlag,
 				Status:    statusFlag,
@@ -296,24 +387,24 @@ Examples:
 
 	var graphCmd = &cobra.Command{
 		Use:   "graph [path]",
-		Short: "Show an ASCII tree of zettel relationships",
-		Long: `Print an ASCII tree showing relationships between zettels.
+		Short: "Show an ASCII tree of concept relationships",
+		Long: `Print an ASCII tree showing relationships between concepts.
 
 The tree is printed to stdout so it can be viewed directly in the terminal
 or piped to other tools. A summary line (N nodes, M edges) is printed to
 stderr so it does not pollute piped output.
 
-If no path is given, the configured zettelkasten root directory is used.
-When a graph database (.zk_graph.db) exists, it is used for fast queries.
+If no path is given, the configured bundle root directory is used.
+When a graph database (.okfw_graph.db) exists, it is used for fast queries.
 Use --sync to force a fresh sync before querying.
 
 Examples:
-  zk graph                             # Tree from zettelkasten root
-  zk graph ~/zettelkasten              # Tree of all zettels in directory
-  zk graph --start 20260213-abc-123    # Tree centered on a specific zettel
-  zk graph --depth 3                   # Traverse up to 3 hops from start
-  zk graph --limit 20                  # Show up to 20 nodes (default: 10)
-  zk graph --sync                      # Sync graph DB before querying`,
+  okfw graph                             # Tree from bundle root
+  okfw graph ~/bundle              # Tree of all concepts in directory
+  okfw graph --start 20260213-abc-123    # Tree centered on a specific concept
+  okfw graph --depth 3                   # Traverse up to 3 hops from start
+  okfw graph --limit 20                  # Show up to 20 nodes (default: 10)
+  okfw graph --sync                      # Sync graph DB before querying`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -352,7 +443,7 @@ Examples:
 					return err
 				}
 			} else {
-				g, err = buildGraphFromPath(path)
+				g, err = buildGraphFromPath(path, cfg.RootPath)
 				if err != nil {
 					return err
 				}
@@ -402,7 +493,7 @@ you must provide it via --project flag or be in a git repository.`,
 			}
 			if project == "" {
 				cwd, _ := os.Getwd()
-				project = zettel.GetGitContext(cwd)
+				project = gitctx.GetGitContext(cwd)
 			}
 			if project == "" {
 				return fmt.Errorf("tethered notes require a project; use --project flag or run from a git repository")
@@ -439,8 +530,8 @@ you must provide it via --project flag or be in a git repository.`,
 	var untetherCmd = &cobra.Command{
 		Use:   "untether [file_path]",
 		Short: "Untether a tethered note (set category to untethered)",
-		Long: `Untether a tethered note by changing its category to untethered and clearing the project.`,
-		Args: cobra.ExactArgs(1),
+		Long:  `Untether a tethered note by changing its category to untethered and clearing the project.`,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
 
@@ -486,7 +577,7 @@ you must provide it via --project flag or be in a git repository.`,
 
 	var setProjectCmd = &cobra.Command{
 		Use:   "set-project [file_path] [project]",
-		Short: "Set or update the project for a zettel",
+		Short: "Set or update the project for a concept",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
@@ -524,16 +615,16 @@ you must provide it via --project flag or be in a git repository.`,
 
 	var backlinksCmd = &cobra.Command{
 		Use:   "backlinks [id_or_file]",
-		Short: "Find all notes that link to a zettel",
-		Long: `Find all zettels that contain links to the specified zettel.
+		Short: "Find all notes that link to a concept",
+		Long: `Find all concepts that contain links to the specified concept.
 
 Links are detected in the format [[id]] or [[id|title]].
 When a graph database exists, uses O(1) indexed lookup instead of filesystem scan.
 
 Examples:
-  zk backlinks 202602131045           # Find backlinks by ID
-  zk backlinks ./notes/202602131045.md  # Find backlinks by file path
-  zk backlinks 202602131045 --json    # Output as JSON`,
+  okfw backlinks 202602131045           # Find backlinks by ID
+  okfw backlinks ./notes/202602131045.md  # Find backlinks by file path
+  okfw backlinks 202602131045 --json    # Output as JSON`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -615,7 +706,7 @@ Examples:
 					if fi.IsDir() && fi.Name() == "ephemeral" {
 						return filepath.SkipDir
 					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") {
+					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
 						files = append(files, p)
 					}
 					return nil
@@ -631,7 +722,8 @@ Examples:
 					}
 
 					body := extractBody(content)
-					links := graph.ExtractLinks(body)
+					absPath, _ := filepath.Abs(filePath)
+					links := config.ResolveBodyLinkIDs(body, absPath, searchPath)
 
 					for _, linkID := range links {
 						if linkID == targetID {
@@ -689,19 +781,19 @@ Examples:
 	var exportCmd = &cobra.Command{
 		Use:   "export [path]",
 		Short: "Export graph subset as portable markdown to ephemeral/",
-		Long: `Export a subset of the zettelkasten as portable markdown files.
+		Long: `Export a subset of the bundle as portable markdown files.
 
-Runs the same graph query as 'zk graph' (BFS, --limit, --depth, --start),
+Runs the same graph query as 'okfw graph' (BFS, --limit, --depth, --start),
 then copies each note into <root>/ephemeral/ with [[id|title]] links
 converted to [title](id.md) relative links that work in any markdown viewer.
 
 The ephemeral/ directory has a .gitignore that ignores all its contents.
 
 Examples:
-  zk export                             # Export from zettelkasten root
-  zk export ~/zettelkasten --limit 5    # Export 5 closest notes
-  zk export --start 20260213-abc-123    # Export from a specific zettel
-  zk export --depth 2                   # Export up to 2 hops from start`,
+  okfw export                             # Export from bundle root
+  okfw export ~/bundle --limit 5    # Export 5 closest notes
+  okfw export --start 20260213-abc-123    # Export from a specific concept
+  okfw export --depth 2                   # Export up to 2 hops from start`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -714,7 +806,7 @@ Examples:
 				path = args[0]
 			}
 
-			g, err := buildGraphFromPath(path)
+			g, err := buildGraphFromPath(path, cfg.RootPath)
 			if err != nil {
 				return err
 			}
@@ -724,10 +816,13 @@ Examples:
 				return err
 			}
 
-			// Build nodeMap from result set
-			nodeMap := make(map[string]*graph.Node, len(nodes))
+			// Map each exported concept's bundle-relative path to its ID so that
+			// in-bundle markdown links can be flattened to <id>.md in the export.
+			pathToID := make(map[string]string, len(nodes))
 			for _, n := range nodes {
-				nodeMap[n.ID] = n
+				if rel, err := filepath.Rel(cfg.RootPath, n.FilePath); err == nil {
+					pathToID[filepath.ToSlash(rel)] = n.ID
+				}
 			}
 
 			// Prepare ephemeral directory
@@ -736,7 +831,7 @@ Examples:
 				return err
 			}
 
-			// Export each note with transformed links
+			// Export each note with links flattened to the exported file names.
 			for _, node := range nodes {
 				content, err := os.ReadFile(node.FilePath)
 				if err != nil {
@@ -744,7 +839,19 @@ Examples:
 					continue
 				}
 
-				transformed := graph.TransformLinks(string(content), nodeMap)
+				fromDir := ""
+				if rel, err := filepath.Rel(cfg.RootPath, filepath.Dir(node.FilePath)); err == nil {
+					fromDir = filepath.ToSlash(rel)
+					if fromDir == "." {
+						fromDir = ""
+					}
+				}
+				transformed := graph.RewriteLinks(string(content), func(href string) string {
+					if id, ok := pathToID[graph.NormalizeTarget(href, fromDir)]; ok {
+						return id + ".md"
+					}
+					return href
+				})
 				outPath := filepath.Join(ephemeralDir, node.ID+".md")
 				if err := os.WriteFile(outPath, []byte(transformed), 0644); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to write %s: %v\n", outPath, err)
@@ -760,12 +867,16 @@ Examples:
 	// Flags
 	createCmd.Flags().StringVar(&noteCategory, "category", "untethered", "Note category (untethered or tethered)")
 	createCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Project context (auto-detected from git if not provided)")
-	createCmd.Flags().StringVarP(&templateFlag, "template", "T", "", "Use a template (see 'zk templates' for list)")
+	createCmd.Flags().StringVarP(&templateFlag, "template", "T", "", "Use a template (see 'okfw templates' for list)")
+	createCmd.Flags().StringVarP(&descriptionFlag, "description", "d", "", "One-sentence summary (OKF description)")
+	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Preview changes without modifying the bundle")
+	createCmd.Flags().StringVar(&pathFlag, "path", "", "Place the concept in a bundle subdirectory (e.g. projects/okf)")
 	createCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Additional tags (comma-separated)")
 
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
 	searchCmd.Flags().StringVarP(&categoryFlag, "category", "c", "", "Filter by category (untethered/tethered)")
-	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by type (note/todo/daily-note/issue)")
+	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
+	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/todo/daily-note/issue)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by status (open/in_progress/closed)")
 	searchCmd.Flags().StringVar(&priorityFlag, "priority", "", "Filter by priority (high/medium/low)")
@@ -775,12 +886,12 @@ Examples:
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
 
 	graphCmd.Flags().IntVarP(&graphLimitFlag, "limit", "l", 10, "Maximum number of nodes to display")
-	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific zettel ID")
+	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific concept ID")
 	graphCmd.Flags().IntVar(&graphDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
 	graphCmd.Flags().BoolVar(&graphSyncFlag, "sync", false, "Sync graph database before querying")
 
 	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of notes to export")
-	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Start export from a specific zettel ID")
+	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Start export from a specific concept ID")
 	exportCmd.Flags().IntVar(&exportDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
 
 	backlinksCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
@@ -801,12 +912,12 @@ Daily notes provide a consistent place for capturing thoughts, tasks, and
 reflections throughout the day. Each day has exactly one daily note.
 
 Examples:
-  zk daily                    # Today's daily note
-  zk daily --yesterday        # Yesterday's daily note
-  zk daily --date 2026-02-10  # Specific date
-  zk daily --list             # List recent daily notes
-  zk daily --list --week      # This week's daily notes
-  zk daily --list --month     # This month's daily notes`,
+  okfw daily                    # Today's daily note
+  okfw daily --yesterday        # Yesterday's daily note
+  okfw daily --date 2026-02-10  # Specific date
+  okfw daily --list             # List recent daily notes
+  okfw daily --list --week      # This week's daily notes
+  okfw daily --list --month     # This month's daily notes`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
@@ -854,13 +965,13 @@ Examples:
 		Short: "Create a new todo",
 		Long: `Create a new actionable todo item.
 
-Todos are a special type of zettel with status tracking, due dates, and priority.
+Todos are a special type of concept with status tracking, due dates, and priority.
 
 Examples:
-  zk todo "Fix login bug"                          # Basic todo
-  zk todo "Update docs" --due 2026-02-20           # With due date
-  zk todo "Critical fix" --priority high           # With priority
-  zk todo "Feature work" --project myproj          # With project`,
+  okfw todo "Fix login bug"                          # Basic todo
+  okfw todo "Update docs" --due 2026-02-20           # With due date
+  okfw todo "Critical fix" --priority high           # With priority
+  okfw todo "Feature work" --project myproj          # With project`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -872,7 +983,7 @@ Examples:
 			id := uuid.Must(uuid.NewV7()).String()
 
 			cwd, _ := os.Getwd()
-			project := zettel.GetGitContext(cwd)
+			project := gitctx.GetGitContext(cwd)
 			if projectFlag != "" {
 				project = projectFlag
 			}
@@ -896,13 +1007,16 @@ Examples:
 				return fmt.Errorf("failed to generate todo: %w", err)
 			}
 
-			// Todos go in untethered directory
-			outputDir := filepath.Join(cfg.RootPath, cfg.Folders.Untethered)
+			// Placement: --path wins, else the project folder, else bundle root.
+			outputDir, err := conceptDir(cfg, pathFlag, project)
+			if err != nil {
+				return err
+			}
 			if err := os.MkdirAll(outputDir, 0755); err != nil {
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 
-			filePath := filepath.Join(outputDir, id+".md")
+			filePath := filepath.Join(outputDir, noteFilename(outputDir, title, id))
 			if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 				return fmt.Errorf("failed to write file: %w", err)
 			}
@@ -923,6 +1037,7 @@ Examples:
 	}
 
 	todoCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Project context")
+	todoCmd.Flags().StringVar(&pathFlag, "path", "", "Place the todo in a bundle subdirectory (e.g. projects/okf)")
 	todoCmd.Flags().StringVar(&dueFlag, "due", "", "Due date (YYYY-MM-DD)")
 	todoCmd.Flags().StringVar(&priorityFlag, "priority", "", "Priority (high, medium, low)")
 	todoCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Additional tags")
@@ -933,9 +1048,9 @@ Examples:
 		Long: `Set the status of a todo to open, in_progress, or closed.
 
 Examples:
-  zk set-status 202602131045 closed          # By ID
-  zk set-status ./path/to/todo.md in_progress # By file path
-  zk set-status ./path/to/todo.md open        # Reopen a closed todo`,
+  okfw set-status 202602131045 closed          # By ID
+  okfw set-status ./path/to/todo.md in_progress # By file path
+  okfw set-status ./path/to/todo.md open        # Reopen a closed todo`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			status := args[1]
@@ -949,7 +1064,7 @@ Examples:
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			filePath, err := resolveZettelPath(cfg, args[0])
+			filePath, err := resolveConceptPath(cfg, args[0])
 			if err != nil {
 				return err
 			}
@@ -965,7 +1080,7 @@ Examples:
 			}
 
 			if !z.IsTodo() {
-				return fmt.Errorf("note is not a todo (type: %s)", z.GetType())
+				return fmt.Errorf("note is not a todo (type: %s)", z.GetKind())
 			}
 
 			if z.Status == status {
@@ -1019,12 +1134,12 @@ Examples:
 
 	var addTagsCmd = &cobra.Command{
 		Use:   "add-tags [id_or_file] [tags...]",
-		Short: "Add tags to a zettel",
-		Long: `Add one or more tags to a zettel's frontmatter. Duplicate tags are ignored.
+		Short: "Add tags to a concept",
+		Long: `Add one or more tags to a concept's frontmatter. Duplicate tags are ignored.
 
 Examples:
-  zk add-tags ./path/to/note.md golang api
-  zk add-tags 202602131045 security review`,
+  okfw add-tags ./path/to/note.md golang api
+  okfw add-tags 202602131045 security review`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			filePath := args[0]
@@ -1035,7 +1150,7 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("failed to load config: %w", err)
 				}
-				filePath, err = resolveZettelPath(cfg, args[0])
+				filePath, err = resolveConceptPath(cfg, args[0])
 				if err != nil {
 					return err
 				}
@@ -1074,6 +1189,12 @@ Examples:
 				return fmt.Errorf("failed to update frontmatter: %w", err)
 			}
 
+			// Bump the OKF timestamp (last meaningful change).
+			newContent, err = updateFrontmatter(newContent, nil)
+			if err != nil {
+				return fmt.Errorf("failed to update timestamp: %w", err)
+			}
+
 			if err := os.WriteFile(filePath, newContent, 0644); err != nil {
 				return fmt.Errorf("failed to write file: %w", err)
 			}
@@ -1092,16 +1213,35 @@ Examples:
 		},
 	}
 
+	var validateOKF bool
 	var validateCmd = &cobra.Command{
-		Use:   "validate [id_or_file]",
-		Short: "Validate a zettel's frontmatter",
-		Long: `Validate a zettel's frontmatter against the CUE schema and business rules.
+		Use:   "validate [id_or_file_or_path]",
+		Short: "Validate a concept's frontmatter, or a bundle's OKF conformance",
+		Long: `Validate a concept's frontmatter against the CUE schema and business rules,
+or check a whole bundle for OKF conformance with --okf.
 
 Examples:
-  zk validate ./path/to/note.md
-  zk validate 202602131045`,
-		Args: cobra.ExactArgs(1),
+  okfw validate ./path/to/note.md
+  okfw validate 202602131045
+  okfw validate --okf                 # conformance check of the bundle root
+  okfw validate --okf ~/okfw          # conformance check of a path`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if validateOKF {
+				cfg, err := config.Load("")
+				if err != nil {
+					return fmt.Errorf("failed to load config: %w", err)
+				}
+				root := cfg.RootPath
+				if len(args) > 0 {
+					root = args[0]
+				}
+				return runValidateOKF(cfg, root)
+			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("a concept id or file is required (or use --okf to check the bundle)")
+			}
 			filePath := args[0]
 
 			// If it looks like an ID (not a file path), resolve it
@@ -1110,7 +1250,7 @@ Examples:
 				if err != nil {
 					return fmt.Errorf("failed to load config: %w", err)
 				}
-				filePath, err = resolveZettelPath(cfg, args[0])
+				filePath, err = resolveConceptPath(cfg, args[0])
 				if err != nil {
 					return err
 				}
@@ -1126,7 +1266,7 @@ Examples:
 				return fmt.Errorf("validation failed: %w", err)
 			}
 
-			fmt.Printf("Valid %s: %s\n", z.GetType(), z.Title)
+			fmt.Printf("Valid %s: %s\n", z.GetKind(), z.Title)
 			return nil
 		},
 	}
@@ -1137,14 +1277,14 @@ Examples:
 		Long: `List and search todos with various filters.
 
 Examples:
-  zk todos                        # All open todos
-  zk todos --closed               # All closed todos
-  zk todos --project myproj       # Filter by project
-  zk todos --priority high        # Filter by priority
-  zk todos --overdue              # Overdue todos
-  zk todos --due today            # Due today
-  zk todos --due this-week        # Due this week
-  zk todos "fix bug"              # Full-text search in todos`,
+  okfw todos                        # All open todos
+  okfw todos --closed               # All closed todos
+  okfw todos --project myproj       # Filter by project
+  okfw todos --priority high        # Filter by priority
+  okfw todos --overdue              # Overdue todos
+  okfw todos --due today            # Due today
+  okfw todos --due this-week        # Due this week
+  okfw todos "fix bug"              # Full-text search in todos`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
@@ -1158,7 +1298,7 @@ Examples:
 			defer idx.Close()
 
 			opts := index.SearchOptions{
-				Type:     "todo",
+				Kind:     "todo",
 				Project:  projectFlag,
 				Tags:     tagsFlag,
 				Limit:    limitFlag,
@@ -1232,10 +1372,10 @@ Examples:
 The generated file is placed in the configured todos_path directory.
 
 Examples:
-  zk todo-list                           # All open todos
-  zk todo-list --project myproj          # Project-specific list
-  zk todo-list --today                   # Due today
-  zk todo-list --output my-todos.md      # Custom filename`,
+  okfw todo-list                           # All open todos
+  okfw todo-list --project myproj          # Project-specific list
+  okfw todo-list --today                   # Due today
+  okfw todo-list --output my-todos.md      # Custom filename`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
@@ -1249,7 +1389,7 @@ Examples:
 			defer idx.Close()
 
 			opts := index.SearchOptions{
-				Type:    "todo",
+				Kind:    "todo",
 				Project: projectFlag,
 				Limit:   200, // Higher limit for list generation
 			}
@@ -1332,7 +1472,7 @@ Examples:
 	var helloCmd = &cobra.Command{
 		Use:   "hello",
 		Short: "Start your day by creating a dated branch",
-		Long: `Start your zettelkasten session by creating a new branch from main.
+		Long: `Start your bundle session by creating a new branch from main.
 
 The branch name will be today's date in YYYYMMDD format.
 
@@ -1342,14 +1482,14 @@ This command will:
 3. Create a new branch named with today's date
 
 Examples:
-  zk hello    # Creates branch like "20260213" from main`,
+  okfw hello    # Creates branch like "20260213" from main`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
 				return fmt.Errorf("failed to load config: %w", err)
 			}
 
-			// Determine working directory (use zettelkasten root if it exists)
+			// Determine working directory (use bundle root if it exists)
 			workDir := cfg.RootPath
 			if _, err := os.Stat(workDir); os.IsNotExist(err) {
 				workDir, _ = os.Getwd()
@@ -1373,7 +1513,7 @@ Examples:
 				fmt.Println("  git diff            # See unstaged changes")
 				fmt.Println("  git diff --staged   # See staged changes")
 				fmt.Println("")
-				fmt.Println("Commit or stash your changes before running 'zk hello'.")
+				fmt.Println("Commit or stash your changes before running 'okfw hello'.")
 				return nil
 			}
 
@@ -1414,7 +1554,7 @@ Examples:
 			fmt.Printf("Good morning! Created branch: %s\n", branchName)
 			fmt.Println("")
 			fmt.Println("You're ready to capture ideas. When you're done, run:")
-			fmt.Println("  zk goodbye")
+			fmt.Println("  okfw goodbye")
 
 			return nil
 		},
@@ -1423,7 +1563,7 @@ Examples:
 	var goodbyeCmd = &cobra.Command{
 		Use:   "goodbye",
 		Short: "End your day by committing and merging to main",
-		Long: `End your zettelkasten session by committing changes and merging to main.
+		Long: `End your bundle session by committing changes and merging to main.
 
 This command will:
 1. Stage all changes in the current branch
@@ -1433,7 +1573,7 @@ This command will:
 5. Delete the dated branch
 
 Examples:
-  zk goodbye    # Commits changes and merges to main`,
+  okfw goodbye    # Commits changes and merges to main`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
 			if err != nil {
@@ -1461,7 +1601,7 @@ Examples:
 			if !isDateBranch(currentBranch) {
 				fmt.Printf("Warning: Current branch '%s' is not a dated branch (YYYYMMDD format).\n", currentBranch)
 				fmt.Println("")
-				fmt.Println("The 'goodbye' command is meant to be used with branches created by 'zk hello'.")
+				fmt.Println("The 'goodbye' command is meant to be used with branches created by 'okfw hello'.")
 				fmt.Println("")
 				fmt.Println("To commit manually:")
 				fmt.Println("  git add -A")
@@ -1527,15 +1667,15 @@ Examples:
 	var graphSyncCmd = &cobra.Command{
 		Use:   "graph-sync [path]",
 		Short: "Sync the persistent graph database from filesystem",
-		Long: `Walk the zettelkasten directory and synchronize the persistent graph database.
+		Long: `Walk the bundle directory and synchronize the persistent graph database.
 
 Adds new notes, updates changed notes, and purges deleted notes.
 The graph database enables fast O(1) backlink lookups and indexed traversals.
 
 Examples:
-  zk graph-sync                    # Sync from configured root
-  zk graph-sync ~/zettelkasten     # Sync from explicit path
-  zk graph-sync --validate         # Sync and validate edge integrity`,
+  okfw graph-sync                    # Sync from configured root
+  okfw graph-sync ~/bundle     # Sync from explicit path
+  okfw graph-sync --validate         # Sync and validate edge integrity`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Load("")
@@ -1596,10 +1736,10 @@ Examples:
 All subcommands support --json for machine-readable output (e.g. for Neovim integration).
 
 Examples:
-  zk graph-query backlinks <id>            # Find backlinks
-  zk graph-query cluster <id> --depth 2    # N-depth cluster
-  zk graph-query tag <tag>                 # Notes by tag
-  zk graph-query dangling                  # Dangling edges`,
+  okfw graph-query backlinks <id>            # Find backlinks
+  okfw graph-query cluster <id> --depth 2    # N-depth cluster
+  okfw graph-query tag <tag>                 # Notes by tag
+  okfw graph-query dangling                  # Dangling edges`,
 	}
 
 	var gqBacklinksCmd = &cobra.Command{
@@ -1767,6 +1907,10 @@ Examples:
 	graphQueryCmd.AddCommand(gqDanglingCmd)
 
 	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(migrateCmd)
+	rootCmd.AddCommand(rootPathCmd)
+	rootCmd.AddCommand(indexMdCmd)
+	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(templatesCmd)
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(searchCmd)
@@ -1784,6 +1928,7 @@ Examples:
 	rootCmd.AddCommand(todosCmd)
 	rootCmd.AddCommand(todoListCmd)
 	rootCmd.AddCommand(addTagsCmd)
+	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check the whole bundle for OKF conformance")
 	rootCmd.AddCommand(validateCmd)
 	rootCmd.AddCommand(helloCmd)
 	rootCmd.AddCommand(goodbyeCmd)
@@ -1793,8 +1938,8 @@ Examples:
 	}
 }
 
-// parseZettelForGraph parses a zettel file and returns a graph node
-func parseZettelForGraph(filePath string) (*graph.Node, error) {
+// parseConceptForGraph parses a concept file and returns a graph node
+func parseConceptForGraph(filePath, bundleRoot string) (*graph.Node, error) {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -1805,16 +1950,16 @@ func parseZettelForGraph(filePath string) (*graph.Node, error) {
 		return nil, err
 	}
 
-	// Validate this is a real zettel (must have an ID)
+	// Validate this is a real concept (must have an ID)
 	if z.ID == "" {
-		return nil, fmt.Errorf("not a valid zettel: no id field")
+		return nil, fmt.Errorf("not a valid concept: no id field")
 	}
 
-	// Extract links from body
-	body := extractBody(content)
-	links := graph.ExtractLinks(body)
-
 	absPath, _ := filepath.Abs(filePath)
+
+	// Resolve vanilla markdown links in the body to target concept IDs.
+	body := extractBody(content)
+	links := config.ResolveBodyLinkIDs(body, absPath, bundleRoot)
 
 	return &graph.Node{
 		ID:       z.ID,
@@ -1828,8 +1973,8 @@ func parseZettelForGraph(filePath string) (*graph.Node, error) {
 }
 
 // buildGraphFromPath walks the directory for .md files (skipping hidden dirs and ephemeral/),
-// parses each as a zettel, and returns a fully-built graph.
-func buildGraphFromPath(path string) (*graph.Graph, error) {
+// parses each as a concept, and returns a fully-built graph.
+func buildGraphFromPath(path, bundleRoot string) (*graph.Graph, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat path %q: %w", path, err)
@@ -1844,7 +1989,7 @@ func buildGraphFromPath(path string) (*graph.Graph, error) {
 			if fi.IsDir() && (strings.HasPrefix(fi.Name(), ".") && fi.Name() != "." || fi.Name() == "ephemeral") {
 				return filepath.SkipDir
 			}
-			if !fi.IsDir() && strings.HasSuffix(p, ".md") {
+			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
 				files = append(files, p)
 			}
 			return nil
@@ -1858,7 +2003,7 @@ func buildGraphFromPath(path string) (*graph.Graph, error) {
 
 	g := graph.New()
 	for _, filePath := range files {
-		node, err := parseZettelForGraph(filePath)
+		node, err := parseConceptForGraph(filePath, bundleRoot)
 		if err != nil {
 			continue
 		}
@@ -1866,7 +2011,7 @@ func buildGraphFromPath(path string) (*graph.Graph, error) {
 	}
 
 	if g.NodeCount() == 0 {
-		return nil, fmt.Errorf("no valid zettels found in %s", path)
+		return nil, fmt.Errorf("no valid concepts found in %s", path)
 	}
 
 	g.BuildRelationships()
@@ -1958,7 +2103,9 @@ func ensureGitignore(basePath string, graphPath string) error {
 }
 
 // indexFile indexes a single markdown file
-func indexFile(idx interface{ Index(string, interface{}) error }, filePath string) error {
+func indexFile(idx interface {
+	Index(string, interface{}) error
+}, filePath string) error {
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -1971,23 +2118,29 @@ func indexFile(idx interface{ Index(string, interface{}) error }, filePath strin
 
 	body := extractBody(content)
 
-	// Default type to "note" if not set
-	docType := z.GetType()
+	docKind := z.GetKind()
+	docType := z.Type
+	if docType == "" {
+		docType = docKind // legacy notes: fall back to the structured kind
+	}
 
-	doc := &index.ZettelDoc{
-		ID:        z.ID,
-		Title:     z.Title,
-		Type:      docType,
-		Project:   z.Project,
-		Category:  z.Category,
-		Tags:      z.Tags,
-		Body:      body,
-		FilePath:  filePath,
-		Created:   z.Created.Format("2006-01-02T15:04:05Z07:00"),
-		Status:    z.Status,
-		Due:       z.Due,
-		Completed: z.Completed,
-		Priority:  z.Priority,
+	doc := &index.ConceptDoc{
+		ID:          z.ID,
+		Title:       z.Title,
+		Type:        docType,
+		Kind:        docKind,
+		Description: z.Description,
+		Project:     z.Project,
+		Category:    z.Category,
+		Tags:        z.Tags,
+		Body:        body,
+		FilePath:    filePath,
+		Created:     z.Created.Format("2006-01-02T15:04:05Z07:00"),
+		Timestamp:   z.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
+		Status:      z.Status,
+		Due:         z.Due,
+		Completed:   z.Completed,
+		Priority:    z.Priority,
 	}
 
 	return idx.Index(z.ID, doc)
@@ -2017,11 +2170,588 @@ func extractBody(content []byte) string {
 	return string(body)
 }
 
+// slugify converts a title into a lowercase, ASCII, hyphen-separated slug
+// suitable for a filename. Reserved OKF basenames are guarded.
+func slugify(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	prevHyphen := false
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			prevHyphen = false
+		case r == ' ' || r == '-' || r == '_' || r == '/' || r == '.':
+			if !prevHyphen && b.Len() > 0 {
+				b.WriteByte('-')
+				prevHyphen = true
+			}
+		}
+	}
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		slug = "note"
+	}
+	if slug == "index" || slug == "log" {
+		slug += "-note" // never collide with reserved OKF filenames
+	}
+	return slug
+}
+
+// shortID returns the leading hex of a UUID/legacy id for filename disambiguation.
+func shortID(id string, n int) string {
+	hex := strings.ReplaceAll(id, "-", "")
+	if n > len(hex) {
+		n = len(hex)
+	}
+	return hex[:n]
+}
+
+// noteFilename builds a hybrid "slug--shortid.md" filename for title/id, unique
+// within dir (the short id is extended on collision). Returns the base name only.
+func noteFilename(dir, title, id string) string {
+	slug := slugify(title)
+	for n := 8; n <= 32; n += 2 {
+		name := slug + "--" + shortID(id, n) + ".md"
+		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
+			return name
+		}
+	}
+	// Fallback: full compact id (effectively always unique).
+	return slug + "--" + strings.ReplaceAll(id, "-", "") + ".md"
+}
+
+// sanitizeSubdir cleans a user/agent-requested bundle subdirectory and rejects
+// any path that would escape the bundle root. Returns "" if invalid.
+func sanitizeSubdir(p string) string {
+	p = strings.TrimSpace(filepath.ToSlash(p))
+	p = strings.TrimPrefix(p, "/")
+	cleaned := filepath.ToSlash(filepath.Clean(p))
+	if cleaned == "." || cleaned == "" {
+		return ""
+	}
+	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
+		return ""
+	}
+	return cleaned
+}
+
+// conceptDir resolves where a new concept should be written: an explicit --path
+// (sanitized, in-bundle) takes precedence; otherwise the project name is used as
+// a top-level folder; otherwise the bundle root. The untethered/tethered category
+// is metadata only and never dictates the path.
+func conceptDir(cfg *config.Config, pathFlag, project string) (string, error) {
+	if pathFlag != "" {
+		sub := sanitizeSubdir(pathFlag)
+		if sub == "" {
+			return "", fmt.Errorf("invalid --path %q: must be a subdirectory within the bundle", pathFlag)
+		}
+		return filepath.Join(cfg.RootPath, filepath.FromSlash(sub)), nil
+	}
+	if project != "" {
+		if sub := sanitizeSubdir(project); sub != "" {
+			return filepath.Join(cfg.RootPath, filepath.FromSlash(sub)), nil
+		}
+	}
+	return cfg.RootPath, nil
+}
+
+// isReservedBase reports whether name is an OKF reserved filename (index.md/log.md).
+func isReservedBase(name string) bool {
+	return name == "index.md" || name == "log.md"
+}
+
+// relDir returns the directory portion of a slash-separated bundle-relative path.
+func relDir(rel string) string {
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[:i]
+	}
+	return ""
+}
+
+type migrateItem struct {
+	absPath string
+	relPath string // bundle-relative, slash-separated
+	id      string
+	title   string
+	newRel  string // planned bundle-relative path, slash-separated
+}
+
+// planName chooses the hybrid slug--shortid.md name for a concept, preserving an
+// already-correct name (idempotent) and avoiding in-batch collisions via used.
+func planName(dir, oldBase, title, id string, used map[string]bool) string {
+	slug := slugify(title)
+	key := func(name string) string { return dir + "|" + name }
+	// Keep the current name if it is already a valid slug--shortid form for this id.
+	for n := 8; n <= 32; n += 2 {
+		cand := slug + "--" + shortID(id, n) + ".md"
+		if cand == oldBase {
+			used[key(cand)] = true
+			return cand
+		}
+	}
+	for n := 8; n <= 32; n += 2 {
+		cand := slug + "--" + shortID(id, n) + ".md"
+		if !used[key(cand)] {
+			used[key(cand)] = true
+			return cand
+		}
+	}
+	cand := slug + "--" + strings.ReplaceAll(id, "-", "") + ".md"
+	used[key(cand)] = true
+	return cand
+}
+
+// gitMove renames a file with `git mv` (preserving history) when possible,
+// falling back to a plain rename outside a git repo.
+func gitMove(root, oldAbs, newAbs string) error {
+	cmd := exec.Command("git", "-C", root, "mv", "-f", "--", oldAbs, newAbs)
+	if err := cmd.Run(); err != nil {
+		return os.Rename(oldAbs, newAbs)
+	}
+	return nil
+}
+
+// runValidateOKF checks a bundle for OKF conformance: every non-reserved .md has
+// parseable frontmatter with a non-empty `type`. Unresolved links are reported as
+// warnings (OKF tolerates broken links). Returns an error if any hard violation
+// is found.
+func runValidateOKF(cfg *config.Config, root string) error {
+	var concepts, violations, brokenLinks int
+	var problems []string
+
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if (strings.HasPrefix(fi.Name(), ".") && fi.Name() != ".") || fi.Name() == "ephemeral" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || isReservedBase(fi.Name()) {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			violations++
+			problems = append(problems, fmt.Sprintf("  ✗ %s: unparseable frontmatter (%v)", rel, err))
+			return nil
+		}
+		concepts++
+		if strings.TrimSpace(z.Type) == "" {
+			violations++
+			problems = append(problems, fmt.Sprintf("  ✗ %s: missing required non-empty `type`", rel))
+		}
+		// Warn on unresolved internal links.
+		absP, _ := filepath.Abs(p)
+		body := extractBody(content)
+		fromDir := ""
+		if rd, err := filepath.Rel(root, filepath.Dir(absP)); err == nil {
+			fromDir = filepath.ToSlash(rd)
+			if fromDir == "." {
+				fromDir = ""
+			}
+		}
+		for _, href := range graph.ExtractLinkTargets(body) {
+			tr := graph.NormalizeTarget(href, fromDir)
+			if tr == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(tr))); err != nil {
+				brokenLinks++
+				problems = append(problems, fmt.Sprintf("  ⚠ %s: link target not found: %s", rel, href))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Root index.md should declare okf_version.
+	if data, err := os.ReadFile(filepath.Join(root, "index.md")); err == nil {
+		if !strings.Contains(string(data), "okf_version") {
+			problems = append(problems, "  ⚠ index.md: root index is missing an okf_version declaration")
+		}
+	}
+
+	for _, pmsg := range problems {
+		fmt.Println(pmsg)
+	}
+	fmt.Printf("\nOKF conformance: %d concept(s), %d violation(s), %d broken link(s).\n", concepts, violations, brokenLinks)
+	if violations > 0 {
+		return fmt.Errorf("%d conformance violation(s)", violations)
+	}
+	return nil
+}
+
+// runIndexMd generates an OKF index.md in each bundle directory (progressive
+// disclosure). The root index.md carries the okf_version declaration; all other
+// index files have no frontmatter.
+func runIndexMd(cfg *config.Config, root string) error {
+	type entry struct{ title, desc, href string }
+	concepts := map[string][]entry{}
+	dirs := map[string]bool{"": true}
+
+	addDirChain := func(d string) {
+		for {
+			dirs[d] = true
+			if d == "" {
+				break
+			}
+			d = relDir(d)
+		}
+	}
+
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if (strings.HasPrefix(fi.Name(), ".") && fi.Name() != ".") || fi.Name() == "ephemeral" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || isReservedBase(fi.Name()) {
+			return nil
+		}
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return nil
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil || z.ID == "" {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
+		d := relDir(rel)
+		title := z.Title
+		if title == "" {
+			title = fi.Name()
+		}
+		concepts[d] = append(concepts[d], entry{title, z.Description, fi.Name()})
+		addDirChain(d)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	// Immediate subdirectories per directory.
+	subdirs := map[string][]string{}
+	for d := range dirs {
+		if d == "" {
+			continue
+		}
+		parent := relDir(d)
+		name := strings.TrimPrefix(d[len(parent):], "/")
+		subdirs[parent] = append(subdirs[parent], name)
+	}
+
+	count := 0
+	for d := range dirs {
+		var b strings.Builder
+		if d == "" {
+			b.WriteString("---\nokf_version: \"0.1\"\n---\n\n")
+		}
+		heading := d
+		if heading == "" {
+			heading = "/"
+		}
+		b.WriteString("# " + heading + "\n\n")
+		if subs := subdirs[d]; len(subs) > 0 {
+			sort.Strings(subs)
+			b.WriteString("## Subdirectories\n\n")
+			for _, s := range subs {
+				b.WriteString("* [" + s + "/](" + s + "/)\n")
+			}
+			b.WriteString("\n")
+		}
+		if cs := concepts[d]; len(cs) > 0 {
+			sort.Slice(cs, func(i, j int) bool { return cs[i].title < cs[j].title })
+			b.WriteString("## Concepts\n\n")
+			for _, c := range cs {
+				line := "* [" + c.title + "](" + c.href + ")"
+				if c.desc != "" {
+					line += " - " + c.desc
+				}
+				b.WriteString(line + "\n")
+			}
+			b.WriteString("\n")
+		}
+		out := filepath.Join(root, filepath.FromSlash(d), "index.md")
+		if err := os.WriteFile(out, []byte(b.String()), 0644); err != nil {
+			return err
+		}
+		count++
+	}
+	fmt.Printf("Wrote %d index.md file(s).\n", count)
+	return nil
+}
+
+// runLog renders an OKF log.md at the bundle root from git history (date-grouped,
+// newest first). Concept additions/modifications/deletions become
+// Creation/Update/Deprecation entries.
+func runLog(cfg *config.Config, root string) error {
+	cmd := exec.Command("git", "-C", root, "log", "--date=short", "--name-status",
+		"--pretty=format:\x01%ad\x02%s")
+	out, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("git log failed (is %s a git repository?): %w", root, err)
+	}
+
+	type event struct{ verb, path, subject string }
+	byDate := map[string][]event{}
+	var dateOrder []string
+	seenDate := map[string]bool{}
+	var curDate, curSubject string
+
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.HasPrefix(line, "\x01") {
+			parts := strings.SplitN(strings.TrimPrefix(line, "\x01"), "\x02", 2)
+			curDate = parts[0]
+			curSubject = ""
+			if len(parts) > 1 {
+				curSubject = parts[1]
+			}
+			if !seenDate[curDate] {
+				seenDate[curDate] = true
+				dateOrder = append(dateOrder, curDate)
+			}
+			continue
+		}
+		if line == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 2 {
+			continue
+		}
+		status := fields[0]
+		p := fields[len(fields)-1]
+		if !strings.HasSuffix(p, ".md") || isReservedBase(filepath.Base(p)) {
+			continue
+		}
+		verb := "Update"
+		switch {
+		case strings.HasPrefix(status, "A"):
+			verb = "Creation"
+		case strings.HasPrefix(status, "D"):
+			verb = "Deprecation"
+		}
+		byDate[curDate] = append(byDate[curDate], event{verb, filepath.ToSlash(p), curSubject})
+	}
+
+	var b strings.Builder
+	b.WriteString("# Update Log\n\n")
+	for _, d := range dateOrder {
+		evs := byDate[d]
+		if len(evs) == 0 {
+			continue
+		}
+		b.WriteString("## " + d + "\n\n")
+		for _, e := range evs {
+			b.WriteString("* **" + e.verb + "**: [" + e.path + "](/" + e.path + ")")
+			if e.subject != "" {
+				b.WriteString(" — " + e.subject)
+			}
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+
+	outPath := filepath.Join(root, "log.md")
+	if err := os.WriteFile(outPath, []byte(b.String()), 0644); err != nil {
+		return err
+	}
+	fmt.Printf("Wrote %s\n", outPath)
+	return nil
+}
+
+// runMigrate converts a legacy bundle to OKF conventions: relocates ~/zk_vault,
+// renames concepts to slug--shortid.md, rewrites [[id]] links to markdown links,
+// and rebuilds the graph DB and search index. Idempotent; dryRun previews only.
+func runMigrate(cfg *config.Config, root string, dryRun bool) error {
+	// Step 0: relocate a legacy ~/zk_vault bundle to the configured root.
+	if home, err := os.UserHomeDir(); err == nil {
+		legacy := filepath.Join(home, "zk_vault")
+		if legacy != root {
+			if fi, statErr := os.Stat(legacy); statErr == nil && fi.IsDir() {
+				if _, rootErr := os.Stat(root); os.IsNotExist(rootErr) {
+					if dryRun {
+						fmt.Printf("[dry-run] would relocate %s -> %s\n", legacy, root)
+						root = legacy // preview against the legacy contents
+					} else {
+						if err := os.Rename(legacy, root); err != nil {
+							return fmt.Errorf("relocate legacy bundle: %w", err)
+						}
+						fmt.Printf("Relocated %s -> %s\n", legacy, root)
+					}
+				}
+			}
+		}
+	}
+	if _, err := os.Stat(root); err != nil {
+		return fmt.Errorf("bundle root not found: %s", root)
+	}
+
+	// Pass 1: collect concepts and plan new filenames.
+	var items []migrateItem
+	idToNewRel := map[string]string{}
+	idToTitle := map[string]string{}
+	used := map[string]bool{}
+
+	walkConcepts := func(fn func(p string, fi os.FileInfo)) error {
+		return filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if fi.IsDir() {
+				if (strings.HasPrefix(fi.Name(), ".") && fi.Name() != ".") || fi.Name() == "ephemeral" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
+				fn(p, fi)
+			}
+			return nil
+		})
+	}
+
+	err := walkConcepts(func(p string, fi os.FileInfo) {
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil || z.ID == "" {
+			return
+		}
+		rel, _ := filepath.Rel(root, p)
+		rel = filepath.ToSlash(rel)
+		dir := relDir(rel)
+		base := planName(dir, fi.Name(), z.Title, z.ID, used)
+		newRel := base
+		if dir != "" {
+			newRel = dir + "/" + base
+		}
+		items = append(items, migrateItem{absPath: p, relPath: rel, id: z.ID, title: z.Title, newRel: newRel})
+		idToNewRel[z.ID] = newRel
+		idToTitle[z.ID] = z.Title
+	})
+	if err != nil {
+		return err
+	}
+
+	// Pass 2: rewrite links and rename files.
+	renamed, rewrote := 0, 0
+	for _, it := range items {
+		content, err := os.ReadFile(it.absPath)
+		if err != nil {
+			continue
+		}
+		newContent := graph.TransformWikiLinks(string(content), func(id, display string) string {
+			target, ok := idToNewRel[id]
+			if !ok {
+				return "" // leave links to unknown ids untouched
+			}
+			title := display
+			if title == "" {
+				if t := idToTitle[id]; t != "" {
+					title = t
+				} else {
+					title = id
+				}
+			}
+			return "[" + title + "](/" + target + ")"
+		})
+		changed := newContent != string(content)
+		needRename := it.relPath != it.newRel
+
+		if dryRun {
+			if needRename {
+				fmt.Printf("[dry-run] rename %s -> %s\n", it.relPath, it.newRel)
+				renamed++
+			}
+			if changed {
+				fmt.Printf("[dry-run] rewrite links in %s\n", it.newRel)
+				rewrote++
+			}
+			continue
+		}
+
+		targetAbs := it.absPath
+		if needRename {
+			newAbs := filepath.Join(root, filepath.FromSlash(it.newRel))
+			if err := os.MkdirAll(filepath.Dir(newAbs), 0755); err != nil {
+				return err
+			}
+			if err := gitMove(root, it.absPath, newAbs); err != nil {
+				return fmt.Errorf("rename %s: %w", it.relPath, err)
+			}
+			targetAbs = newAbs
+			renamed++
+		}
+		if changed {
+			if err := os.WriteFile(targetAbs, []byte(newContent), 0644); err != nil {
+				return err
+			}
+			rewrote++
+		}
+	}
+
+	if dryRun {
+		fmt.Printf("\n[dry-run] %d file(s) would be renamed, %d would have links rewritten.\n", renamed, rewrote)
+		return nil
+	}
+
+	// Rebuild the graph DB from scratch and reindex.
+	_ = ensureGitignore(root, cfg.GraphPath)
+	dbPath := filepath.Join(root, cfg.GraphPath)
+	_ = os.Remove(dbPath)
+	if store, err := graphdb.Open(dbPath); err == nil {
+		if _, err := store.Sync(root); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: graph sync failed: %v\n", err)
+		}
+		store.Close()
+	}
+	if idx, err := index.OpenOrCreateIndex(cfg.IndexPath); err == nil {
+		_ = walkConcepts(func(p string, fi os.FileInfo) { _ = indexFile(idx, p) })
+		idx.Close()
+	}
+
+	fmt.Printf("Migration complete: %d file(s) renamed, %d had links rewritten.\n", renamed, rewrote)
+	return nil
+}
+
+// touchTimestamp ensures the updates map bumps the OKF `timestamp` field to now
+// (last meaningful change), unless the caller already set it explicitly.
+func touchTimestamp(updates map[string]string) map[string]string {
+	if updates == nil {
+		updates = map[string]string{}
+	}
+	if _, ok := updates["timestamp"]; !ok {
+		updates["timestamp"] = time.Now().Format(time.RFC3339)
+	}
+	return updates
+}
+
 // updateFrontmatter updates specific fields in YAML frontmatter
 func updateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
 	if !bytes.HasPrefix(content, []byte("---")) {
 		return nil, fmt.Errorf("no frontmatter found")
 	}
+	updates = touchTimestamp(updates)
 
 	rest := content[3:]
 	if len(rest) > 0 && rest[0] == '\n' {
@@ -2090,7 +2820,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) error {
 	title := fmt.Sprintf("%s %s", dateStr, dayName)
 
 	// Daily notes go into a "daily" subdirectory within untethered
-	dailyDir := filepath.Join(cfg.RootPath, cfg.Folders.Untethered, "daily",
+	dailyDir := filepath.Join(cfg.RootPath, "daily",
 		targetDate.Format("2006"), targetDate.Format("01"))
 
 	// Check if any daily note already exists for this date
@@ -2105,7 +2835,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) error {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	filePath := filepath.Join(dailyDir, id+".md")
+	filePath := filepath.Join(dailyDir, noteFilename(dailyDir, title, id))
 
 	// Get the daily template
 	tmpl, err := templates.Get("daily")
@@ -2136,7 +2866,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) error {
 
 // listDailyNotes lists recent daily notes
 func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error {
-	dailyDir := filepath.Join(cfg.RootPath, cfg.Folders.Untethered, "daily")
+	dailyDir := filepath.Join(cfg.RootPath, "daily")
 
 	// Check if daily directory exists
 	if _, err := os.Stat(dailyDir); os.IsNotExist(err) {
@@ -2294,15 +3024,17 @@ func generateBasicNote(id, title, project, category string, tags []string) strin
 		buf.WriteString(" []\n")
 	}
 
-	buf.WriteString(fmt.Sprintf("created: %q\n", now.Format(time.RFC3339)))
+	stamp := now.Format(time.RFC3339)
+	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
+	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
 	buf.WriteString("---\n\n")
 	buf.WriteString(fmt.Sprintf("# %s\n\n", title))
 
 	return buf.String()
 }
 
-// resolveZettelPath resolves a zettel ID or file path to an absolute file path
-func resolveZettelPath(cfg *config.Config, idOrPath string) (string, error) {
+// resolveConceptPath resolves a concept ID or file path to an absolute file path
+func resolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 	// If it looks like a file path, use it directly
 	if strings.HasSuffix(idOrPath, ".md") || strings.Contains(idOrPath, "/") {
 		if _, err := os.Stat(idOrPath); err != nil {
@@ -2311,42 +3043,44 @@ func resolveZettelPath(cfg *config.Config, idOrPath string) (string, error) {
 		return filepath.Abs(idOrPath)
 	}
 
-	// Otherwise, it's an ID - search for it
-	searchPaths := []string{
-		filepath.Join(cfg.RootPath, cfg.Folders.Untethered, idOrPath+".md"),
-		filepath.Join(cfg.RootPath, cfg.Folders.Tethered, idOrPath+".md"),
-	}
-
-	for _, p := range searchPaths {
-		if _, err := os.Stat(p); err == nil {
-			return filepath.Abs(p)
-		}
-	}
-
-	// Try recursive search as last resort
+	// Otherwise it is an ID: search the whole bundle for a concept whose
+	// frontmatter id matches. Concepts may live in any directory (the
+	// untethered/tethered layout is not assumed), and filenames are
+	// slug--shortid.md rather than <id>.md.
 	var found string
 	err := filepath.Walk(cfg.RootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if info.IsDir() && info.Name() == "ephemeral" {
-			return filepath.SkipDir
+		if info.IsDir() {
+			if (strings.HasPrefix(info.Name(), ".") && info.Name() != ".") || info.Name() == "ephemeral" {
+				return filepath.SkipDir
+			}
+			return nil
 		}
-		if !info.IsDir() && strings.HasSuffix(path, idOrPath+".md") {
+		if !strings.HasSuffix(path, ".md") || isReservedBase(info.Name()) {
+			return nil
+		}
+		// Fast path: a legacy <id>.md filename.
+		if info.Name() == idOrPath+".md" {
+			found = path
+			return filepath.SkipAll
+		}
+		if config.ReadConceptID(path) == idOrPath {
 			found = path
 			return filepath.SkipAll
 		}
 		return nil
 	})
 	if err != nil && err != filepath.SkipAll {
-		return "", fmt.Errorf("error searching for zettel: %w", err)
+		return "", fmt.Errorf("error searching for concept: %w", err)
 	}
 
 	if found != "" {
 		return filepath.Abs(found)
 	}
 
-	return "", fmt.Errorf("zettel not found: %s", idOrPath)
+	return "", fmt.Errorf("concept not found: %s", idOrPath)
 }
 
 // updateFrontmatterRemove updates fields and removes specified fields from frontmatter
@@ -2354,6 +3088,7 @@ func updateFrontmatterRemove(content []byte, updates map[string]string, remove [
 	if !bytes.HasPrefix(content, []byte("---")) {
 		return nil, fmt.Errorf("no frontmatter found")
 	}
+	updates = touchTimestamp(updates)
 
 	rest := content[3:]
 	if len(rest) > 0 && rest[0] == '\n' {

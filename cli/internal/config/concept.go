@@ -8,51 +8,61 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Zettel represents a zettelkasten note's frontmatter.
-type Zettel struct {
-	ID       string    `yaml:"id"`
-	Title    string    `yaml:"title"`
-	Type     string    `yaml:"type,omitempty"`     // "note" (default), "todo", "daily-note", or "issue"
-	Project  string    `yaml:"project,omitempty"`
-	Category string    `yaml:"category"`
-	Tags     []string  `yaml:"tags"`
-	Created  time.Time `yaml:"created"`
-	Parent   string    `yaml:"parent,omitempty"`
+// Concept represents a bundle note's frontmatter.
+type Concept struct {
+	ID          string    `yaml:"id"`
+	Title       string    `yaml:"title"`
+	Type        string    `yaml:"type"`                  // OKF required: free-form concept kind, always written
+	Kind        string    `yaml:"kind,omitempty"`        // structured: "note" (default), "todo", "daily-note", "issue"
+	Description string    `yaml:"description,omitempty"` // OKF recommended: one-sentence summary
+	Resource    string    `yaml:"resource,omitempty"`    // OKF recommended: URI of the underlying asset
+	Project     string    `yaml:"project,omitempty"`
+	Category    string    `yaml:"category"`
+	Tags        []string  `yaml:"tags"`
+	Created     time.Time `yaml:"created"`
+	Timestamp   time.Time `yaml:"timestamp"` // OKF recommended: last meaningful change
+	Parent      string    `yaml:"parent,omitempty"`
 
-	// Todo-specific fields (only used when Type == "todo")
+	// Todo-specific fields (only used when Kind == "todo")
 	Status    string `yaml:"status,omitempty"`    // "open", "in_progress", "closed"
 	Due       string `yaml:"due,omitempty"`       // YYYY-MM-DD
 	Completed string `yaml:"completed,omitempty"` // YYYY-MM-DD (set when closed)
 	Priority  string `yaml:"priority,omitempty"`  // "high", "medium", "low"
 }
 
-// IsTodo returns true if this zettel is a todo item.
-func (z *Zettel) IsTodo() bool {
-	return z.Type == "todo"
-}
-
-// IsDailyNote returns true if this zettel is a daily note.
-func (z *Zettel) IsDailyNote() bool {
-	return z.Type == "daily-note"
-}
-
-// GetType returns the zettel type, defaulting to "note" if not set.
-func (z *Zettel) GetType() string {
-	if z.Type == "" {
-		return "note"
+// GetKind returns the structured concept kind, defaulting to "note".
+// For backward compatibility with legacy notes that stored the kind in the
+// `type` field (pre-OKF), it falls back to a recognized `type` value.
+func (z *Concept) GetKind() string {
+	if z.Kind != "" {
+		return z.Kind
 	}
-	return z.Type
+	switch z.Type {
+	case "note", "todo", "daily-note", "issue":
+		return z.Type
+	}
+	return "note"
+}
+
+// IsTodo returns true if this concept is a todo item.
+func (z *Concept) IsTodo() bool {
+	return z.GetKind() == "todo"
+}
+
+// IsDailyNote returns true if this concept is a daily note.
+func (z *Concept) IsDailyNote() bool {
+	return z.GetKind() == "daily-note"
 }
 
 // ParseFrontmatter extracts and parses YAML frontmatter from markdown content.
 // Frontmatter must be enclosed between "---" markers at the start of the file.
-func ParseFrontmatter(content []byte) (*Zettel, error) {
+func ParseFrontmatter(content []byte) (*Concept, error) {
 	frontmatter, err := ExtractFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
 
-	var z Zettel
+	var z Concept
 	if err := yaml.Unmarshal(frontmatter, &z); err != nil {
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
@@ -88,15 +98,15 @@ func ExtractFrontmatter(content []byte) ([]byte, error) {
 	return rest[:endIdx], nil
 }
 
-// ValidateZettel validates a Zettel struct against the CUE schema and business rules.
-func ValidateZettel(z *Zettel) error {
+// ValidateConcept validates a Concept struct against the CUE schema and business rules.
+func ValidateConcept(z *Concept) error {
 	// Convert to YAML and validate against CUE schema
 	data, err := yaml.Marshal(z)
 	if err != nil {
-		return fmt.Errorf("failed to marshal zettel: %w", err)
+		return fmt.Errorf("failed to marshal concept: %w", err)
 	}
 
-	if err := ValidateZettelYAML(data); err != nil {
+	if err := ValidateConceptYAML(data); err != nil {
 		return err
 	}
 
@@ -111,7 +121,7 @@ func ValidateZettel(z *Zettel) error {
 }
 
 // validateTodoFields validates todo-specific business rules.
-func validateTodoFields(z *Zettel) error {
+func validateTodoFields(z *Concept) error {
 	// Status is required for todos
 	if z.Status == "" {
 		return fmt.Errorf("todo requires status field (open, in_progress, or closed)")
@@ -139,19 +149,19 @@ func validateTodoFields(z *Zettel) error {
 }
 
 // ParseAndValidate extracts frontmatter from content and validates it against the schema.
-func ParseAndValidate(content []byte) (*Zettel, error) {
+func ParseAndValidate(content []byte) (*Concept, error) {
 	frontmatter, err := ExtractFrontmatter(content)
 	if err != nil {
 		return nil, err
 	}
 
 	// Validate raw YAML against schema
-	if err := ValidateZettelYAML(frontmatter); err != nil {
+	if err := ValidateConceptYAML(frontmatter); err != nil {
 		return nil, err
 	}
 
 	// Parse into struct
-	var z Zettel
+	var z Concept
 	if err := yaml.Unmarshal(frontmatter, &z); err != nil {
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}

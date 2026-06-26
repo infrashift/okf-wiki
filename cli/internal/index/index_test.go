@@ -8,7 +8,7 @@ import (
 // setupTestIndex creates a temporary Bleve index with test documents
 func setupTestIndex(t *testing.T) (string, func()) {
 	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "zk-index-test-*")
+	tmpDir, err := os.MkdirTemp("", "okfw-index-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -20,7 +20,7 @@ func setupTestIndex(t *testing.T) (string, func()) {
 		t.Fatalf("Failed to create index: %v", err)
 	}
 
-	docs := []ZettelDoc{
+	docs := []ConceptDoc{
 		{
 			ID:       "20260201100000-aaa",
 			Title:    "Authentication Design",
@@ -47,18 +47,18 @@ func setupTestIndex(t *testing.T) (string, func()) {
 			Due:      "2026-02-15",
 		},
 		{
-			ID:       "20260203100000-ccc",
-			Title:    "Update API docs",
-			Type:     "todo",
-			Project:  "docs",
-			Category: "untethered",
-			Tags:     []string{"docs"},
-			Body:     "API documentation is outdated",
-			FilePath: "/notes/update-docs.md",
-			Created:  "2026-02-03T10:00:00Z",
-			Status:   "closed",
-			Priority: "medium",
-			Due:      "2026-02-10",
+			ID:        "20260203100000-ccc",
+			Title:     "Update API docs",
+			Type:      "todo",
+			Project:   "docs",
+			Category:  "untethered",
+			Tags:      []string{"docs"},
+			Body:      "API documentation is outdated",
+			FilePath:  "/notes/update-docs.md",
+			Created:   "2026-02-03T10:00:00Z",
+			Status:    "closed",
+			Priority:  "medium",
+			Due:       "2026-02-10",
 			Completed: "2026-02-09",
 		},
 		{

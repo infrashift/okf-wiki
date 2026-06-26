@@ -40,4 +40,4 @@ How do we measure success?
 
 ## Related Notes
 
-- [[]]
+<!-- - [Related concept](/path/to/concept.md) -->

@@ -2,7 +2,7 @@ local M = {}
 
 M.setup = function(opts)
     M.config = vim.tbl_deep_extend("force", {
-        bin = "zk",
+        bin = "okfw",
     }, opts or {})
 end
 
@@ -213,7 +213,7 @@ M.daily_picker = function(opts)
     end
 
     Snacks.picker.pick({
-        source = "zk_daily",
+        source = "okfw_daily",
         title = "Daily Notes",
         items = items,
         format = function(item, _picker)
@@ -319,11 +319,11 @@ M.set_status = function(status, file_path)
     job:start()
 end
 
--- Add tags to a zettel
+-- Add tags to a concept
 M.add_tags = function(tags, file_path)
     file_path = file_path or vim.fn.expand("%:p")
     if file_path == "" then
-        print("No zettel specified")
+        print("No concept specified")
         return
     end
     if type(tags) == "string" then
@@ -360,11 +360,11 @@ M.add_tags = function(tags, file_path)
     job:start()
 end
 
--- Validate a zettel's frontmatter against the CUE schema
+-- Validate a concept's frontmatter against the CUE schema
 M.validate = function(file_path)
     file_path = file_path or vim.fn.expand("%:p")
     if file_path == "" then
-        print("No zettel specified")
+        print("No concept specified")
         return
     end
 
@@ -592,7 +592,7 @@ M.template_picker = function(opts)
     end
 
     Snacks.picker.pick({
-        source = "zk_templates",
+        source = "okfw_templates",
         title = "Select Template",
         items = items,
         format = function(item, _picker)
@@ -755,7 +755,7 @@ M.set_project = function(file_path, project)
     job:start()
 end
 
--- Search zettels (requires results to be displayed somehow)
+-- Search concepts (requires results to be displayed somehow)
 M.search = function(query, opts)
     opts = opts or {}
     local args = { "search", "--json" }
@@ -852,7 +852,7 @@ M.index_file = function(path)
         on_exit = function(_, return_val)
             if return_val ~= 0 then
                 vim.schedule(function()
-                    vim.notify("zk: failed to index " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.WARN)
+                    vim.notify("okfw: failed to index " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.WARN)
                 end)
             end
         end,
@@ -860,8 +860,8 @@ M.index_file = function(path)
     job:start()
 end
 
--- Extract zettel ID from current buffer frontmatter
-local function get_current_zettel_id()
+-- Extract concept ID from current buffer frontmatter
+local function get_current_concept_id()
     local lines = vim.api.nvim_buf_get_lines(0, 0, 20, false)
     local in_frontmatter = false
 
@@ -887,7 +887,7 @@ M.graph = function(opts)
     local limit = opts.limit or 10
     local depth = opts.depth or 0
 
-    -- Build args: path is optional (CLI defaults to zettelkasten root)
+    -- Build args: path is optional (CLI defaults to conceptkasten root)
     local args = { "graph" }
 
     if opts.path and opts.path ~= "" then
@@ -902,10 +902,10 @@ M.graph = function(opts)
         table.insert(args, tostring(depth))
     end
 
-    -- Use current zettel as the start node if available
+    -- Use current concept as the start node if available
     local start_id = opts.start
     if not start_id then
-        start_id = get_current_zettel_id()
+        start_id = get_current_concept_id()
     end
     if start_id and start_id ~= "" then
         table.insert(args, "--start")
@@ -934,7 +934,7 @@ M.graph = function(opts)
                 vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
                 vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
                 vim.api.nvim_set_option_value("filetype", "mermaid", { buf = buf })
-                vim.api.nvim_buf_set_name(buf, "zk-graph")
+                vim.api.nvim_buf_set_name(buf, "okfw-graph")
                 vim.api.nvim_set_current_buf(buf)
                 vim.api.nvim_set_option_value("wrap", false, { win = 0 })
 
@@ -970,7 +970,7 @@ M.export = function(opts)
 
     local start_id = opts.start
     if not start_id then
-        start_id = get_current_zettel_id()
+        start_id = get_current_concept_id()
     end
     if start_id and start_id ~= "" then
         table.insert(args, "--start")
@@ -1067,7 +1067,7 @@ M.preview_note = function(file_path)
     })
 
     -- Store file path for opening
-    vim.b[buf].zk_preview_path = file_path
+    vim.b[buf].okfw_preview_path = file_path
 
     -- Keymaps for the preview window
     local close_preview = function()
@@ -1077,7 +1077,7 @@ M.preview_note = function(file_path)
     end
 
     local open_note = function()
-        local path = vim.b[buf].zk_preview_path
+        local path = vim.b[buf].okfw_preview_path
         close_preview()
         vim.cmd("edit " .. vim.fn.fnameescape(path))
     end
@@ -1112,27 +1112,63 @@ M.preview_by_id = function(id)
     })
 end
 
--- Insert a zettel link at cursor position
+-- Insert a concept link at cursor position
 -- Format: [[id]] or [[id|title]]
-M.insert_link = function(id, title, include_title)
-    if not id or id == "" then
-        print("No ID provided")
+-- Cached bundle root (path of the OKF bundle), queried from the CLI.
+M._bundle_root = nil
+M.bundle_root = function()
+    if M._bundle_root then return M._bundle_root end
+    local Job = require("plenary.job")
+    local job = Job:new({ command = M.config.bin, args = { "root" } })
+    job:sync(5000)
+    local out = vim.trim(table.concat(job:result(), "\n"))
+    if out ~= "" then M._bundle_root = out end
+    return M._bundle_root
+end
+
+-- Convert an absolute path to a bundle-relative OKF link target ("/dir/file.md").
+-- Returns nil if the path is outside the bundle.
+M.bundle_rel = function(abs)
+    if not abs or abs == "" then return nil end
+    abs = vim.fn.fnamemodify(abs, ":p")
+    local root = M.bundle_root()
+    if not root then return nil end
+    root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+    if abs:sub(1, #root + 1) == root .. "/" then
+        return abs:sub(#root + 1) -- keeps the leading "/"
+    end
+    return nil
+end
+
+-- Insert a vanilla markdown link to a concept entry ({ file_path, title, id }).
+-- When use_title is true the link text is the concept title, otherwise its slug.
+M.insert_link = function(entry, use_title)
+    if not entry or not entry.file_path then
+        print("No link target")
+        return
+    end
+
+    local target = M.bundle_rel(entry.file_path)
+    if not target then
+        vim.notify("Link target is outside the bundle", vim.log.levels.WARN)
         return
     end
 
     -- Prevent self-linking
-    local current_id = get_current_zettel_id()
-    if current_id and current_id == id then
+    local current = M.bundle_rel(vim.api.nvim_buf_get_name(0))
+    if current and current == target then
         vim.notify("Cannot link a note to itself", vim.log.levels.WARN)
         return
     end
 
-    local link
-    if include_title and title and title ~= "" then
-        link = string.format("[[%s|%s]]", id, title)
+    local text
+    if use_title and entry.title and entry.title ~= "" then
+        text = entry.title
     else
-        link = string.format("[[%s]]", id)
+        text = target:match("([^/]+)%.md$") or entry.title or target
     end
+
+    local link = string.format("[%s](%s)", text, target)
 
     -- Insert at cursor position
     local row, col = unpack(vim.api.nvim_win_get_cursor(0))
@@ -1144,29 +1180,74 @@ M.insert_link = function(id, title, include_title)
     vim.api.nvim_win_set_cursor(0, { row, col + #link })
 end
 
--- Prompt for ID and insert link
+-- Follow the markdown link under the cursor. Absolute ("/...") targets resolve
+-- against the bundle root; relative targets against the current file's directory.
+M.follow_link = function()
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+
+    local href
+    local i = 1
+    while true do
+        local ms, me, cap = line:find("%[[^%]]*%]%(([^)]+)%)", i)
+        if not ms then break end
+        if col >= ms and col <= me then
+            href = cap
+            break
+        end
+        i = me + 1
+    end
+    if not href then
+        href = vim.fn.expand("<cfile>")
+    end
+    if not href or href == "" then
+        vim.notify("No link under cursor", vim.log.levels.INFO)
+        return
+    end
+
+    href = href:gsub("#.*$", "")
+    if href:match("^%a[%w+.-]*://") then
+        vim.notify("External link: " .. href, vim.log.levels.INFO)
+        return
+    end
+
+    local target
+    if href:sub(1, 1) == "/" then
+        local root = M.bundle_root()
+        if not root then
+            vim.notify("Bundle root unknown", vim.log.levels.WARN)
+            return
+        end
+        target = root:gsub("/$", "") .. href
+    else
+        local dir = vim.fn.expand("%:p:h")
+        target = vim.fn.fnamemodify(dir .. "/" .. href, ":p")
+    end
+
+    if vim.fn.filereadable(target) == 1 then
+        vim.cmd("edit " .. vim.fn.fnameescape(target))
+    else
+        vim.notify("Link target not found: " .. target, vim.log.levels.WARN)
+    end
+end
+
+-- Prompt for an ID and insert a markdown link to that concept.
 M.insert_link_prompt = function(include_title)
-    local id = vim.fn.input("Note ID: ")
+    local id = vim.fn.input("Concept ID: ")
     if id == "" then return end
 
-    if include_title then
-        -- Search for title
-        M.search("", {
-            limit = 100,
-            on_results = function(results)
-                for _, r in ipairs(results) do
-                    if r.id == id then
-                        M.insert_link(id, r.title, true)
-                        return
-                    end
+    M.search("", {
+        limit = 200,
+        on_results = function(results)
+            for _, r in ipairs(results) do
+                if r.id == id then
+                    M.insert_link(r, include_title)
+                    return
                 end
-                -- Not found, insert without title
-                M.insert_link(id, nil, false)
-            end,
-        })
-    else
-        M.insert_link(id, nil, false)
-    end
+            end
+            vim.notify("Concept not found: " .. id, vim.log.levels.WARN)
+        end,
+    })
 end
 
 -- Open picker to search notes and insert link (requires snacks.nvim)
@@ -1198,12 +1279,12 @@ M.link_picker = function(opts)
 
     local ok, results = pcall(vim.json.decode, results_json)
     if not ok or type(results) ~= "table" then
-        vim.notify("No zettels found to link", vim.log.levels.INFO)
+        vim.notify("No concepts found to link", vim.log.levels.INFO)
         return
     end
 
     -- Filter out the current note to prevent self-linking
-    local current_id = get_current_zettel_id()
+    local current_id = get_current_concept_id()
     if current_id then
         local filtered = {}
         for _, r in ipairs(results) do
@@ -1215,7 +1296,7 @@ M.link_picker = function(opts)
     end
 
     if #results == 0 then
-        vim.notify("No zettels found to link", vim.log.levels.INFO)
+        vim.notify("No concepts found to link", vim.log.levels.INFO)
         return
     end
 
@@ -1236,7 +1317,7 @@ M.link_picker = function(opts)
     end
 
     Snacks.picker.pick({
-        source = "zk_link",
+        source = "okfw_link",
         title = "Insert Link to Zettel",
         items = items,
         format = function(item, _picker)
@@ -1246,14 +1327,14 @@ M.link_picker = function(opts)
         confirm = function(picker, item)
             picker:close()
             if item and item.data then
-                M.insert_link(item.data.id, item.data.title, include_title)
+                M.insert_link(item.data, include_title)
             end
         end,
         actions = {
             insert_titled_link = function(picker, item)
                 if item and item.data then
                     picker:close()
-                    M.insert_link(item.data.id, item.data.title, true)
+                    M.insert_link(item.data, true)
                 end
             end,
         },
@@ -1273,7 +1354,7 @@ M._tag_cache = nil
 M._tag_cache_time = 0
 M._tag_cache_ttl = 60 -- Cache TTL in seconds
 
--- Get all unique tags from indexed zettels (async)
+-- Get all unique tags from indexed concepts (async)
 M.get_tags = function(callback)
     local Job = require("plenary.job")
     local results_json = ""
@@ -1385,7 +1466,7 @@ end
 M.complete_tags = function()
     local tags = M.get_tags_sync()
     if #tags == 0 then
-        print("No tags found. Run :lua require('zk').index() first.")
+        print("No tags found. Run :lua require('okfw').index() first.")
         return
     end
 
@@ -1478,7 +1559,7 @@ M.omnifunc = function(findstart, base)
             if base == "" or tag:lower():find(base:lower(), 1, true) then
                 table.insert(matches, {
                     word = tag,
-                    menu = "[zk-tag]",
+                    menu = "[okfw-tag]",
                 })
             end
         end
@@ -1493,12 +1574,12 @@ M.setup_tag_completion = function()
         pattern = "markdown",
         callback = function()
             -- Set omnifunc for manual completion
-            vim.bo.omnifunc = "v:lua.require'zk'.omnifunc"
+            vim.bo.omnifunc = "v:lua.require'okfw'.omnifunc"
 
             -- Set up <C-x><C-o> for omni completion in insert mode
             vim.keymap.set("i", "<C-x><C-t>", function()
                 if in_tags_section() then
-                    require("zk").complete_tags()
+                    require("okfw").complete_tags()
                 else
                     -- Fall back to default behavior
                     vim.api.nvim_feedkeys(
@@ -1507,7 +1588,7 @@ M.setup_tag_completion = function()
                         false
                     )
                 end
-            end, { buffer = true, desc = "Complete zk tags" })
+            end, { buffer = true, desc = "Complete okfw tags" })
         end,
     })
 end
@@ -1557,7 +1638,7 @@ M.setup_cmp = function()
         return false
     end
 
-    cmp.register_source("zk_tags", M.cmp_source().new())
+    cmp.register_source("okfw_tags", M.cmp_source().new())
     return true
 end
 
@@ -1569,7 +1650,7 @@ M._backlinks_state = {
     backlinks = {},
 }
 
--- Get backlinks for a zettel (async)
+-- Get backlinks for a concept (async)
 M.get_backlinks = function(id_or_file, callback)
     local Job = require("plenary.job")
     local results_json = ""
@@ -1624,7 +1705,7 @@ end
 M.backlinks_panel = function(opts)
     opts = opts or {}
 
-    -- Save all modified zettel buffers so backlinks scan finds latest links
+    -- Save all modified concept buffers so backlinks scan finds latest links
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
         if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified then
             local name = vim.api.nvim_buf_get_name(bufnr)
@@ -1634,10 +1715,10 @@ M.backlinks_panel = function(opts)
         end
     end
 
-    -- Get the zettel ID
-    local target = opts.id or opts.file or get_current_zettel_id()
+    -- Get the concept ID
+    local target = opts.id or opts.file or get_current_concept_id()
     if not target then
-        print("No zettel ID found. Open a zettel file first.")
+        print("No concept ID found. Open a concept file first.")
         return
     end
 
@@ -1687,7 +1768,7 @@ M.backlinks_panel = function(opts)
     vim.api.nvim_buf_set_option(buf, "modifiable", false)
     vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
     vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-    vim.api.nvim_buf_set_name(buf, "zk-backlinks")
+    vim.api.nvim_buf_set_name(buf, "okfw-backlinks")
 
     -- Create floating window
     local win = vim.api.nvim_open_win(buf, true, {
@@ -1730,10 +1811,10 @@ M.backlinks_panel = function(opts)
     end
 
     -- Keymaps
-    local augroup = vim.api.nvim_create_augroup("ZkBacklinksPanel", { clear = true })
+    local augroup = vim.api.nvim_create_augroup("OkfwBacklinksPanel", { clear = true })
 
     local close_panel = function()
-        pcall(vim.api.nvim_del_augroup_by_name, "ZkBacklinksPanel")
+        pcall(vim.api.nvim_del_augroup_by_name, "OkfwBacklinksPanel")
         if M._backlinks_state.win and vim.api.nvim_win_is_valid(M._backlinks_state.win) then
             vim.api.nvim_win_close(M._backlinks_state.win, true)
         end
@@ -1791,10 +1872,10 @@ M.backlinks_split = function(opts)
     opts = opts or {}
     local position = opts.position or "right"
 
-    -- Get the zettel ID
-    local target = opts.id or opts.file or get_current_zettel_id()
+    -- Get the concept ID
+    local target = opts.id or opts.file or get_current_concept_id()
     if not target then
-        print("No zettel ID found. Open a zettel file first.")
+        print("No concept ID found. Open a concept file first.")
         return
     end
 
@@ -1838,7 +1919,7 @@ M.backlinks_split = function(opts)
     vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
     vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
     vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
-    vim.api.nvim_buf_set_name(buf, "zk-backlinks-" .. target)
+    vim.api.nvim_buf_set_name(buf, "okfw-backlinks-" .. target)
 
     -- Resize to reasonable width
     if position == "right" or position == "left" then
@@ -1853,7 +1934,7 @@ end
 -- Toggle backlinks panel
 M.toggle_backlinks = function(opts)
     if M._backlinks_state.win and vim.api.nvim_win_is_valid(M._backlinks_state.win) then
-        pcall(vim.api.nvim_del_augroup_by_name, "ZkBacklinksPanel")
+        pcall(vim.api.nvim_del_augroup_by_name, "OkfwBacklinksPanel")
         vim.api.nvim_win_close(M._backlinks_state.win, true)
         M._backlinks_state.win = nil
         M._backlinks_state.buf = nil
@@ -1865,7 +1946,7 @@ end
 -- Telescope integration (lazy loaded)
 M.telescope = setmetatable({}, {
     __index = function(_, key)
-        local ok, telescope_ext = pcall(require, "zk.telescope")
+        local ok, telescope_ext = pcall(require, "okfw.telescope")
         if ok then
             return telescope_ext[key]
         end

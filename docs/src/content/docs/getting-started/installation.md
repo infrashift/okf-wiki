@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: How to install the Zettelkasten CLI from source.
+description: How to install OKF Wiki from source.
 ---
 
 ## Prerequisites
