@@ -5,11 +5,13 @@ description: A comprehensive guide to managing daily notes with okfw directly fr
 
 A comprehensive guide to managing daily notes with `okfw` directly from your editor. This document covers the daily, weekly, and monthly review workflows with NeoVim-specific commands and keybindings.
 
+Your project needs an initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at the project root to create the `.okfw/` directory. The plugin discovers the wiki via `okfw root` from NeoVim's current working directory, so everything below works from any subdirectory of the project.
+
 ---
 
 ## What Are Daily Notes?
 
-A daily note is a dated entry that serves as your primary capture point for a given day. Rather than deciding "what type of note is this?" every time you have a thought, you write in today's daily note first. Later, you review and extract tethered insights.
+A daily note is a dated entry that serves as your primary capture point for a given day. Rather than deciding "what type of note is this?" every time you have a thought, you write in today's daily note first. Later, you review and extract refined insights.
 
 **Key characteristics:**
 - **One per day** - Each date has exactly one daily note
@@ -25,7 +27,7 @@ A daily note is a dated entry that serves as your primary capture point for a gi
 ### 1. Reduces Cognitive Overhead
 
 When an idea strikes, you don't want to spend mental energy deciding:
-- Is this untethered or tethered?
+- Is this worth a standalone note?
 - What project does this belong to?
 - What should I title this?
 
@@ -42,7 +44,7 @@ Daily notes become a searchable history of your work and thoughts:
 
 The daily review practice naturally resurfaces ideas:
 - Morning: Review yesterday's note
-- Extract anything valuable into tethered notes
+- Extract anything valuable into standalone notes
 - Unprocessed ideas get a second chance
 
 ### 4. Supports GTD-Style Workflows
@@ -50,7 +52,7 @@ The daily review practice naturally resurfaces ideas:
 Daily notes function as an "inbox" in Getting Things Done methodology:
 - Capture everything during the day
 - Process and organize during review
-- Tether valuable insights to permanent storage
+- Refine valuable insights into permanent notes
 
 ### 5. Integrates with Todos
 
@@ -68,7 +70,6 @@ id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "2026-02-13 Friday"
 type: "daily-note"
 kind: "daily-note"
-category: "untethered"
 tags:
   - "daily"
 created: "2026-02-13T00:00:00Z"
@@ -181,7 +182,7 @@ local notes = require("okfw").list_daily_sync({ week = true })
    ```
 
 3. **Extract insights from yesterday:**
-   - Identify anything worth keeping as a tethered note
+   - Identify anything worth keeping as a standalone note
    - Create new notes with `:OkfwNote` or `:OkfwTemplate`
    - Link back to the daily note if relevant
 
@@ -272,7 +273,7 @@ okfw daily --list --week
    - What projects progressed? Stalled?
 3. **Create synthesis notes:**
    - Weekly summary note
-   - Tethered notes for recurring themes
+   - Standalone notes for recurring themes
 4. **Review todos** via `:OkfwTodoList`
 
 ---
@@ -320,10 +321,12 @@ vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList!<cr>", { desc = "This week
 
 ## File Organization
 
-Daily notes are stored at the bundle root in a structured hierarchy:
+Daily notes are stored inside the project's wiki (the `.okfw/` directory
+created by `okfw init` and discovered automatically from any subdirectory) in
+a structured hierarchy:
 
 ```
-~/okfw/
+.okfw/
 └── daily/
     └── 2026/
         ├── 01/
@@ -336,7 +339,7 @@ Daily notes are stored at the bundle root in a structured hierarchy:
 ```
 
 This structure:
-- Lives at the bundle root, separate from project folders
+- Lives at the wiki root, separate from project folders
 - Groups notes by year and month
 - Uses human-readable filenames (YYYY-MM-DD--<shortid>.md)
 - Makes manual browsing easy
@@ -344,14 +347,14 @@ This structure:
 
 ---
 
-## Integration with Zettelkasten
+## Integration with OKF Wiki
 
-Daily notes complement the Zettelkasten method:
+Daily notes complement the wider knowledge base:
 
-| Zettelkasten Concept | Daily Notes Role |
-|---------------------|------------------|
-| **Untethered notes** | Daily note = primary untethered inbox |
-| **Tethered notes** | Extract from daily during review |
+| Knowledge Base Concept | Daily Notes Role |
+|-----------------------|------------------|
+| **Capture** | Daily note = primary inbox |
+| **Refined notes** | Extract from daily during review |
 | **Links** | Track in "Links Created" section |
 | **Todos** | Create todos from daily captures |
 | **Projects** | Daily notes capture project-related thoughts |
@@ -363,7 +366,7 @@ Daily Note (capture)
     |
 Morning Review (extract)
     |
-Tethered Note (refine)    <->    Todo (actionable)
+Standalone Note (refine)  <->    Todo (actionable)
     |                              |
 Graph (connect)             Done (complete)
 ```
@@ -395,6 +398,6 @@ Graph (connect)             Done (complete)
 
 ## Related Documentation
 
-- [Notes Workflow](/zettelkasten/neovim/notes-workflow/) - General note-taking workflow
-- [Todo Workflow](/zettelkasten/neovim/todo-workflow/) - Todo management workflow
-- [CLI Commands](/zettelkasten/reference/cli-commands/) - Complete CLI reference
+- [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - General note-taking workflow
+- [Todo Workflow](/okf-wiki/neovim/todo-workflow/) - Todo management workflow
+- [CLI Commands](/okf-wiki/reference/cli-commands/) - Complete CLI reference

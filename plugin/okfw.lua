@@ -1,4 +1,4 @@
--- okfw.nvim - Zettelkasten CLI integration for NeoVim
+-- okfw.nvim - OKF Wiki CLI integration for NeoVim
 -- This file is auto-loaded by NeoVim when the plugin is installed
 
 -- Prevent loading twice
@@ -15,6 +15,13 @@ end
 
 -- User commands
 local function create_commands()
+    -- Initialize the project wiki (.okfw/); noop when it already exists
+    vim.api.nvim_create_user_command("OkfwInit", function()
+        require("okfw").init_wiki()
+    end, {
+        desc = "Initialize an OKF wiki for the current project",
+    })
+
     -- Daily notes
     vim.api.nvim_create_user_command("OkfwDaily", function(opts)
         local okfw = require("okfw")
@@ -55,10 +62,7 @@ local function create_commands()
         local i = 1
         while i <= #args_list do
             local arg = args_list[i]
-            if arg == "--category" and args_list[i + 1] then
-                args_parsed.note_type = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--project" and args_list[i + 1] then
+            if arg == "--project" and args_list[i + 1] then
                 args_parsed.project = args_list[i + 1]
                 i = i + 2
             else
@@ -66,23 +70,14 @@ local function create_commands()
             end
         end
 
-        -- Default to untethered
-        if not args_parsed.note_type then
-            args_parsed.note_type = "untethered"
-        end
-
         okfw.create_note(args_parsed)
     end, {
         nargs = "*",
         complete = function(_, line)
             local args = vim.split(line, "%s+")
-            local last = args[#args] or ""
             local prev = args[#args - 1] or ""
 
             -- Complete values after flags
-            if prev == "--category" then
-                return { "untethered", "tethered" }
-            end
             if prev == "--project" then
                 return {}
             end
@@ -93,15 +88,12 @@ local function create_commands()
                 used[a] = true
             end
             local completions = {}
-            if not used["--category"] then
-                table.insert(completions, "--category")
-            end
             if not used["--project"] then
                 table.insert(completions, "--project")
             end
             return completions
         end,
-        desc = "Create new concept (--category untethered/tethered --project NAME)",
+        desc = "Create new concept (--project NAME)",
     })
 
     vim.api.nvim_create_user_command("OkfwTemplate", function(opts)
@@ -178,10 +170,7 @@ local function create_commands()
         local i = 1
         while i <= #args_list do
             local arg = args_list[i]
-            if arg == "--category" and args_list[i + 1] then
-                search_opts.category = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--project" and args_list[i + 1] then
+            if arg == "--project" and args_list[i + 1] then
                 search_opts.project = args_list[i + 1]
                 i = i + 2
             elseif arg == "--type" and args_list[i + 1] then
@@ -235,9 +224,6 @@ local function create_commands()
             local prev = args[#args - 1] or ""
 
             -- Complete values after flags
-            if prev == "--category" then
-                return { "untethered", "tethered" }
-            end
             if prev == "--type" then
                 return { "note", "todo", "daily-note", "issue" }
             end
@@ -257,7 +243,7 @@ local function create_commands()
                 used[a] = true
             end
             local completions = {}
-            for _, flag in ipairs({ "--category", "--project", "--type", "--status", "--priority", "--due-before", "--due-after", "--tag" }) do
+            for _, flag in ipairs({ "--project", "--type", "--status", "--priority", "--due-before", "--due-after", "--tag" }) do
                 if not used[flag] then
                     table.insert(completions, flag)
                 end

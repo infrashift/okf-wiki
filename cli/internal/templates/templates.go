@@ -39,7 +39,6 @@ var issueTemplate string
 type Template struct {
 	Name        string
 	Description string
-	Category    string
 	Kind        string // structured kind: "note" (default), "todo", "daily-note", "issue"
 	Tags        []string
 	Body        string
@@ -65,49 +64,42 @@ var BuiltinTemplates = map[string]*Template{
 	"meeting": {
 		Name:        "meeting",
 		Description: "Meeting notes with attendees and action items",
-		Category:    "untethered",
 		Tags:        []string{"meeting"},
 		Body:        meetingTemplate,
 	},
 	"book-review": {
 		Name:        "book-review",
 		Description: "Book review with rating and key takeaways",
-		Category:    "tethered",
 		Tags:        []string{"book", "review"},
 		Body:        bookReviewTemplate,
 	},
 	"snippet": {
 		Name:        "snippet",
 		Description: "Code snippet with context and explanation",
-		Category:    "untethered",
 		Tags:        []string{"code", "snippet"},
 		Body:        snippetTemplate,
 	},
 	"project-idea": {
 		Name:        "project-idea",
 		Description: "Project idea with goals and next steps",
-		Category:    "untethered",
 		Tags:        []string{"idea", "project"},
 		Body:        projectIdeaTemplate,
 	},
 	"user-story": {
 		Name:        "user-story",
 		Description: "User story in standard format with acceptance criteria",
-		Category:    "untethered",
 		Tags:        []string{"user-story", "requirements"},
 		Body:        userStoryTemplate,
 	},
 	"feature": {
 		Name:        "feature",
 		Description: "Feature specification with requirements and design notes",
-		Category:    "untethered",
 		Tags:        []string{"feature", "spec"},
 		Body:        featureTemplate,
 	},
 	"daily": {
 		Name:        "daily",
 		Description: "Daily note for capturing thoughts, tasks, and reflections",
-		Category:    "untethered",
 		Kind:        "daily-note",
 		Tags:        []string{"daily"},
 		Body:        dailyTemplate,
@@ -115,7 +107,6 @@ var BuiltinTemplates = map[string]*Template{
 	"todo": {
 		Name:        "todo",
 		Description: "Actionable task with status tracking",
-		Category:    "untethered",
 		Kind:        "todo",
 		Tags:        []string{"todo"},
 		Body:        todoTemplate,
@@ -123,7 +114,6 @@ var BuiltinTemplates = map[string]*Template{
 	"issue": {
 		Name:        "issue",
 		Description: "Issue tracking like GitHub (bug, enhancement, question)",
-		Category:    "untethered",
 		Kind:        "issue",
 		Tags:        []string{"issue"},
 		Body:        issueTemplate,
@@ -212,8 +202,6 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 	if project != "" {
 		buf.WriteString(fmt.Sprintf("project: %q\n", project))
 	}
-
-	buf.WriteString(fmt.Sprintf("category: %q\n", t.Category))
 
 	// Todo-specific fields
 	if kind == "todo" {

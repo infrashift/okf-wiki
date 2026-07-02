@@ -18,7 +18,6 @@ type ConceptDoc struct {
 	Kind        string   `json:"kind"`                  // structured: "note", "todo", "daily-note", "issue"
 	Description string   `json:"description,omitempty"` // OKF one-sentence summary
 	Project     string   `json:"project"`
-	Category    string   `json:"category"`
 	Tags        []string `json:"tags"`
 	Body        string   `json:"body"`
 	FilePath    string   `json:"file_path"`
@@ -39,7 +38,6 @@ type SearchResult struct {
 	Type     string   `json:"type"`
 	Kind     string   `json:"kind"`
 	Project  string   `json:"project"`
-	Category string   `json:"category"`
 	Tags     []string `json:"tags"`
 	FilePath string   `json:"file_path"`
 	Score    float64  `json:"score"`
@@ -56,7 +54,6 @@ type SearchResult struct {
 type SearchOptions struct {
 	Query    string   // Full-text query
 	Project  string   // Filter by project
-	Category string   // Filter by category (untethered/tethered)
 	Type     string   // Filter by OKF type (free-form)
 	Kind     string   // Filter by structured kind (note/todo/daily-note/issue)
 	Tags     []string // Filter by tags (AND)
@@ -88,7 +85,6 @@ func CreateMapping() mapping.IndexMapping {
 	indexMapping.DefaultMapping.AddFieldMappingsAt("type", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("kind", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("project", keywordMapping)
-	indexMapping.DefaultMapping.AddFieldMappingsAt("category", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("tags", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("file_path", keywordMapping)
 	indexMapping.DefaultMapping.AddFieldMappingsAt("created", keywordMapping)
@@ -152,13 +148,6 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		projectQuery := bleve.NewTermQuery(opts.Project)
 		projectQuery.SetField("project")
 		queries = append(queries, projectQuery)
-	}
-
-	// Category filter
-	if opts.Category != "" {
-		categoryQuery := bleve.NewTermQuery(opts.Category)
-		categoryQuery.SetField("category")
-		queries = append(queries, categoryQuery)
 	}
 
 	// Tags filter (AND - must have all tags)
@@ -240,7 +229,7 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 	searchRequest := bleve.NewSearchRequest(finalQuery)
 	searchRequest.Size = opts.Limit
 	searchRequest.From = opts.Offset
-	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "category", "tags", "file_path", "status", "due", "completed", "priority"}
+	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "tags", "file_path", "status", "due", "completed", "priority"}
 
 	// Add highlighting for body matches
 	if opts.Query != "" {
@@ -273,9 +262,6 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		}
 		if project, ok := hit.Fields["project"].(string); ok {
 			result.Project = project
-		}
-		if category, ok := hit.Fields["category"].(string); ok {
-			result.Category = category
 		}
 		if filePath, ok := hit.Fields["file_path"].(string); ok {
 			result.FilePath = filePath
@@ -337,7 +323,7 @@ func FormatSearchResults(results []SearchResult, total int) string {
 
 	for i, r := range results {
 		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, r.Title))
-		sb.WriteString(fmt.Sprintf("   ID: %s | Category: %s", r.ID, r.Category))
+		sb.WriteString(fmt.Sprintf("   ID: %s", r.ID))
 		if r.Project != "" {
 			sb.WriteString(fmt.Sprintf(" | Project: %s", r.Project))
 		}

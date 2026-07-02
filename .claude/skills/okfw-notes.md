@@ -9,6 +9,18 @@ globs:
 
 Use the `okfw` CLI to create, search, and manage concepts. The binary must be built first: `go build -o okfw ./cli/cmd/okfw`
 
+## Wiki Location
+
+A wiki is a per-project `.okfw/` directory at the project root, created once
+with `okfw init` (no-op if it already exists). There is no config file. Every
+command discovers the wiki by searching upward from the current working
+directory (like git finds `.git`) and errors with init advice when none is
+found. `okfw connect` verifies the wiki and prints a summary; `okfw root`
+prints the discovered `.okfw` path. Generated artifacts inside `.okfw/`:
+`.index/` (search index), `.graph.db` (graph database), `.todos/` (todo
+lists), `ephemeral/` (exports) — all gitignored; concept markdown is
+committed with the project.
+
 ## Concept Format
 
 Every concept is a markdown file with YAML frontmatter. ID format: `YYYYMMDDHHmmss-UUIDv4`.
@@ -18,8 +30,7 @@ Every concept is a markdown file with YAML frontmatter. ID format: `YYYYMMDDHHmm
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "My Concept Title"
 type: "note"           # note | todo | daily-note | issue
-project: "myproject"   # required for tethered, optional for untethered
-category: "untethered" # untethered | tethered
+project: "myproject"   # always optional
 tags:
   - "golang"
   - "architecture"
@@ -35,11 +46,11 @@ Body content with [[20260212...-uuid|Display Title]] style links.
 ## Creating Concepts
 
 ```bash
-# Basic concept (untethered, auto-detects project from git context)
+# Basic concept (lands at the wiki root, no project metadata)
 okfw create "My Concept Title"
 
-# Tethered concept with explicit project
-okfw create "Design Doc" --category tethered --project myproject
+# Concept with explicit project
+okfw create "Design Doc" --project myproject
 
 # From template (meeting, book-review, snippet, project-idea, user-story, feature, daily, todo, issue)
 okfw create "Sprint Planning" --template meeting --project myproject
@@ -53,14 +64,14 @@ okfw templates
 
 ## Searching
 
-Requires index: `okfw index` or `okfw index ~/okfw`
+Requires index: `okfw index` (the wiki is discovered automatically) or `okfw index path/to/.okfw`
 
 ```bash
 # Full-text search
 okfw search "authentication patterns"
 
 # Filter by metadata
-okfw search --project myproject --category tethered
+okfw search --project myproject
 okfw search --type todo --status open --priority high
 okfw search --tag golang --tag api    # AND filter
 
@@ -82,12 +93,6 @@ okfw validate 20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 ## Concept Management
 
 ```bash
-# Tether an untethered concept (requires project)
-okfw tether ./concept.md --project myproject
-
-# Untether a tethered concept (removes project, sets category to untethered)
-okfw untether ./concept.md
-
 # Change project
 okfw set-project ./concept.md newproject
 

@@ -23,10 +23,6 @@ func TestBuiltinTemplates(t *testing.T) {
 			t.Errorf("Template %q has empty description", name)
 		}
 
-		if tmpl.Category != "untethered" && tmpl.Category != "tethered" {
-			t.Errorf("Template %q has invalid category: %q", name, tmpl.Category)
-		}
-
 		if len(tmpl.Tags) == 0 {
 			t.Errorf("Template %q has no tags", name)
 		}
@@ -141,8 +137,8 @@ func TestGenerateFrontmatter(t *testing.T) {
 		t.Errorf("Frontmatter should contain project")
 	}
 
-	if !strings.Contains(frontmatter, `category: "untethered"`) {
-		t.Errorf("Frontmatter should contain category")
+	if strings.Contains(frontmatter, "category:") {
+		t.Errorf("Frontmatter should not contain category")
 	}
 
 	if !strings.Contains(frontmatter, `"meeting"`) {

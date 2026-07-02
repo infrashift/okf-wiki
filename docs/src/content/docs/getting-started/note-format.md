@@ -14,7 +14,6 @@ title: "My Note Title"
 type: "note"
 description: "A one-sentence summary of the concept."  # Optional
 project: "my-project"
-category: "untethered"
 tags:
   - "idea"
   - "research"
@@ -47,12 +46,11 @@ If you previously saw a `type:` field holding `note`/`todo`/`daily-note`/`issue`
 | `kind` | No | `note`, `todo`, `daily-note`, or `issue` | Structured kind that drives behavior. Omitted from frontmatter when it equals `note` (default). |
 | `description` | No | One-sentence string | Optional OKF summary of the concept |
 | `resource` | No | URI | Optional OKF reference to an underlying asset (e.g. a file or URL the concept describes) |
-| `project` | Untethered: No, Tethered: Yes | Non-empty string | Project context (auto-detected from git) |
-| `category` | Yes | `untethered` or `tethered` | Concept category |
+| `project` | No | Non-empty string | Optional project metadata (set with `--project`) |
 | `tags` | Yes | List of non-empty strings | Categorization tags |
 | `created` | Yes | RFC3339 timestamp | Creation time |
 | `timestamp` | Yes | RFC3339 timestamp | OKF "last meaningful change". Updated by the CLI on every mutation. |
-| `parent` | No | Concept id | Parent concept for hierarchies. A concept's OKF id is its bundle-relative path minus `.md`. |
+| `parent` | No | Concept id | Parent concept for hierarchies. A concept's OKF id is its path within the wiki minus `.md`. |
 
 ## Todo-specific fields
 
@@ -67,12 +65,10 @@ When `kind: "todo"`:
 
 ## Concept IDs and file paths
 
-A concept's OKF **id is its bundle-relative path minus `.md`**. Concept files are named `slug--shortid.md` (for example `my-note-title--019f0494.md`), where the short id is the leading hex of the UUID. So a note stored at `infra/my-note-title--019f0494.md` has the OKF id `infra/my-note-title--019f0494`.
+A concept's OKF **id is its path within the wiki (relative to `.okfw/`) minus `.md`**. Concept files are named `slug--shortid.md` (for example `my-note-title--019f0494.md`), where the short id is the leading hex of the UUID. So a note stored at `.okfw/infra/my-note-title--019f0494.md` has the OKF id `infra/my-note-title--019f0494`.
 
-Links between concepts are vanilla markdown links that point at these paths. See the [Notes Workflow](/zettelkasten/neovim/notes-workflow/) for how linking works.
+Links between concepts are vanilla markdown links that point at these paths. See the [Notes Workflow](/okf-wiki/neovim/notes-workflow/) for how linking works.
 
 :::note
-Untethered notes can be created without a project context for quick idea capture. When tethering to a tethered note, a project is required.
+Notes can be created without a project context for quick idea capture. Assign a project later with `okfw set-project`.
 :::
-</content>
-</invoke>

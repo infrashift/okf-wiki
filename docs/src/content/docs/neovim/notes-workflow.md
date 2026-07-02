@@ -23,18 +23,18 @@ You're a developer. You read documentation, solve problems, attend meetings, and
 - Searchable, indexed knowledge
 - Works from your editor - no context switching
 
-`okfw` brings the Zettelkasten method into NeoVim, so your knowledge base grows while you work.
+`okfw` brings OKF Wiki into NeoVim, so your knowledge base grows while you work.
 
 ---
 
 ## Before You Begin
 
-**Recommended reading:** [Why Zettelkasten?](/zettelkasten/methodology/why-zettelkasten/)
+**Recommended reading:** [Why OKF Wiki?](/okf-wiki/methodology/why-okf-wiki/)
 
 Understanding the methodology will help you get more value from the tool. The key concepts are:
 
-- **Untethered notes** - Quick captures, unrefined thoughts
-- **Tethered notes** - Refined insights, linked to other notes
+- **Capture** - Get ideas into notes quickly, without judging them
+- **Refine** - Sharpen captures into clear, focused insights
 - **Atomic notes** - One idea per note
 - **Links** - Connections between notes create emergent structure
 
@@ -45,8 +45,8 @@ Understanding the methodology will help you get more value from the tool. The ke
 > *As a developer working on multiple projects, I want to capture ideas and insights as I work, so that I can build a searchable knowledge base without leaving my editor.*
 
 This tutorial will show you how to:
-1. Capture a quick idea (untethered note)
-2. Refine and tether it (tethered note)
+1. Capture a quick idea
+2. Refine and link it
 3. Search and connect your notes
 4. Use templates for structured content
 5. Build daily review habits
@@ -58,7 +58,11 @@ This tutorial will show you how to:
 Ensure you have:
 - NeoVim 0.9+ with the okfw plugin installed
 - The `okfw` CLI binary in your PATH
-- A zettelkasten directory (default: `~/okfw/`)
+- An initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at
+  your project root to create the `.okfw/` directory
+
+The plugin discovers the wiki via `okfw root` from NeoVim's current working
+directory, so open NeoVim anywhere inside your project.
 
 Verify your setup:
 ```vim
@@ -71,18 +75,18 @@ You should see a picker with available templates.
 
 ## Part 1: Basic Workflow (Without Templates)
 
-### Step 1: Capture an Untethered Note
+### Step 1: Capture a Note
 
 You're reading code and notice an interesting pattern. Capture it immediately.
 
 **From NeoVim:**
 ```vim
-:OkfwNote untethered
+:OkfwNote
 ```
 
 Or using the Lua API:
 ```vim
-:lua require("okfw").create_note("untethered")
+:lua require("okfw").create_note()
 ```
 
 You'll be prompted for a title:
@@ -92,13 +96,12 @@ Note Title: Interesting error handling pattern in auth module
 
 The plugin creates a new note and shows you the path. Files are named `slug--shortid.md`, where the short id is the leading hex of the concept's UUID:
 ```
-Created: ~/okfw/error-handling-pattern--019f0494.md
+Created: .okfw/error-handling-pattern--019f0494.md
 ```
 
 **What just happened:**
 - A new markdown file was created with a UUIDv7 `id` and a `slug--shortid.md` filename
 - YAML frontmatter was generated with metadata
-- The note is categorized as "untethered" (quick capture)
 - No project context required - just capture the thought
 
 ### Step 2: View Your Note
@@ -116,7 +119,6 @@ The file looks like this:
 id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
 type: "note"
-category: "untethered"
 tags:
   - ""
 created: "2026-02-13T14:23:45-06:00"
@@ -136,7 +138,6 @@ Fill in your thoughts while they're fresh:
 id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
 type: "note"
-category: "untethered"
 tags:
   - "go"
   - "error-handling"
@@ -165,7 +166,7 @@ Save the file (`:w`).
 
 Before you can search, index your notes:
 ```vim
-:OkfwIndex ~/okfw/
+:OkfwIndex path/to/.okfw/
 ```
 
 Or index just the current directory:
@@ -173,14 +174,9 @@ Or index just the current directory:
 :OkfwIndex
 ```
 
-### Step 5: Tether the Note
+### Step 5: Refine the Note
 
-A week later, you've used this pattern successfully. Time to tether the note.
-
-Open the untethered note, then press `\t` and select `tether`:
-```
-\t  →  Pick: tether / untether
-```
+A week later, you've used this pattern successfully. Time to refine the note: review the content, sharpen the writing, and add any context you were missing at capture time.
 
 You can also set a project with `\p`:
 ```
@@ -189,20 +185,19 @@ You can also set a project with `\p`:
 
 The note's frontmatter is updated:
 ```yaml
-category: "tethered"
 project: "my-project"
 ```
 
-**Why tether?**
-- Tethered notes represent validated knowledge
-- They require project context (accountability)
+**Why refine?**
+- Refined notes represent validated knowledge
+- Project context makes them easy to find later
 - They're the building blocks of your knowledge base
 
 ### Step 6: Link Notes Together
 
 Later, you write another note about Go best practices. Link back to your error handling note.
 
-Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. By default it uses a bundle-relative absolute path — a leading `/` means the bundle root:
+Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. By default it uses a wiki-relative absolute path — a leading `/` means the wiki root:
 ```markdown
 See also [error wrapping](/error-handling-pattern--019f0494.md) for the pattern.
 ```
@@ -260,7 +255,6 @@ The note opens with a pre-filled structure:
 id: "019f04a1-2b3c-7456-8def-0123456789ab"
 title: "Sprint 14 Planning"
 type: "note"
-category: "untethered"
 tags:
   - "meeting"
 created: "2026-02-13T15:00:00-06:00"
@@ -306,7 +300,6 @@ Title: `Add password reset flow`
 id: "019f04b8-7e9a-7012-3456-789abcdef012"
 title: "Add password reset flow"
 type: "note"
-category: "untethered"
 tags:
   - "user-story"
   - "requirements"
@@ -395,8 +388,7 @@ Search as you type:
 `:OkfwSearch` supports flags for filtering by any indexed field:
 
 ```vim
-" Filter by category or project
-:OkfwSearch --category tethered
+" Filter by project
 :OkfwSearch --project my-project
 
 " Filter by structured kind (note/todo/daily-note/issue)
@@ -437,44 +429,29 @@ This generates an ASCII tree showing up to 20 notes and their relationships.
 
 ---
 
-## Part 4: The Tether Workflow
+## Part 4: The Refine Workflow
 
-The core Zettelkasten workflow is:
+The core workflow is:
 
 ```
-Capture (untethered) -> Review -> Refine -> Tether (tethered)
+Capture -> Review -> Refine -> Link
 ```
 
-### When to Tether
+### When to Refine
 
-Tether an untethered note when:
+Refine a captured note when:
 - You've validated the idea through use
-- You've refined the content for clarity
+- The content needs sharpening for clarity
 - It connects meaningfully to other notes
 - It's worth keeping long-term
 
-### How to Tether
+### How to Refine
 
-1. Open the untethered note
-2. Review and refine the content
-3. Add links to related notes
+1. Open the note
+2. Review and sharpen the content
+3. Add links to related notes with `\l`
 4. Set the project context with `\p` (if not already set)
-5. Press `\t` and select `tether`
-
-### How to Untether
-
-If a tethered note no longer warrants its status, you can revert it:
-
-1. Open the tethered note
-2. Press `\t` and select `untether`
-
-The note's `category` changes back from `"tethered"` to `"untethered"`.
-
-### What Changes When Tethering
-
-- `category` changes from `"untethered"` to `"tethered"`
-- `project` is set (required for tethered notes)
-- The file stays in place (no movement required)
+5. Add tags with `\a`
 
 ---
 
@@ -489,8 +466,8 @@ vim.keymap.set("n", "<leader>zD", "<cmd>OkfwDaily yesterday<cr>", { desc = "Yest
 
 -- Note creation
 vim.keymap.set("n", "<leader>zf", function()
-    require("okfw").create_note("untethered")
-end, { desc = "New untethered note" })
+    require("okfw").create_note()
+end, { desc = "New note" })
 
 vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTemplate<cr>", { desc = "New from template" })
 
@@ -511,7 +488,7 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" }
 
 | Action | Command | Keymap Suggestion |
 |--------|---------|-------------------|
-| New untethered note | `:OkfwNote untethered` | `<leader>zf` |
+| New note | `:OkfwNote` | `<leader>zf` |
 | New from template | `:OkfwTemplate` | `<leader>zt` |
 | Today's daily | `:OkfwDaily` | `<leader>zd` |
 | Search notes | `:OkfwSearch` | `<leader>zz` |
@@ -519,7 +496,6 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" }
 | Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on concepts |
 | Toggle backlinks | `\b` (buffer-local) | Auto-mapped on concepts |
 | Set project | `\p` (buffer-local) | Auto-mapped on note/todo |
-| Tether / Untether | `\t` (buffer-local) | Auto-mapped on note/todo |
 | Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
 | Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 | Generate graph | `:OkfwGraph` | `<leader>zg` |
@@ -536,7 +512,7 @@ Daily notes are the foundation of a sustainable practice. They provide:
 - A natural review rhythm
 - A timeline of your thinking
 
-**Read:** [Daily Notes Workflow](/zettelkasten/neovim/daily-notes-workflow/) for a comprehensive guide to daily, weekly, and monthly review workflows in NeoVim.
+**Read:** [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a comprehensive guide to daily, weekly, and monthly review workflows in NeoVim.
 
 ### Manage Tasks with Todos
 
@@ -545,13 +521,13 @@ Todos are a special type of concept for actionable tasks. They integrate with da
 - Due dates and priorities
 - Links to related notes
 
-**Read:** [Todo Workflow](/zettelkasten/neovim/todo-workflow/) for the complete todo workflow guide.
+**Read:** [Todo Workflow](/okf-wiki/neovim/todo-workflow/) for the complete todo workflow guide.
 
 ### Master the CLI
 
 The NeoVim plugin wraps the `okfw` CLI. For scripting, automation, or terminal use:
 
-**Read:** [CLI Commands](/zettelkasten/reference/cli-commands/) for the complete command reference.
+**Read:** [CLI Commands](/okf-wiki/reference/cli-commands/) for the complete command reference.
 
 ### Get Help
 
@@ -573,14 +549,13 @@ okfw daily --help
 
 You've learned how to:
 
-1. **Capture** - Create untethered notes for quick ideas
-2. **Refine** - Add content, tags, and links
-3. **Tether** - Elevate validated insights to tethered notes
-4. **Untether** - Revert tethered notes when needed
-5. **Search** - Find and connect your knowledge
-6. **Template** - Use structured formats for consistency
+1. **Capture** - Create notes for quick ideas
+2. **Refine** - Add content, tags, and project context
+3. **Link** - Connect validated insights to related notes
+4. **Search** - Find and connect your knowledge
+5. **Template** - Use structured formats for consistency
 
-The key is consistency. Capture freely, review regularly, and tether deliberately. Your knowledge base will grow organically as you work.
+The key is consistency. Capture freely, review regularly, and link deliberately. Your knowledge base will grow organically as you work.
 
 ---
 

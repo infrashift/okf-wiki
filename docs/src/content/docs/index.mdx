@@ -1,16 +1,16 @@
 ---
 title: OKF Wiki
-description: A fast, opinionated command-line tool for managing a Zettelkasten note-taking system. Built with Go, validated with CUE schemas, and integrated with NeoVim. Concepts are stored as plain markdown conforming to the Open Knowledge Format (OKF).
+description: A fast, opinionated command-line tool for managing a local-first knowledge base. Built with Go, validated with CUE schemas, and integrated with NeoVim. Concepts are stored as plain markdown conforming to the Open Knowledge Format (OKF).
 template: splash
 hero:
-  tagline: A fast, opinionated CLI for the Zettelkasten method — with CUE-validated schemas, full-text search, graph visualization, and deep NeoVim integration.
+  tagline: A fast, opinionated CLI for zero-configuration, per-project knowledge bases — one `okfw init` creates a `.okfw/` wiki that travels with your repo, with CUE-validated schemas, full-text search, graph visualization, and deep NeoVim integration.
   actions:
     - text: Get Started
-      link: /zettelkasten/getting-started/installation/
+      link: /okf-wiki/getting-started/installation/
       icon: right-arrow
       variant: primary
     - text: Tutorial
-      link: /zettelkasten/tutorial/
+      link: /okf-wiki/tutorial/
       variant: minimal
 ---
 
@@ -18,16 +18,16 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 
 <CardGrid>
   <Card title="CLI-First Workflow" icon="seti:shell">
-    Create, promote, search, and link notes from the command line. Designed for developers who live in the terminal.
+    Create, search, and link notes from the command line. Designed for developers who live in the terminal.
   </Card>
   <Card title="NeoVim Plugin" icon="laptop">
     Lua plugin with snacks.nvim picker, floating previews, backlink panels, and keybindings for seamless editing.
   </Card>
   <Card title="Graph Visualization" icon="random">
-    Generate ASCII tree visualizations showing how your notes connect. Visualize untethered vs tethered notes and their relationships.
+    Generate ASCII tree visualizations showing how your notes connect and their relationships.
   </Card>
   <Card title="Full-Text Search" icon="magnifier">
-    Bleve-powered local search index with structured field queries. Filter by project, category, tags, and more.
+    Bleve-powered local search index with structured field queries. Filter by project, tags, and more.
   </Card>
   <Card title="Note Templates" icon="document">
     Built-in templates for meetings, user stories, features, book reviews, code snippets, and project ideas.

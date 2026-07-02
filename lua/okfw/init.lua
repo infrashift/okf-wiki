@@ -6,17 +6,16 @@ M.setup = function(opts)
     }, opts or {})
 end
 
-M.create_note = function(opts_or_type, project)
+M.create_note = function(opts_or_project, project)
     local opts = {}
 
-    -- Handle legacy call signature: create_note(type, project)
-    if type(opts_or_type) == "string" then
+    -- Handle legacy call signature: create_note(_, project)
+    if type(opts_or_project) == "string" then
         opts = {
-            note_type = opts_or_type,
             project = project,
         }
     else
-        opts = opts_or_type or {}
+        opts = opts_or_project or {}
     end
 
     local title = opts.title
@@ -26,7 +25,7 @@ M.create_note = function(opts_or_type, project)
     end
 
     local cwd = vim.fn.getcwd()
-    local args = { "create", title, "--category", opts.note_type or "untethered" }
+    local args = { "create", title }
 
     if opts.project and opts.project ~= "" then
         table.insert(args, "--project")
@@ -442,48 +441,39 @@ M.templates = {
     {
         name = "meeting",
         description = "Meeting notes with attendees and action items",
-        category = "untethered",
     },
     {
         name = "book-review",
         description = "Book review with rating and key takeaways",
-        category = "tethered",
     },
     {
         name = "snippet",
         description = "Code snippet with context and explanation",
-        category = "untethered",
     },
     {
         name = "project-idea",
         description = "Project idea with goals and next steps",
-        category = "untethered",
     },
     {
         name = "user-story",
         description = "User story with acceptance criteria",
-        category = "untethered",
     },
     {
         name = "feature",
         description = "Feature specification with requirements",
-        category = "untethered",
     },
     {
         name = "daily",
         description = "Daily note for thoughts, tasks, and reflections",
-        category = "untethered",
     },
     {
         name = "todo",
         description = "Actionable task with status tracking",
-        category = "untethered",
         type = "todo",
     },
     {
         name = "issue",
         description = "Issue tracking like GitHub (bug, enhancement, question)",
-        category = "untethered",
         type = "issue",
     },
 }
@@ -581,8 +571,8 @@ M.template_picker = function(opts)
 
     local items = {}
     for idx, entry in ipairs(M.templates) do
-        local display = string.format("%-15s %s [%s]",
-            entry.name, entry.description, entry.category)
+        local display = string.format("%-15s %s",
+            entry.name, entry.description)
         table.insert(items, {
             idx = idx,
             text = entry.name .. " " .. entry.description,
@@ -607,15 +597,7 @@ M.template_picker = function(opts)
             local title = vim.fn.input("Note Title: ")
             if title == "" then return end
 
-            -- For tethered templates, ensure project
             local project = opts.project
-            if tmpl.category == "tethered" and (not project or project == "") then
-                project = vim.fn.input("Project (required for tethered): ")
-                if project == "" then
-                    print("Tethered notes require a project")
-                    return
-                end
-            end
 
             local args = { "create", title, "--template", tmpl.name }
             if project and project ~= "" then
@@ -654,73 +636,6 @@ M.template_picker = function(opts)
             job:start()
         end,
     })
-end
-
-M.tether_note = function(file_path, project)
-    file_path = file_path or vim.fn.expand("%:p")
-    if file_path == "" then
-        print("No file specified")
-        return
-    end
-
-    local cwd = vim.fn.getcwd()
-    local args = { "tether", file_path }
-
-    if project and project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, project)
-    end
-
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = args,
-        cwd = cwd,
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    print("Note tethered")
-                    if vim.fn.expand("%:p") == file_path then
-                        vim.cmd("edit!")
-                    end
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    print("Failed to tether note: " .. err)
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
-M.untether_note = function(file_path)
-    file_path = file_path or vim.fn.expand("%:p")
-    if file_path == "" then
-        print("No file specified")
-        return
-    end
-
-    local cwd = vim.fn.getcwd()
-    local args = { "untether", file_path }
-
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = args,
-        cwd = cwd,
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    print("Note untethered")
-                    if vim.fn.expand("%:p") == file_path then
-                        vim.cmd("edit!")
-                    end
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    print("Failed to untether note: " .. err)
-                end
-            end)
-        end,
-    })
-    job:start()
 end
 
 M.set_project = function(file_path, project)
@@ -769,11 +684,6 @@ M.search = function(query, opts)
         table.insert(args, opts.project)
     end
 
-    if opts.category and opts.category ~= "" then
-        table.insert(args, "--category")
-        table.insert(args, opts.category)
-    end
-
     if opts.tags and type(opts.tags) == "table" then
         for _, tag in ipairs(opts.tags) do
             table.insert(args, "--tag")
@@ -805,7 +715,7 @@ M.search = function(query, opts)
                             print("No results found")
                         else
                             for _, r in ipairs(results) do
-                                print(string.format("%s: %s [%s]", r.id, r.title, r.category))
+                                print(string.format("%s: %s", r.id, r.title))
                             end
                         end
                     end
@@ -1114,16 +1024,42 @@ end
 
 -- Insert a concept link at cursor position
 -- Format: [[id]] or [[id|title]]
--- Cached bundle root (path of the OKF bundle), queried from the CLI.
-M._bundle_root = nil
+-- Cached wiki roots (path of the project's .okfw directory), queried from the
+-- CLI. Keyed by cwd: the wiki is per-project and discovered by walking upward,
+-- so switching projects within one session must not reuse a stale root.
+M._bundle_roots = {}
 M.bundle_root = function()
-    if M._bundle_root then return M._bundle_root end
+    local cwd = vim.fn.getcwd()
+    if M._bundle_roots[cwd] then return M._bundle_roots[cwd] end
     local Job = require("plenary.job")
-    local job = Job:new({ command = M.config.bin, args = { "root" } })
+    local job = Job:new({ command = M.config.bin, args = { "root" }, cwd = cwd })
     job:sync(5000)
     local out = vim.trim(table.concat(job:result(), "\n"))
-    if out ~= "" then M._bundle_root = out end
-    return M._bundle_root
+    if out ~= "" then M._bundle_roots[cwd] = out end
+    return M._bundle_roots[cwd]
+end
+
+-- Initialize an OKF wiki for the current project (noop when already present).
+M.init_wiki = function()
+    local cwd = vim.fn.getcwd()
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "init" },
+        cwd = cwd,
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    local out = table.concat(j:result(), "\n")
+                    print(out ~= "" and out or "OKF wiki initialized")
+                    M._bundle_roots[cwd] = nil -- rediscover on next use
+                else
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("okfw init failed: " .. err, vim.log.levels.ERROR)
+                end
+            end)
+        end,
+    })
+    job:start()
 end
 
 -- Convert an absolute path to a bundle-relative OKF link target ("/dir/file.md").
@@ -1318,7 +1254,7 @@ M.link_picker = function(opts)
 
     Snacks.picker.pick({
         source = "okfw_link",
-        title = "Insert Link to Zettel",
+        title = "Insert Link to Concept",
         items = items,
         format = function(item, _picker)
             return { { item.display or item.text } }
@@ -1621,7 +1557,7 @@ M.cmp_source = function()
             table.insert(items, {
                 label = tag,
                 kind = require("cmp").lsp.CompletionItemKind.Keyword,
-                documentation = "Zettel tag",
+                documentation = "Concept tag",
             })
         end
 
@@ -1743,7 +1679,7 @@ M.backlinks_panel = function(opts)
                 title = title:sub(1, 32) .. "..."
             end
             table.insert(lines, string.format(" %d. %s", i, title))
-            table.insert(lines, string.format("    [%s] %s", bl.category, bl.id))
+            table.insert(lines, string.format("    %s", bl.id))
         end
         table.insert(lines, "")
     end
@@ -1895,7 +1831,7 @@ M.backlinks_split = function(opts)
         for _, bl in ipairs(backlinks) do
             local title = bl.title or bl.id
             table.insert(lines, string.format("- **%s** `%s`", title, bl.id))
-            table.insert(lines, string.format("  [%s] %s", bl.category, bl.file_path))
+            table.insert(lines, string.format("  %s", bl.file_path))
             table.insert(lines, "")
         end
     end

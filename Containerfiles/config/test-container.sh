@@ -61,28 +61,41 @@ grep -q "xterm-ghostty" ~/.tmux.conf && pass "tmux.conf has ghostty override" ||
 section "okfw CLI"
 
 export HOME=/home/user
-OKFWDIR=/home/user/okfw
-mkdir -p "$OKFWDIR/.okfw" "$OKFWDIR/untethered" "$OKFWDIR/tethered" "$OKFWDIR/daily" "$OKFWDIR/todos"
-cd "$OKFWDIR"
+PROJECT=/home/user/test-project
+mkdir -p "$PROJECT"
+cd "$PROJECT"
 git init -q .
 git config user.email "test@test.com"
 git config user.name "Test"
 
-cat > .okfw/config.yaml <<'YAML'
-root: .
-untethered_dir: untethered
-tethered_dir: tethered
-daily_dir: daily
-todo_dir: todos
-projects: []
-YAML
+# Test: create before init fails with advice
+OUTPUT=$(okfw create "Too Early" 2>&1)
+[[ $? -ne 0 ]] && echo "$OUTPUT" | grep -q "okfw init" && pass "create before init advises okfw init" || fail "pre-init create" "$OUTPUT"
 
-# Test: create untethered note
-OUTPUT=$(okfw create "Test Note Alpha" --category untethered 2>&1)
-echo "$OUTPUT" | grep -qi "created\|Created" && pass "create untethered note" || fail "create untethered" "$OUTPUT"
+# Test: init creates the per-project wiki
+OUTPUT=$(okfw init 2>&1)
+echo "$OUTPUT" | grep -qi "Initialized" && pass "okfw init" || fail "init" "$OUTPUT"
+[[ -d "$PROJECT/.okfw" ]] && pass ".okfw directory created" || fail ".okfw" "missing"
+[[ -f "$PROJECT/.okfw/.gitignore" ]] && pass ".okfw/.gitignore written" || fail ".okfw/.gitignore" "missing"
 
-UNTETHERED_COUNT=$(find "$OKFWDIR/untethered" -name "*.md" 2>/dev/null | wc -l)
-[[ "$UNTETHERED_COUNT" -ge 1 ]] && pass "untethered file exists ($UNTETHERED_COUNT files)" || fail "untethered file" "no .md in untethered/"
+# Test: repeat init is a noop
+OUTPUT=$(okfw init 2>&1)
+echo "$OUTPUT" | grep -qi "already initialized" && pass "repeat init is a noop" || fail "repeat init" "$OUTPUT"
+
+# Test: connect reports the wiki
+OUTPUT=$(okfw connect 2>&1)
+echo "$OUTPUT" | grep -q "Connected:" && pass "okfw connect" || fail "connect" "$OUTPUT"
+
+OKFWDIR="$PROJECT/.okfw"
+# Without --path or --project, new concepts land at the wiki root.
+NOTES_DIR="$OKFWDIR"
+
+# Test: create note
+OUTPUT=$(okfw create "Test Note Alpha" 2>&1)
+echo "$OUTPUT" | grep -qi "created\|Created" && pass "create note" || fail "create note" "$OUTPUT"
+
+NOTE_COUNT=$(find "$NOTES_DIR" -name "*.md" 2>/dev/null | wc -l)
+[[ "$NOTE_COUNT" -ge 1 ]] && pass "note file exists ($NOTE_COUNT files)" || fail "note file" "no .md in $NOTES_DIR"
 
 # Test: create with template
 OUTPUT=$(okfw create "Meeting Review" --template meeting 2>&1)
@@ -92,20 +105,20 @@ echo "$OUTPUT" | grep -qi "created\|Created" && pass "create from template (meet
 OUTPUT=$(okfw daily 2>&1)
 echo "$OUTPUT" | grep -qi "daily\|note\|created\|Daily" && pass "daily note" || fail "daily" "$OUTPUT"
 
-# Daily notes are stored under untethered/daily/YYYY/MM/
-DAILY_COUNT=$(find "$OKFWDIR/untethered/daily" -name "*.md" 2>/dev/null | wc -l)
-[[ "$DAILY_COUNT" -ge 1 ]] && pass "daily note file exists ($DAILY_COUNT files)" || fail "daily file" "no .md in untethered/daily/"
+# Daily notes are stored under daily/YYYY/MM/
+DAILY_COUNT=$(find "$OKFWDIR/daily" -name "*.md" 2>/dev/null | wc -l)
+[[ "$DAILY_COUNT" -ge 1 ]] && pass "daily note file exists ($DAILY_COUNT files)" || fail "daily file" "no .md in daily/"
 
 # Test: create todo
 OUTPUT=$(okfw todo "Fix the thing" 2>&1)
 echo "$OUTPUT" | grep -qi "todo\|created\|Fix" && pass "create todo" || fail "create todo" "$OUTPUT"
 
-# Todos are created as untethered notes in untethered/ (same-minute timestamps may collide)
-ALL_UNTETHERED=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
-[[ "$ALL_UNTETHERED" -ge 1 ]] && pass "todo file exists in untethered/ ($ALL_UNTETHERED files)" || fail "todo file" "expected >=1 .md in untethered/"
+# Todos are placed like any concept: --path, else --project folder, else wiki root
+ALL_NOTES=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l)
+[[ "$ALL_NOTES" -ge 1 ]] && pass "todo file exists in $NOTES_DIR ($ALL_NOTES files)" || fail "todo file" "expected >=1 .md in $NOTES_DIR"
 
 # Test: set-status closed
-TODO_FILE=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | tail -1)
+TODO_FILE=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" 2>/dev/null | tail -1)
 if [[ -n "$TODO_FILE" ]]; then
   OUTPUT=$(okfw set-status "$TODO_FILE" closed 2>&1)
   echo "$OUTPUT" | grep -qi "closed\|Closed" && pass "set-status closed" || fail "set-status closed" "$OUTPUT"
@@ -124,7 +137,7 @@ if [[ -n "$TODO_FILE" ]]; then
 fi
 
 # Test: add-tags
-NOTE_FILE=$(find "$OKFWDIR/untethered" -maxdepth 1 -name "*.md" 2>/dev/null | head -1)
+NOTE_FILE=$(find "$NOTES_DIR" -maxdepth 1 -name "*.md" 2>/dev/null | head -1)
 if [[ -n "$NOTE_FILE" ]]; then
   OUTPUT=$(okfw add-tags "$NOTE_FILE" golang api 2>&1)
   echo "$OUTPUT" | grep -qi "added\|Added\|tags" && pass "add-tags" || fail "add-tags" "$OUTPUT"
@@ -138,7 +151,7 @@ if [[ -n "$NOTE_FILE" ]]; then
 fi
 
 # Test: index
-OUTPUT=$(okfw index . 2>&1)
+OUTPUT=$(okfw index .okfw 2>&1)
 echo "$OUTPUT" | grep -qi "indexed\|index\|Indexed" && pass "index" || fail "index" "$OUTPUT"
 
 # Test: search
@@ -149,9 +162,11 @@ echo "$OUTPUT" | grep -q "Test Note Alpha\|title" && pass "search finds notes (J
 OUTPUT=$(okfw search --json --limit 1 2>&1)
 echo "$OUTPUT" | grep -q "\[" && pass "search --limit 1" || fail "search --limit" "$OUTPUT"
 
-# Test: search with --category
-OUTPUT=$(okfw search --json --category untethered 2>&1)
-echo "$OUTPUT" | grep -q "untethered" && pass "search --category untethered" || fail "search --category" "$OUTPUT"
+# Test: search with --project (project is explicit metadata via -p)
+okfw create "Projected Note" -p demo-project &>/dev/null
+okfw index .okfw &>/dev/null
+OUTPUT=$(okfw search --json --project demo-project 2>&1)
+echo "$OUTPUT" | grep -q "demo-project" && pass "search --project demo-project" || fail "search --project" "$OUTPUT"
 
 # Test: templates list
 OUTPUT=$(okfw templates 2>&1)
@@ -161,32 +176,21 @@ echo "$OUTPUT" | grep -q "snippet" && pass "templates lists snippet" || fail "te
 echo "$OUTPUT" | grep -q "daily" && pass "templates lists daily" || fail "templates" "$OUTPUT"
 echo "$OUTPUT" | grep -q "book-review" && pass "templates lists book-review" || fail "templates" "$OUTPUT"
 
-# Test: tether (needs an untethered note)
-UNTETHERED_FILE=$(find "$OKFWDIR/untethered" -name "*.md" 2>/dev/null | head -1)
-if [[ -n "$UNTETHERED_FILE" ]]; then
-  OUTPUT=$(okfw tether "$UNTETHERED_FILE" --project test-proj 2>&1)
-  echo "$OUTPUT" | grep -qi "tethered\|Tethered\|tether" && pass "tether untethered->tethered" || fail "tether" "$OUTPUT"
-  # Tether updates frontmatter category in-place (doesn't move file)
-  grep -q "tethered" "$UNTETHERED_FILE" 2>/dev/null && pass "tethered file has tethered category" || fail "tethered file" "category not updated"
-else
-  fail "tether" "no untethered file found"
-fi
-
 # Test: set-project
-PERM_FILE=$(find "$OKFWDIR/tethered" -name "*.md" 2>/dev/null | head -1)
-if [[ -n "$PERM_FILE" ]]; then
-  OUTPUT=$(okfw set-project "$PERM_FILE" new-project 2>&1)
+if [[ -n "$NOTE_FILE" ]]; then
+  OUTPUT=$(okfw set-project "$NOTE_FILE" new-project 2>&1)
   echo "$OUTPUT" | grep -qi "project\|updated\|Project" && pass "set-project" || fail "set-project" "$OUTPUT"
+  grep -q "new-project" "$NOTE_FILE" 2>/dev/null && pass "set-project wrote project to file" || fail "set-project file" "project not updated"
 fi
 
 # Test: backlinks
-if [[ -n "$PERM_FILE" ]]; then
-  OUTPUT=$(okfw backlinks "$PERM_FILE" --json 2>&1)
+if [[ -n "$NOTE_FILE" ]]; then
+  OUTPUT=$(okfw backlinks "$NOTE_FILE" --json 2>&1)
   echo "$OUTPUT" | grep -q "\[" && pass "backlinks (JSON output)" || fail "backlinks" "$OUTPUT"
 fi
 
 # Test: graph (ASCII tree output)
-OUTPUT=$(okfw graph . --limit 5 2>&1)
+OUTPUT=$(okfw graph --limit 5 2>&1)
 echo "$OUTPUT" | grep -q "[├└─]" && pass "graph" || fail "graph" "$OUTPUT"
 
 # ── NeoVim plugin tests ────────────────────────────────────────────────
@@ -199,7 +203,7 @@ for plugin in "okfw.nvim" "snacks.nvim" "plenary.nvim" "LazyVim" "which-key.nvim
 done
 
 # Test: all Okfw commands registered
-for cmd in OkfwSearch OkfwNote OkfwDaily OkfwTodo OkfwTemplate OkfwIndex OkfwGraph OkfwRefreshTags OkfwTodoList OkfwDailyList; do
+for cmd in OkfwInit OkfwSearch OkfwNote OkfwDaily OkfwTodo OkfwTemplate OkfwIndex OkfwGraph OkfwRefreshTags OkfwTodoList OkfwDailyList; do
   OUTPUT=$(nvim --headless -c "lua if vim.api.nvim_get_commands({})['$cmd'] then print('OK') end" -c qa 2>&1)
   echo "$OUTPUT" | grep -q "OK" && pass ":$cmd command" || fail ":$cmd" "not registered"
 done
@@ -209,7 +213,7 @@ OUTPUT=$(nvim --headless -c 'lua local okfw = require("okfw"); if okfw.config an
 echo "$OUTPUT" | grep -q "CONFIGURED" && pass "okfw.setup() bin=/home/user/.local/bin/okfw" || fail "okfw.setup" "$OUTPUT"
 
 # Test: okfw module has expected functions
-for fn in create_note daily todo search index tether_note untether_note set_project set_status add_tags validate graph backlinks_panel toggle_backlinks preview_note insert_link complete_tags; do
+for fn in create_note daily todo search index set_project set_status add_tags validate graph backlinks_panel toggle_backlinks preview_note insert_link complete_tags; do
   OUTPUT=$(nvim --headless -c "lua if type(require('okfw').$fn) == 'function' then print('OK') end" -c qa 2>&1)
   echo "$OUTPUT" | grep -q "OK" && pass "okfw.$fn() exists" || fail "okfw.$fn" "not a function"
 done
@@ -250,7 +254,7 @@ else
 fi
 
 # ── Cleanup ──────────────────────────────────────────────────────────────
-rm -rf "$OKFWDIR"
+rm -rf "$PROJECT"
 
 # ── Summary ──────────────────────────────────────────────────────────────
 section "SUMMARY"

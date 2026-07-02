@@ -25,7 +25,7 @@ make ui-check
 ## Source Layout
 
 ```
-okfw/
+okf-wiki/
 ├── cli/
 │   ├── cmd/okfw/        # CLI entry point (Cobra commands)
 │   ├── internal/
@@ -34,31 +34,32 @@ okfw/
 │   │   ├── graphdb/     # Persistent graph store (bbolt)
 │   │   ├── index/       # Bleve full-text search index
 │   │   ├── templates/   # Embedded note templates
-│   │   └── zettel/      # Note utilities (git context)
+│   │   └── gitctx/      # Git project-context helper
 │   └── testdata/        # Test fixtures
 ├── lua/okfw/            # NeoVim plugin (snacks-based pickers)
-├── plugin/              # NeoVim autoload
-├── after/               # NeoVim ftplugin
+├── plugin/okfw.lua      # NeoVim plugin auto-load
+├── doc/okfw.txt         # NeoVim help file
+├── docs/                # Documentation site (Astro Starlight)
 ├── go.mod, go.sum       # Go module (stays at root)
 └── Makefile
 ```
 
-## Bundle Layout
+## Wiki Layout
 
-Your knowledge base (the "bundle") lives separately from the source tree, at
-`~/okfw` by default. Concepts are markdown files named `slug--shortid.md`, where
-the short id is the leading hex of the concept's UUID. A concept's OKF id is its
-bundle-relative path minus `.md`.
+Each project's knowledge base is a `.okfw/` directory at the project's root,
+created by `okfw init` and discovered automatically by every command (searching
+upward from the current directory, like git finds `.git`). Concepts are
+markdown files named `slug--shortid.md`, where the short id is the leading hex
+of the concept's UUID. A concept's OKF id is its path within the wiki minus
+`.md`.
 
-Concepts are organized by topic and project, not by maturity. A concept's
-`category` (`untethered`/`tethered`) is metadata only and does not affect where
-the file is placed. With no `--path`, a concept lands in a top-level folder named
-after its project (or the bundle root when there is no project); an explicit
-`--path projects/okf` overrides that. okfw does not create or require any
-`untethered/`/`tethered/` folders.
+Concepts are organized by topic and project, not by maturity. With no `--path`,
+a concept lands in a top-level folder named after its project (or the wiki
+root when there is no project); an explicit `--path projects/okf` overrides
+that.
 
 ```
-~/okfw/                            # Bundle root
+.okfw/                             # Wiki root (at the project root)
 ├── index.md                       # Directory listing (reserved; okf_version)
 ├── log.md                         # Update history (reserved)
 ├── infra/                         # A project folder (concepts grouped by project)
@@ -70,11 +71,16 @@ after its project (or the bundle root when there is no project); an explicit
 │           └── 2026-06-26--019f04a1.md
 ├── any-other-folder/              # Concepts may live in any directory you choose
 │   └── refined-concept--019f04b8.md
-├── ephemeral/                     # Exports (gitignored)
-├── .okfw_index/                   # Bleve full-text search index (auto-managed)
-├── .okfw_graph.db                 # Persistent graph database (auto-managed)
-└── .okfw_todos/                   # Generated todo lists
+├── ephemeral/                     # Export scratch dir (gitignored)
+├── .index/                        # Bleve full-text search index (auto-managed)
+├── .graph.db                      # Persistent graph database (auto-managed)
+├── .todos/                        # Generated todo lists
+└── .gitignore                     # Ignores .index/, .graph.db, .todos/, ephemeral/
 ```
+
+Concept markdown is meant to be **committed with the project**; the generated
+artifacts (`.index/`, `.graph.db`, `.todos/`, `ephemeral/`) are covered by the
+`.gitignore` that `okfw init` writes.
 
 `index.md` and `log.md` are **reserved filenames** that carry no concept
 frontmatter. `index.md` is a per-directory listing for progressive disclosure

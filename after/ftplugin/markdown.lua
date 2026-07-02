@@ -110,20 +110,6 @@ if is_concept() then
         vim.keymap.set("n", "<localleader>p", function()
             require("okfw").set_project()
         end, vim.tbl_extend("force", opts, { desc = "Set project" }))
-
-        vim.keymap.set("n", "<localleader>t", function()
-            vim.ui.select(
-                { "tether", "untether" },
-                { prompt = "Tether / Untether:" },
-                function(choice)
-                    if choice == "tether" then
-                        require("okfw").tether_note()
-                    elseif choice == "untether" then
-                        require("okfw").untether_note()
-                    end
-                end
-            )
-        end, vim.tbl_extend("force", opts, { desc = "Tether / Untether" }))
     end
 
     -- Status picker for todo-kind concepts

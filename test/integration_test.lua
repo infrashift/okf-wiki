@@ -33,15 +33,10 @@ local plenary_path = "/tmp/nvim-test-plugins/plenary.nvim/lua"
 vim.opt.runtimepath:append(vim.fn.getcwd())
 vim.opt.runtimepath:append("/tmp/nvim-test-plugins/plenary.nvim")
 
--- Isolate the bundle so this test never touches the real ~/okfw and is
--- deterministic. okfw resolves its bundle root from $HOME by default.
-local test_home = vim.fn.tempname()
-vim.fn.mkdir(test_home, "p")
-vim.env.HOME = test_home
-local bundle = test_home .. "/okfw"
+-- Wikis are per-project (.okfw/ discovered from the cwd), so the CLI tests
+-- below are isolated inside a dedicated temp project — no HOME juggling needed.
 
 log("=== okfw Plugin Integration Test ===")
-log("Isolated bundle: " .. bundle)
 log("")
 
 -- Test 1: Plugin loads successfully
@@ -56,8 +51,9 @@ end
 -- Test 2: Setup function works
 log("")
 log("Test 2: Setup function")
+local okfw_bin = vim.fn.getcwd() .. "/okfw"
 local setup_ok, setup_err = pcall(function()
-    okfw.setup({ bin = "./okfw" })
+    okfw.setup({ bin = okfw_bin })
 end)
 assert_true(setup_ok, "Setup completes without error")
 if not setup_ok then
@@ -67,7 +63,7 @@ end
 -- Test 3: Config is set correctly
 log("")
 log("Test 3: Config values")
-assert_eq(okfw.config.bin, "./okfw", "Binary path is set correctly")
+assert_eq(okfw.config.bin, okfw_bin, "Binary path is set correctly")
 
 -- Test 4: Plenary.job is available
 log("")
@@ -77,9 +73,57 @@ local plenary_ok, plenary_job = pcall(function()
 end)
 assert_true(plenary_ok, "Plenary.job loads successfully")
 
--- Test 5: Integration test - actually run okfw via plenary.job
+-- CLI test setup: wikis are per-project (.okfw/), so CLI tests run inside a
+-- dedicated temp project initialized with `okfw init`. In-process plugin
+-- functions (insert_link, follow_link) discover the wiki from Neovim's cwd,
+-- so the whole session moves into the test project.
+local repo_root = vim.fn.getcwd()
+local test_project = "/tmp/okfw-integration-project"
+os.execute("rm -rf " .. test_project .. " && mkdir -p " .. test_project)
+vim.cmd("cd " .. test_project)
+
+-- Test 5: okfw init creates the project wiki (and repeat is a noop)
 log("")
-log("Test 5: CLI integration via plenary.job")
+log("Test 5: okfw init")
+
+if plenary_ok then
+    local Job = require("plenary.job")
+
+    local init_code = nil
+    local init_job = Job:new({
+        command = okfw_bin,
+        args = { "init" },
+        cwd = test_project,
+        on_exit = function(_, return_val)
+            init_code = return_val
+        end,
+    })
+    init_job:sync(5000)
+    assert_eq(init_code, 0, "okfw init exits with code 0")
+    assert_eq(vim.fn.isdirectory(test_project .. "/.okfw"), 1, ".okfw directory created")
+
+    local reinit_output = {}
+    local reinit_code = nil
+    local reinit_job = Job:new({
+        command = okfw_bin,
+        args = { "init" },
+        cwd = test_project,
+        on_stdout = function(_, data)
+            table.insert(reinit_output, data)
+        end,
+        on_exit = function(_, return_val)
+            reinit_code = return_val
+        end,
+    })
+    reinit_job:sync(5000)
+    assert_eq(reinit_code, 0, "repeat okfw init exits with code 0 (noop)")
+    assert_true(table.concat(reinit_output, " "):find("already initialized") ~= nil,
+        "repeat okfw init reports already initialized")
+end
+
+-- Test 5b: Integration test - actually run okfw via plenary.job
+log("")
+log("Test 5b: CLI integration via plenary.job")
 
 if plenary_ok then
     local Job = require("plenary.job")
@@ -87,9 +131,9 @@ if plenary_ok then
     local job_code = nil
 
     local job = Job:new({
-        command = "./okfw",
-        args = { "create", "Integration Test Note", "--category", "untethered" },
-        cwd = vim.fn.getcwd(),
+        command = okfw_bin,
+        args = { "create", "Integration Test Note" },
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(job_output, data)
         end,
@@ -113,62 +157,27 @@ log("")
 log("Test 6: create_note function")
 assert_true(type(okfw.create_note) == "function", "create_note is a function")
 
--- Test 7: Verify tether_note function exists
+-- Test 7: Verify set_project function exists
 log("")
-log("Test 7: tether_note function")
-assert_true(type(okfw.tether_note) == "function", "tether_note is a function")
-
--- Test 8: Verify set_project function exists
-log("")
-log("Test 8: set_project function")
+log("Test 7: set_project function")
 assert_true(type(okfw.set_project) == "function", "set_project is a function")
 
--- Test 9: Test tether command via CLI
+-- Test 8: Test set-project command via CLI
 log("")
-log("Test 9: CLI tether command")
+log("Test 8: CLI set-project command")
 if plenary_ok then
     local Job = require("plenary.job")
 
     -- First copy the test file
-    os.execute("cp cli/testdata/valid_fleeting_no_project.md /tmp/test_tether_integration.md")
-
-    local tether_output = {}
-    local tether_code = nil
-
-    local tether_job = Job:new({
-        command = "./okfw",
-        args = { "tether", "/tmp/test_tether_integration.md", "--project", "integration-test" },
-        cwd = vim.fn.getcwd(),
-        on_stdout = function(_, data)
-            table.insert(tether_output, data)
-        end,
-        on_exit = function(_, return_val)
-            tether_code = return_val
-        end,
-    })
-
-    tether_job:sync(5000)
-
-    assert_eq(tether_code, 0, "okfw tether exits with code 0")
-
-    if #tether_output > 0 then
-        log("  CLI output: " .. tether_output[1])
-    end
-end
-
--- Test 10: Test set-project command via CLI
-log("")
-log("Test 10: CLI set-project command")
-if plenary_ok then
-    local Job = require("plenary.job")
+    os.execute("cp " .. repo_root .. "/cli/testdata/valid_concept_no_project.md /tmp/test_setproject_integration.md")
 
     local setproj_output = {}
     local setproj_code = nil
 
     local setproj_job = Job:new({
-        command = "./okfw",
-        args = { "set-project", "/tmp/test_tether_integration.md", "new-project" },
-        cwd = vim.fn.getcwd(),
+        command = okfw_bin,
+        args = { "set-project", "/tmp/test_setproject_integration.md", "new-project" },
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(setproj_output, data)
         end,
@@ -186,9 +195,9 @@ if plenary_ok then
     end
 end
 
--- Test 11: Test search command via CLI
+-- Test 9: Test search command via CLI
 log("")
-log("Test 11: CLI search command")
+log("Test 9: CLI search command")
 if plenary_ok then
     local Job = require("plenary.job")
 
@@ -196,9 +205,9 @@ if plenary_ok then
     local search_code = nil
 
     local search_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "search", "--json" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(search_output, data)
         end,
@@ -222,33 +231,33 @@ if plenary_ok then
     end
 end
 
--- Test 12: Verify search and index functions exist
+-- Test 10: Verify search and index functions exist
 log("")
-log("Test 12: search and index functions")
+log("Test 10: search and index functions")
 assert_true(type(okfw.search) == "function", "search is a function")
 assert_true(type(okfw.index) == "function", "index is a function")
 
--- Test 13: Verify graph function exists
+-- Test 11: Verify graph function exists
 log("")
-log("Test 13: graph function")
+log("Test 11: graph function")
 assert_true(type(okfw.graph) == "function", "graph is a function")
 
--- Test 14: Verify preview functions exist
+-- Test 12: Verify preview functions exist
 log("")
-log("Test 14: preview functions")
+log("Test 12: preview functions")
 assert_true(type(okfw.preview_note) == "function", "preview_note is a function")
 assert_true(type(okfw.preview_by_id) == "function", "preview_by_id is a function")
 
--- Test 15: Verify link functions exist
+-- Test 13: Verify link functions exist
 log("")
-log("Test 15: link functions")
+log("Test 13: link functions")
 assert_true(type(okfw.insert_link) == "function", "insert_link is a function")
 assert_true(type(okfw.insert_link_prompt) == "function", "insert_link_prompt is a function")
 assert_true(type(okfw.link_picker) == "function", "link_picker is a function")
 
--- Test 16: Verify tag completion functions exist
+-- Test 14: Verify tag completion functions exist
 log("")
-log("Test 16: tag completion functions")
+log("Test 14: tag completion functions")
 assert_true(type(okfw.get_tags) == "function", "get_tags is a function")
 assert_true(type(okfw.get_tags_sync) == "function", "get_tags_sync is a function")
 assert_true(type(okfw.refresh_tags) == "function", "refresh_tags is a function")
@@ -257,27 +266,27 @@ assert_true(type(okfw.setup_tag_completion) == "function", "setup_tag_completion
 assert_true(type(okfw.setup_cmp) == "function", "setup_cmp is a function")
 assert_true(type(okfw.omnifunc) == "function", "omnifunc is a function")
 
--- Test 17: Verify backlinks functions exist
+-- Test 15: Verify backlinks functions exist
 log("")
-log("Test 17: backlinks functions")
+log("Test 15: backlinks functions")
 assert_true(type(okfw.get_backlinks) == "function", "get_backlinks is a function")
 assert_true(type(okfw.get_backlinks_sync) == "function", "get_backlinks_sync is a function")
 assert_true(type(okfw.backlinks_panel) == "function", "backlinks_panel is a function")
 assert_true(type(okfw.backlinks_split) == "function", "backlinks_split is a function")
 assert_true(type(okfw.toggle_backlinks) == "function", "toggle_backlinks is a function")
 
--- Test 18: CLI backlinks command
+-- Test 16: CLI backlinks command
 log("")
-log("Test 18: CLI backlinks command")
+log("Test 16: CLI backlinks command")
 if plenary_ok then
     local Job = require("plenary.job")
     local backlinks_output = {}
     local backlinks_code = nil
 
     local backlinks_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "backlinks", "202602131045", "--json" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(backlinks_output, data)
         end,
@@ -300,26 +309,26 @@ if plenary_ok then
     end
 end
 
--- Test 19: Verify template functions exist
+-- Test 17: Verify template functions exist
 log("")
-log("Test 19: template functions")
+log("Test 17: template functions")
 assert_true(type(okfw.templates) == "table", "templates is a table")
 assert_true(type(okfw.get_template) == "function", "get_template is a function")
 assert_true(type(okfw.create_from_template) == "function", "create_from_template is a function")
 assert_true(type(okfw.template_picker) == "function", "template_picker is a function")
 
--- Test 20: CLI templates command
+-- Test 18: CLI templates command
 log("")
-log("Test 20: CLI templates command")
+log("Test 18: CLI templates command")
 if plenary_ok then
     local Job = require("plenary.job")
     local templates_output = {}
     local templates_code = nil
 
     local templates_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "templates" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(templates_output, data)
         end,
@@ -339,18 +348,18 @@ if plenary_ok then
     assert_true(output_str:find("user%-story") ~= nil, "templates output contains 'user-story'")
 end
 
--- Test 21: CLI create with template
+-- Test 19: CLI create with template
 log("")
-log("Test 21: CLI create with template")
+log("Test 19: CLI create with template")
 if plenary_ok then
     local Job = require("plenary.job")
     local create_tmpl_output = {}
     local create_tmpl_code = nil
 
     local create_tmpl_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "create", "Template Test Meeting", "--template", "meeting" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(create_tmpl_output, data)
         end,
@@ -368,26 +377,26 @@ if plenary_ok then
     end
 end
 
--- Test 22: Verify daily notes functions exist
+-- Test 20: Verify daily notes functions exist
 log("")
-log("Test 22: daily notes functions")
+log("Test 20: daily notes functions")
 assert_true(type(okfw.daily) == "function", "daily is a function")
 assert_true(type(okfw.list_daily) == "function", "list_daily is a function")
 assert_true(type(okfw.list_daily_sync) == "function", "list_daily_sync is a function")
 assert_true(type(okfw.daily_picker) == "function", "daily_picker is a function")
 
--- Test 23: CLI daily command
+-- Test 21: CLI daily command
 log("")
-log("Test 23: CLI daily command")
+log("Test 21: CLI daily command")
 if plenary_ok then
     local Job = require("plenary.job")
     local daily_output = {}
     local daily_code = nil
 
     local daily_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "daily" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(daily_output, data)
         end,
@@ -406,18 +415,18 @@ if plenary_ok then
     end
 end
 
--- Test 24: CLI daily --list command
+-- Test 22: CLI daily --list command
 log("")
-log("Test 24: CLI daily --list command")
+log("Test 22: CLI daily --list command")
 if plenary_ok then
     local Job = require("plenary.job")
     local daily_list_output = {}
     local daily_list_code = nil
 
     local daily_list_job = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = { "daily", "--list", "--json" },
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, data)
             table.insert(daily_list_output, data)
         end,
@@ -446,9 +455,9 @@ local function run_okfw(args)
     local out, code = {}, nil
     local Job = require("plenary.job")
     local j = Job:new({
-        command = "./okfw",
+        command = okfw_bin,
         args = args,
-        cwd = vim.fn.getcwd(),
+        cwd = test_project,
         on_stdout = function(_, d) table.insert(out, d) end,
         on_exit = function(_, rv) code = rv end,
     })
@@ -456,16 +465,16 @@ local function run_okfw(args)
     return code, table.concat(out, "\n")
 end
 
--- Test 25: new link/navigation functions exist
+-- Test 23: new link/navigation functions exist
 log("")
-log("Test 25: OKF link/navigation functions")
+log("Test 23: OKF link/navigation functions")
 assert_true(type(okfw.bundle_root) == "function", "bundle_root is a function")
 assert_true(type(okfw.bundle_rel) == "function", "bundle_rel is a function")
 assert_true(type(okfw.follow_link) == "function", "follow_link is a function")
 
--- Test 26: CLI root prints the isolated bundle path
+-- Test 24: CLI root prints the isolated bundle path
 log("")
-log("Test 26: CLI root")
+log("Test 24: CLI root")
 local linked_target = nil
 if plenary_ok then
     local code, out = run_okfw({ "root" })
@@ -473,9 +482,9 @@ if plenary_ok then
     assert_true(out:find("okfw", 1, true) ~= nil, "okfw root prints bundle path")
 end
 
--- Test 27: create --path places a concept in a subdir with slug filename + OKF frontmatter
+-- Test 25: create --path places a concept in a subdir with slug filename + OKF frontmatter
 log("")
-log("Test 27: create --path + frontmatter")
+log("Test 25: create --path + frontmatter")
 if plenary_ok then
     local code, out = run_okfw({ "create", "Link Target Note", "--path", "projects/itest" })
     assert_eq(code, 0, "okfw create --path exits 0")
@@ -491,9 +500,9 @@ if plenary_ok then
     end
 end
 
--- Test 28: insert_link produces a vanilla markdown link
+-- Test 26: insert_link produces a vanilla markdown link
 log("")
-log("Test 28: insert_link (markdown)")
+log("Test 26: insert_link (markdown)")
 if linked_target then
     vim.cmd("enew")
     vim.api.nvim_buf_set_lines(0, 0, -1, false, { "" })
@@ -506,10 +515,10 @@ if linked_target then
     )
 end
 
--- Test 29: follow_link navigates a relative markdown link
+-- Test 27: follow_link navigates a relative markdown link
 -- (use a scratch dir outside the bundle so these fixtures aren't scanned)
 log("")
-log("Test 29: follow_link")
+log("Test 27: follow_link")
 do
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir, "p")
@@ -521,30 +530,30 @@ do
     assert_eq(vim.fn.expand("%:t"), "follow-b--00000000.md", "follow_link navigated to target")
 end
 
--- Test 30: CLI validate --okf passes on a conformant bundle
+-- Test 28: CLI validate --okf passes on a conformant bundle
 log("")
-log("Test 30: validate --okf")
+log("Test 28: validate --okf")
 if plenary_ok then
     local code, _ = run_okfw({ "validate", "--okf" })
     assert_eq(code, 0, "okfw validate --okf exits 0 on a conformant bundle")
 end
 
--- Test 31: CLI index-md writes a root index.md with okf_version
+-- Test 29: CLI index-md writes a root index.md with okf_version
 log("")
-log("Test 31: index-md")
+log("Test 29: index-md")
 if plenary_ok then
     local code, _ = run_okfw({ "index-md" })
     assert_eq(code, 0, "okfw index-md exits 0")
-    local root_index = bundle .. "/index.md"
+    local root_index = test_project .. "/.okfw/index.md"
     if vim.fn.filereadable(root_index) == 1 then
         local fm = table.concat(vim.fn.readfile(root_index), "\n")
         assert_true(fm:find("okf_version", 1, true) ~= nil, "root index.md declares okf_version")
     end
 end
 
--- Test 32: CLI search --kind filter
+-- Test 30: CLI search --kind filter
 log("")
-log("Test 32: search --kind")
+log("Test 30: search --kind")
 if plenary_ok then
     local code, out = run_okfw({ "search", "--kind", "note", "--json" })
     assert_eq(code, 0, "okfw search --kind note exits 0")

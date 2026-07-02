@@ -4,26 +4,27 @@ description: Get up and running with OKF Wiki in minutes.
 ---
 
 ```bash
-# Create an untethered note (project context optional)
-okfw create "My first idea" --category untethered
+# Initialize a wiki in your project (once per project)
+cd your-project
+okfw init                       # Creates .okfw/ at the project root
 
-# Create an untethered note with explicit project
-okfw create "Project-specific idea" --category untethered --project my-project
+# Every command discovers the wiki automatically from any subdirectory
+okfw connect                    # Verify: prints the wiki path and a summary
+
+# Create a note (project context optional)
+okfw create "My first idea"
+
+# Create a note with an explicit project
+okfw create "Project-specific idea" --project my-project
 
 # Create with a one-sentence OKF description
 okfw create "OAuth notes" -d "How our OAuth flow works"
 
-# Place a note in a specific bundle subdirectory
+# Place a note in a specific subdirectory of the wiki
 okfw create "Spec draft" --path projects/okf
 
 # Set project on an existing note
 okfw set-project path/to/note.md my-project
-
-# Tether an untethered note (requires project)
-okfw tether path/to/note.md --project my-project
-
-# Untether a tethered note
-okfw untether path/to/note.md
 
 # Add tags to a concept
 okfw add-tags path/to/note.md golang          # Add a single tag
@@ -31,22 +32,20 @@ okfw add-tags path/to/note.md golang api      # Add multiple tags
 
 # Validate frontmatter against CUE schema
 okfw validate path/to/note.md
-okfw validate --okf                       # Validate whole-bundle OKF conformance
+okfw validate --okf                       # Validate whole-wiki OKF conformance
 
 # Index notes for searching
 okfw index path/to/notes/       # Index a directory
 okfw index path/to/note.md      # Index a single file
 
-# OKF bundle maintenance
-okfw root                                 # Print the configured bundle root path
+# OKF wiki maintenance
+okfw root                                 # Print the discovered .okfw path
 okfw index-md                             # Generate OKF index.md directory listings
 okfw log                                  # Generate OKF log.md from git history
-okfw migrate-okf --dry-run                # Preview migrating a legacy bundle to OKF
 
 # Search notes
 okfw search "authentication"              # Full-text search
 okfw search --project my-project          # Filter by project
-okfw search --category tethered           # Filter by category
 okfw search --tag golang --tag api        # Filter by tags
 okfw search --kind todo                   # Filter by structured kind
 okfw search --type note                   # Filter by the free-form OKF type
@@ -93,6 +92,4 @@ okfw todo-list                            # Generate todo list markdown
 okfw todo-list --project my-project       # Project-specific list
 
 # Git workflow (dated branches)
-okfw hello                                # Start day: create YYYYMMDD branch from main
-okfw goodbye                              # End day: commit and merge to main
 ```

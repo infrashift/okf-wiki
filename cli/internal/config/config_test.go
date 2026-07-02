@@ -1,21 +1,12 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
-
-func TestLoadSchema(t *testing.T) {
-	schema, err := LoadSchema()
-	if err != nil {
-		t.Fatalf("LoadSchema() error = %v", err)
-	}
-
-	if schema.Err() != nil {
-		t.Fatalf("schema has error: %v", schema.Err())
-	}
-}
 
 func TestLoadConceptSchema(t *testing.T) {
 	schema, err := LoadConceptSchema()
@@ -28,69 +19,68 @@ func TestLoadConceptSchema(t *testing.T) {
 	}
 }
 
-func TestLoadDefaultConfig(t *testing.T) {
-	cfg, err := Load("")
+func TestDiscover(t *testing.T) {
+	project := t.TempDir()
+	wikiDir := filepath.Join(project, WikiDirName)
+	if err := os.MkdirAll(wikiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(project, "src", "internal", "deep")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Found at the start directory itself.
+	cfg, err := Discover(project)
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("Discover(project) error = %v", err)
+	}
+	if cfg.RootPath != wikiDir {
+		t.Errorf("RootPath = %q, want %q", cfg.RootPath, wikiDir)
+	}
+	if cfg.IndexPath != filepath.Join(wikiDir, IndexDirName) {
+		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, filepath.Join(wikiDir, IndexDirName))
+	}
+	if cfg.GraphPath != GraphDBName {
+		t.Errorf("GraphPath = %q, want %q", cfg.GraphPath, GraphDBName)
+	}
+	if cfg.TodosPath != TodosDirName {
+		t.Errorf("TodosPath = %q, want %q", cfg.TodosPath, TodosDirName)
 	}
 
-	// Check defaults
-	home, _ := os.UserHomeDir()
-	expectedRoot := filepath.Join(home, "okfw")
-	if cfg.RootPath != expectedRoot {
-		t.Errorf("RootPath = %q, want %q", cfg.RootPath, expectedRoot)
+	// Found from a nested subdirectory (walks upward).
+	cfg, err = Discover(nested)
+	if err != nil {
+		t.Fatalf("Discover(nested) error = %v", err)
 	}
-
-	if cfg.IndexPath != ".okfw_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".okfw_index")
-	}
-
-	if cfg.Editor != "nvim" {
-		t.Errorf("Editor = %q, want %q", cfg.Editor, "nvim")
-	}
-
-	if cfg.Folders.Untethered != "untethered" {
-		t.Errorf("Folders.Untethered = %q, want %q", cfg.Folders.Untethered, "untethered")
-	}
-
-	if cfg.Folders.Tethered != "tethered" {
-		t.Errorf("Folders.Tethered = %q, want %q", cfg.Folders.Tethered, "tethered")
-	}
-
-	if cfg.Folders.Tmp != "tmp" {
-		t.Errorf("Folders.Tmp = %q, want %q", cfg.Folders.Tmp, "tmp")
+	if cfg.RootPath != wikiDir {
+		t.Errorf("RootPath from nested dir = %q, want %q", cfg.RootPath, wikiDir)
 	}
 }
 
-func TestLoadConfigFromFile(t *testing.T) {
-	// Create a temporary config file
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.cue")
-
-	configContent := `
-root_path: "/custom/path"
-editor: "vim"
-`
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
+func TestDiscover_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Discover(dir)
+	if err == nil {
+		t.Fatal("Discover() expected error when no .okfw exists")
 	}
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+	var noWiki *ErrNoWiki
+	if !errors.As(err, &noWiki) {
+		t.Fatalf("expected *ErrNoWiki, got %T: %v", err, err)
 	}
-
-	if cfg.RootPath != "/custom/path" {
-		t.Errorf("RootPath = %q, want %q", cfg.RootPath, "/custom/path")
+	if !strings.Contains(err.Error(), "okfw init") {
+		t.Errorf("error should advise running okfw init, got: %v", err)
 	}
+}
 
-	if cfg.Editor != "vim" {
-		t.Errorf("Editor = %q, want %q", cfg.Editor, "vim")
+func TestDiscover_IgnoresOkfwFile(t *testing.T) {
+	// A plain file named .okfw must not count as a wiki.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, WikiDirName), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
 	}
-
-	// Defaults should still apply for unset values
-	if cfg.IndexPath != ".okfw_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".okfw_index")
+	if _, err := Discover(dir); err == nil {
+		t.Error("Discover() should not treat a .okfw file as a wiki")
 	}
 }
 
@@ -100,7 +90,6 @@ id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test Concept"
 type: "note"
 project: "test-project"
-category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
@@ -117,7 +106,6 @@ id: "20260213110000-ffffffff-1111-2222-3333-444444444444"
 title: "Child Concept"
 type: "note"
 project: "test-project"
-category: "tethered"
 tags:
   - "child"
 created: "2026-02-13T11:00:00Z"
@@ -134,7 +122,6 @@ func TestValidateConceptYAML_ValidUUIDv7(t *testing.T) {
 id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "UUIDv7 Concept"
 type: "note"
-category: "untethered"
 tags: []
 created: "2026-04-10T12:00:00Z"
 timestamp: "2026-02-13T10:45:00Z"
@@ -150,7 +137,6 @@ id: "12345"
 title: "Test"
 type: "note"
 project: "test"
-category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
@@ -166,7 +152,6 @@ id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: ""
 type: "note"
 project: "test"
-category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
@@ -176,68 +161,36 @@ timestamp: "2026-02-13T10:45:00Z"
 	}
 }
 
-func TestValidateConceptYAML_UntetheredWithoutProject(t *testing.T) {
-	// Untethered notes can omit project entirely
+func TestValidateConceptYAML_WithoutProject(t *testing.T) {
+	// Notes can omit project entirely
 	validYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Quick Idea"
 type: "note"
-category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateConceptYAML() untethered without project should be valid, got error = %v", err)
+		t.Errorf("ValidateConceptYAML() note without project should be valid, got error = %v", err)
 	}
 }
 
-func TestValidateConceptYAML_TetheredRequiresProject(t *testing.T) {
-	// Tethered notes must have a non-empty project
-	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"
-type: "note"
-category: "tethered"
-tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
-`
-	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateConceptYAML() expected error for tethered note without project, got nil")
-	}
-}
-
-func TestValidateConceptYAML_TetheredEmptyProject(t *testing.T) {
-	// Tethered notes cannot have empty project
-	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"
-type: "note"
-project: ""
-category: "tethered"
-tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
-`
-	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateConceptYAML() expected error for tethered note with empty project, got nil")
-	}
-}
-
-func TestValidateConceptYAML_InvalidCategory(t *testing.T) {
-	invalidYAML := `
+func TestValidateConceptYAML_LegacyCategoryTolerated(t *testing.T) {
+	// Notes written before category removal may still carry the field; it is
+	// tolerated as an ignored legacy key (OKF permissive consumption).
+	legacyYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
 project: "test"
-category: "draft"
+category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateConceptYAML() expected error for invalid category, got nil")
+	if err := ValidateConceptYAML([]byte(legacyYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() legacy category should be tolerated, got error = %v", err)
 	}
 }
 
@@ -247,7 +200,6 @@ id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
 project: "test"
-category: "untethered"
 tags: []
 `
 	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
@@ -307,7 +259,6 @@ id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test Concept"
 type: "note"
 project: "test-project"
-category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
@@ -331,10 +282,6 @@ timestamp: "2026-02-13T10:45:00Z"
 
 	if z.Project != "test-project" {
 		t.Errorf("Project = %q, want %q", z.Project, "test-project")
-	}
-
-	if z.Category != "untethered" {
-		t.Errorf("Category = %q, want %q", z.Category, "untethered")
 	}
 
 	if len(z.Tags) != 1 || z.Tags[0] != "test" {
@@ -387,8 +334,8 @@ func TestParseAndValidate_InvalidFile(t *testing.T) {
 	}
 }
 
-func TestParseAndValidate_UntetheredWithoutProject(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_fleeting_no_project.md")
+func TestParseAndValidate_NoProject(t *testing.T) {
+	content, err := os.ReadFile("../../testdata/valid_concept_no_project.md")
 	if err != nil {
 		t.Skipf("testdata file not found: %v", err)
 	}
@@ -398,11 +345,38 @@ func TestParseAndValidate_UntetheredWithoutProject(t *testing.T) {
 		t.Fatalf("ParseAndValidate() error = %v", err)
 	}
 
-	if z.Category != "untethered" {
-		t.Errorf("Category = %q, want %q", z.Category, "untethered")
-	}
-
 	if z.Project != "" {
 		t.Errorf("Project = %q, want empty string", z.Project)
+	}
+}
+
+func TestExtractBody(t *testing.T) {
+	cases := map[string]struct {
+		content string
+		want    string
+	}{
+		"lf": {
+			content: "---\ntitle: \"T\"\n---\n\n# Body\n",
+			want:    "\n# Body\n",
+		},
+		"crlf": {
+			content: "---\r\ntitle: \"T\"\r\n---\r\n\r\n# Body\r\n",
+			want:    "\r\n# Body\r\n",
+		},
+		"no frontmatter": {
+			content: "# Just a heading\n",
+			want:    "# Just a heading\n",
+		},
+		"unclosed frontmatter": {
+			content: "---\ntitle: \"T\"\n",
+			want:    "",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := ExtractBody([]byte(c.content)); got != c.want {
+				t.Errorf("ExtractBody(%q) = %q, want %q", c.content, got, c.want)
+			}
+		})
 	}
 }

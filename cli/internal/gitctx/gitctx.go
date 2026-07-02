@@ -1,19 +1,22 @@
+// Package gitctx locates the git repository root so `okfw init` can place the
+// wiki at the project root. It requires nothing from the user beyond having
+// run the command somewhere inside a repo; outside git, callers fall back to
+// the current directory.
 package gitctx
 
 import (
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
-// GetGitContext returns the repo name if inside a git project, else empty.
-func GetGitContext(cwd string) string {
+// GetGitRoot returns the absolute path of the git repository containing cwd,
+// or empty when not inside a git repo.
+func GetGitRoot(cwd string) string {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = cwd
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
-	// e.g., /home/user/code/my-project -> my-project
-	return filepath.Base(strings.TrimSpace(string(out)))
+	return strings.TrimSpace(string(out))
 }

@@ -18,7 +18,7 @@ Before using indexed queries, sync the graph database from the filesystem:
 okfw graph-sync
 
 # Sync from explicit path
-okfw graph-sync ~/okfw
+okfw graph-sync path/to/.okfw
 
 # Sync + validate edge integrity (CUE schema + referential integrity)
 okfw graph-sync --validate
@@ -27,7 +27,7 @@ okfw graph-sync --validate
 Output shows: `Graph synced: N total, N added, N updated, N deleted`
 With `--validate`: reports dangling edges (links to non-existent concepts) and any structurally invalid edges.
 
-The graph database is stored at `<root>/.okfw_graph.db` (configurable via `graph_path` in config).
+The graph database is stored at `.graph.db` inside the wiki (`.okfw/.graph.db`), which every command discovers automatically by searching upward from the current working directory. There is no configuration.
 
 ## Graph Visualization
 
@@ -86,7 +86,6 @@ All `--json` graph-query output uses this structure:
     "title": "Concept Title",
     "file_path": "/abs/path/to/concept.md",
     "project": "myproject",
-    "category": "untethered",
     "tags": ["golang"],
     "parent": "",
     "links": ["20260214..."],

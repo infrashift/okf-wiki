@@ -5,29 +5,43 @@ description: Complete reference for all :Okfw user commands available in NeoVim.
 
 The plugin registers user commands that you can run from NeoVim's command line (`:OkfwCommand`). All commands support tab completion for flags and values.
 
+The plugin discovers the wiki by running `okfw root` from NeoVim's current
+working directory, which searches upward for a `.okfw/` directory the way git
+finds `.git`.
+
+## Setup
+
+### `:OkfwInit`
+
+Initialize an OKF wiki for the current project. Runs `okfw init` in NeoVim's
+current working directory, creating `.okfw/` at the git repository root (or
+the cwd outside git). Running it again is a no-op.
+
+```vim
+:OkfwInit
+```
+
+---
+
 ## Note Creation
 
 ### `:OkfwNote`
 
-Create a new concept. Defaults to untethered if no category is given.
+Create a new concept.
 
 ```vim
-" Create an untethered note (default)
+" Create a note
 :OkfwNote
 
-" Create an untethered note (explicit)
-:OkfwNote --category untethered
-
-" Create a tethered note with a project
-:OkfwNote --category tethered --project my-project
+" Create a note with a project
+:OkfwNote --project my-project
 ```
 
 **Flags:**
 
 | Flag | Values | Description |
 |------|--------|-------------|
-| `--category` | `untethered`, `tethered` | Note category (default: untethered) |
-| `--project` | any string | Project name (auto-detected from git if omitted) |
+| `--project` | any string | Optional project metadata |
 
 ### `:OkfwTemplate`
 
@@ -65,8 +79,8 @@ Use the bang (`!`) variant for live search that updates as you type.
 " Live search with an initial query
 :OkfwSearch! auth
 
-" Filter by category and project
-:OkfwSearch --category tethered --project my-project
+" Filter by project
+:OkfwSearch --project my-project
 
 " Filter by structured kind and status
 :OkfwSearch --kind todo --status open
@@ -78,14 +92,13 @@ Use the bang (`!`) variant for live search that updates as you type.
 :OkfwSearch --tag security
 
 " Combine a query with filters
-:OkfwSearch auth --category tethered --tag security
+:OkfwSearch auth --project my-project --tag security
 ```
 
 **Flags:**
 
 | Flag | Values | Description |
 |------|--------|-------------|
-| `--category` | `untethered`, `tethered` | Filter by category |
 | `--project` | any string | Filter by project |
 | `--kind` | `note`, `todo`, `daily-note`, `issue` | Filter by structured kind |
 | `--type` | any string | Filter by the free-form OKF `type` field |
@@ -227,7 +240,7 @@ Index concepts for full-text search. Indexes the current directory by default.
 :OkfwIndex
 
 " Index specific path
-:OkfwIndex ~/okfw/
+:OkfwIndex path/to/.okfw/
 ```
 
 ### `:OkfwRefreshTags`
@@ -244,6 +257,7 @@ Clear the tag cache and reload tags from the index.
 
 | Command | Description |
 |---------|-------------|
+| `:OkfwInit` | Initialize a `.okfw/` wiki for the current project |
 | `:OkfwNote` | Create new concept |
 | `:OkfwTemplate [name]` | Create from template |
 | `:OkfwSearch[!] [query]` | Search concepts (! for live search) |

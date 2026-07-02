@@ -1,6 +1,6 @@
 ---
 title: Plugin Installation
-description: Install and configure the okfw NeoVim plugin for seamless Zettelkasten integration.
+description: Install and configure the okfw NeoVim plugin for seamless OKF Wiki integration.
 ---
 
 The `okfw` NeoVim plugin provides seamless integration for creating notes directly from your editor.
@@ -18,7 +18,7 @@ The `okfw` NeoVim plugin provides seamless integration for creating notes direct
 
 ```lua
 {
-    "infrashift/zettelkasten",
+    "infrashift/okf-wiki",
     dependencies = {
         "nvim-lua/plenary.nvim",
         "folke/snacks.nvim",  -- Optional, for picker UI
@@ -35,7 +35,7 @@ The `okfw` NeoVim plugin provides seamless integration for creating notes direct
 
 ```lua
 use {
-    "infrashift/zettelkasten",
+    "infrashift/okf-wiki",
     requires = { "nvim-lua/plenary.nvim" },
     config = function()
         require("okfw").setup({
@@ -49,7 +49,7 @@ use {
 
 ```vim
 Plug 'nvim-lua/plenary.nvim'
-Plug 'infrashift/zettelkasten'
+Plug 'infrashift/okf-wiki'
 
 " In your init.lua or after/plugin:
 lua require("okfw").setup({ bin = "okfw" })
@@ -59,7 +59,7 @@ lua require("okfw").setup({ bin = "okfw" })
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/infrashift/zettelkasten.git ~/.local/share/nvim/site/pack/plugins/start/zettelkasten
+   git clone https://github.com/infrashift/okf-wiki.git ~/.local/share/nvim/site/pack/plugins/start/okf-wiki
    ```
 
 2. Ensure plenary.nvim is also installed
@@ -70,6 +70,19 @@ lua require("okfw").setup({ bin = "okfw" })
        bin = "okfw",
    })
    ```
+
+## Initialize a Wiki
+
+The plugin discovers the wiki by running `okfw root` from NeoVim's current
+working directory, which searches upward for a `.okfw/` directory (the way git
+finds `.git`). If your project doesn't have a wiki yet, initialize one with
+the `:OkfwInit` user command (it runs `okfw init` in the cwd):
+
+```vim
+:OkfwInit
+```
+
+This creates `.okfw/` at the git repository root; running it again is a no-op.
 
 ## Configuration
 
@@ -93,7 +106,7 @@ require("okfw").setup({
 
 ```lua
 require("okfw").setup({
-    bin = vim.fn.expand("~/projects/zettelkasten/okfw"),
+    bin = vim.fn.expand("~/projects/okf-wiki/okfw"),
 })
 ```
 
@@ -123,7 +136,6 @@ automatically provides buffer-local keymaps:
 | `<localleader>L` | Insert link with title |
 | `<localleader>b` | Toggle backlinks |
 | `<localleader>p` | Set project (note and todo types) |
-| `<localleader>t` | Tether / Untether (note and todo types) |
 | `<localleader>a` | Add tags (all concept types) |
 | `<localleader>v` | Validate frontmatter (all concept types) |
 | `<localleader>s` | Set todo status (todo-type only) |
@@ -132,27 +144,17 @@ automatically provides buffer-local keymaps:
 
 Full documentation is available via `:help okfw`.
 
-See [User Commands](/zettelkasten/neovim/user-commands/) for a complete reference of all `:Okfw` commands.
+See [User Commands](/okf-wiki/neovim/user-commands/) for a complete reference of all `:Okfw` commands.
 
 ## Keybindings
 
 Add these to your NeoVim configuration:
 
 ```lua
--- Quick untethered note (no project)
+-- Quick note
 vim.keymap.set("n", "<leader>zf", function()
-    require("okfw").create_note("untethered")
-end, { desc = "Create untethered note" })
-
--- Quick tethered note (will use git project)
-vim.keymap.set("n", "<leader>zp", function()
-    require("okfw").create_note("tethered")
-end, { desc = "Create tethered note" })
-
--- Tether current note
-vim.keymap.set("n", "<leader>zP", function()
-    require("okfw").tether_note()
-end, { desc = "Tether note" })
+    require("okfw").create_note()
+end, { desc = "Create note" })
 
 -- Set project on current note
 vim.keymap.set("n", "<leader>zs", function()
@@ -242,9 +244,7 @@ local wk = require("which-key")
 wk.register({
     z = {
         name = "OKF Wiki",
-        f = { function() require("okfw").create_note("untethered") end, "Untethered note" },
-        p = { function() require("okfw").create_note("tethered") end, "Tethered note" },
-        P = { function() require("okfw").tether_note() end, "Tether note" },
+        f = { function() require("okfw").create_note() end, "Create note" },
         s = { function() require("okfw").set_project() end, "Set project" },
         g = { function() require("okfw").graph() end, "Generate graph" },
         v = { function() require("okfw").preview_note() end, "Preview note" },
@@ -265,7 +265,7 @@ wk.register({
 ## How It Works
 
 1. When you call `create_note()`, NeoVim prompts for a note title
-2. The plugin invokes `okfw create "title" --category <category>`
+2. The plugin invokes `okfw create "title"`
 3. The `okfw` binary detects your current git project automatically
 4. A confirmation message appears on success
 
@@ -297,10 +297,16 @@ Install plenary.nvim:
 use "nvim-lua/plenary.nvim"
 ```
 
+### "no OKF wiki found"
+
+The project has no `.okfw/` directory anywhere up the tree from NeoVim's cwd.
+Run `:OkfwInit` (or `okfw init` from a shell at your project root) to create
+one.
+
 ### Notes Not Created
 
 1. Check that `okfw create` works from terminal
-2. Verify you're in a git repository (for project detection)
+2. Verify a wiki exists (`okfw root` from the same directory)
 3. Check NeoVim messages with `:messages`
 
 ## API Reference
@@ -315,13 +321,12 @@ require("okfw").setup({
 })
 ```
 
-### `create_note(note_category, project)`
+### `create_note(project)`
 
-Create a new note with the specified category.
+Create a new note.
 
 **Parameters:**
-- `note_category` (string): Either `"untethered"` or `"tethered"`
-- `project` (string, optional): Project context. If nil, auto-detected from git.
+- `project` (string, optional): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title via `vim.fn.input()`
@@ -329,43 +334,8 @@ Create a new note with the specified category.
 3. Prints success/failure message
 
 ```lua
-require("okfw").create_note("untethered")
-require("okfw").create_note("tethered", "my-project")
-```
-
-### `tether_note(file_path, project)`
-
-Tether an untethered note (promote to tethered).
-
-**Parameters:**
-- `file_path` (string, optional): Path to the note. Defaults to current buffer.
-- `project` (string, optional): Project context. If nil, auto-detected from git.
-
-**Behavior:**
-1. Executes `okfw tether` asynchronously
-2. Reloads the buffer if the tethered file is currently open
-3. Prints success/failure message
-
-```lua
-require("okfw").tether_note()  -- Current file, auto-detect project
-require("okfw").tether_note(nil, "my-project")  -- Current file, explicit project
-```
-
-### `untether_note(file_path)`
-
-Untether a tethered note (revert to untethered).
-
-**Parameters:**
-- `file_path` (string, optional): Path to the note. Defaults to current buffer.
-
-**Behavior:**
-1. Executes `okfw untether` asynchronously
-2. Reloads the buffer if the untethered file is currently open
-3. Prints success/failure message
-
-```lua
-require("okfw").untether_note()  -- Current file
-require("okfw").untether_note("/path/to/note.md")  -- Specific file
+require("okfw").create_note()
+require("okfw").create_note("my-project")
 ```
 
 ### `set_project(file_path, project)`
@@ -395,7 +365,6 @@ Search concepts with optional filters.
 - `query` (string, optional): Full-text search query.
 - `opts` (table, optional):
   - `project` (string): Filter by project
-  - `category` (string): Filter by category
   - `tags` (table): Filter by tags (AND logic)
   - `limit` (number): Max results
   - `on_results` (function): Callback receiving results array
@@ -414,7 +383,7 @@ Index concepts for searching.
 
 ```lua
 require("okfw").index()  -- Index cwd
-require("okfw").index("~/okfw/")
+require("okfw").index("path/to/.okfw/")
 ```
 
 ### `graph(opts)`
@@ -432,7 +401,7 @@ Generate an ASCII tree visualization of note relationships.
 
 ```lua
 require("okfw").graph()  -- Graph cwd with defaults
-require("okfw").graph({ limit = 20, path = "~/okfw/" })
+require("okfw").graph({ limit = 20, path = "path/to/.okfw/" })
 ```
 
 ### `preview_note(file_path)`
@@ -459,7 +428,7 @@ require("okfw").preview_note("/path/to/note.md")
 Preview a note by its ID (searches the index).
 
 **Parameters:**
-- `id` (string, optional): Concept id (UUIDv7, or the concept's bundle-relative path minus `.md`). Prompts for input if nil.
+- `id` (string, optional): Concept id (UUIDv7, or the concept's wiki-relative path minus `.md`). Prompts for input if nil.
 
 **Behavior:**
 1. Searches for note with matching ID
@@ -476,8 +445,8 @@ Link insertion is normally done through the **link picker**, bound to
 `<localleader>l` by default. It lets you search your concepts and insert a
 vanilla markdown link to the one you pick — no need to know the concept id.
 
-The inserted link points at the target concept's bundle-relative file path (a
-leading `/` means the bundle root), for example:
+The inserted link points at the target concept's wiki-relative file path (a
+leading `/` means the wiki root), for example:
 
 ```markdown
 [Title](/infra/note--019f0494.md)
@@ -576,14 +545,13 @@ end
 Get all notes that link to the specified concept (async).
 
 **Parameters:**
-- `id_or_file` (string): Zettel ID or file path
+- `id_or_file` (string): Concept ID or file path
 - `callback` (function): Called with list of backlink objects
 
 **Backlink object fields:**
-- `id`: Zettel ID
+- `id`: Concept ID
 - `title`: Note title
 - `project`: Project name
-- `category`: "untethered" or "tethered"
 - `file_path`: Absolute path to file
 
 ```lua
@@ -608,7 +576,7 @@ Open a floating backlinks panel for the current note.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `id` (string): Zettel ID to show backlinks for
+  - `id` (string): Concept ID to show backlinks for
   - `file` (string): File path to show backlinks for
 
 **Panel keymaps:**
@@ -630,7 +598,7 @@ Open backlinks in a split window.
 **Parameters:**
 - `opts` (table, optional):
   - `position` (string): "right" (default), "left", "bottom", or "top"
-  - `id` (string): Zettel ID
+  - `id` (string): Concept ID
   - `file` (string): File path
 
 ```lua
@@ -663,12 +631,11 @@ Get template metadata by name.
 **Parameters:**
 - `name` (string): Template name
 
-**Returns:** Table with `name`, `description`, `category`, `tags` or `nil` if not found
+**Returns:** Table with `name`, `description`, `tags` or `nil` if not found
 
 ```lua
 local tmpl = require("okfw").get_template("meeting")
 print(tmpl.description)  -- "Meeting notes with attendees and action items"
-print(tmpl.category)     -- "untethered"
 ```
 
 ### `create_from_template(template_name, project)`
@@ -677,7 +644,7 @@ Create a note from a template.
 
 **Parameters:**
 - `template_name` (string): Template name (e.g., `"meeting"`, `"user-story"`)
-- `project` (string, optional): Project context. If nil, auto-detected from git.
+- `project` (string, optional): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title
@@ -790,17 +757,8 @@ Open picker with all indexed concepts.
 
 Open picker with live search (results update as you type).
 
-### `require("okfw.picker").untethered(opts)`
-
-Browse only untethered notes.
-
-### `require("okfw.picker").tethered(opts)`
-
-Browse only tethered notes.
-
 **Common opts:**
 - `project` (string): Filter by project
-- `category` (string): Filter by category
 - `tags` (table): Filter by tags
 - `limit` (number): Max results
 

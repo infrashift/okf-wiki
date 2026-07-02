@@ -24,33 +24,40 @@ make fmt                      # go fmt + cue fmt
 
 All CLI commands live in a single file: `cli/cmd/okfw/main.go`. Commands are defined as Cobra commands within `main()`.
 
+Wikis are per-project `.okfw/` directories, created by `okfw init` and
+discovered by searching upward from the current working directory (like git
+finds `.git`). There is no config file. Fixed artifact names inside `.okfw/`:
+`.index/` (Bleve), `.graph.db` (bbolt), `.todos/` (generated todo lists),
+`ephemeral/` (exports). `okfw connect` verifies the wiki; `okfw root` prints
+its path.
+
 Internal packages:
-- `cli/internal/config/` — Config struct + CUE schema loading + concept frontmatter parsing/validation
+- `cli/internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
 - `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, ASCII tree, Mermaid rendering, link extraction)
 - `cli/internal/graphdb/` — Persistent graph store (bbolt). Store, Sync, queries (backlinks, cluster, tag, dangling), CUE edge validation
-- `cli/internal/index/` — Bleve full-text search (ZettelDoc mapping, search with filters)
+- `cli/internal/index/` — Bleve full-text search (`ConceptDoc` mapping, search with filters)
 - `cli/internal/templates/` — Embedded markdown templates via `//go:embed`
 
 ## Key Types
 
 ```go
-// cli/internal/config/zettel.go
-type Zettel struct {
-    ID, Title, Type, Project, Category string
+// cli/internal/config/concept.go
+type Concept struct {
+    ID, Title, Type, Kind, Description, Resource, Project string
     Tags []string
-    Created time.Time
+    Created, Timestamp time.Time
     Parent, Status, Due, Completed, Priority string
 }
 
 // cli/internal/graph/graph.go
 type Node struct {
-    ID, Title, FilePath, Project, Category, Parent string
+    ID, Title, FilePath, Project, Parent string
     Children, Links []string
 }
 
 // cli/internal/graphdb/graphdb.go
 type NodeRecord struct {  // persisted to bbolt
-    ID, Title, FilePath, Project, Category, Parent string
+    ID, Title, FilePath, Project, Parent string
     Tags, Links []string
     ModTime int64
 }
@@ -61,8 +68,7 @@ type EdgeRecord struct {
 
 ## CUE Schemas
 
-- `cli/internal/config/config-schema.cue` — #Config (root_path, index_path, graph_path, etc.)
-- `cli/internal/config/zettel-schema.cue` — #Zettel (#UntetheredZettel | #TetheredZettel)
+- `cli/internal/config/concept-schema.cue` — #Concept
 - `cli/internal/graphdb/edge-schema.cue` — #Edge (from UUID, predicate enum, to string)
 
 Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.New()`, unify with data, validate with `cue.Concrete(true)`.
@@ -81,8 +87,8 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 1. Define the command as a `cobra.Command` inside `main()` in `cli/cmd/okfw/main.go`
 2. Add flags after the command definition
 3. Register with `rootCmd.AddCommand(myCmd)`
-4. Load config with `config.Load("")` inside RunE
-5. For graph operations, use `graphdb.Open(filepath.Join(cfg.RootPath, cfg.GraphPath))`
+4. Discover the wiki with `config.Discover` inside RunE (searches upward from the cwd for `.okfw/`; error out with `okfw init` advice when none is found)
+5. For graph operations, open the store at the wiki's `.graph.db` (e.g. `graphdb.Open(filepath.Join(wikiRoot, ".graph.db"))`)
 
 ## Testing Pattern
 

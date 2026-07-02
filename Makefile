@@ -21,7 +21,6 @@ test:
 	@echo "Running Go tests..."
 	go test -v -cover ./cli/...
 	@echo "Validating CUE schemas..."
-	cue vet ./cli/internal/config/config-schema.cue
 	cue vet ./cli/internal/config/concept-schema.cue
 
 lint:
@@ -52,8 +51,7 @@ e2e:
 
 clean:
 	rm -f $(BINARY_NAME)
-	rm -rf .okfw_index/
-
+	
 tidy:
 	go mod tidy
 

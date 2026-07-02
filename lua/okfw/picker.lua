@@ -34,10 +34,6 @@ local function build_search_args(opts, query)
         table.insert(args, "--project")
         table.insert(args, opts.project)
     end
-    if opts.category and opts.category ~= "" then
-        table.insert(args, "--category")
-        table.insert(args, opts.category)
-    end
     if opts.type and opts.type ~= "" then
         table.insert(args, "--type")
         table.insert(args, opts.type)
@@ -81,14 +77,10 @@ end
 local function format_concept_display(entry)
     local title = entry.title or entry.id or ""
     local project = (entry.project and entry.project ~= "") and entry.project or ""
-    local category = entry.category or ""
 
     local display = title
     if project ~= "" then
         display = display .. " [" .. project .. "]"
-    end
-    if category ~= "" then
-        display = display .. " (" .. category .. ")"
     end
     return display
 end
@@ -178,7 +170,7 @@ M.search = function(opts)
 
     Snacks.picker.pick({
         source = "okfw",
-        title = opts.prompt_title or "Zettels",
+        title = opts.prompt_title or "Concepts",
         items = items,
         format = function(item, _picker)
             local ret = {}
@@ -212,7 +204,7 @@ M.live_search = function(opts)
 
     Snacks.picker.pick({
         source = "okfw_live",
-        title = opts.prompt_title or "Search Zettels",
+        title = opts.prompt_title or "Search Concepts",
         live = true,
         finder = function(fopts, ctx)
             local query = ctx.filter.search or ""
@@ -277,23 +269,7 @@ end
 -- Browse by project
 M.projects = function(opts)
     M.search(vim.tbl_extend("force", opts or {}, {
-        prompt_title = "Zettels by Project",
-    }))
-end
-
--- Browse untethered notes
-M.untethered = function(opts)
-    M.search(vim.tbl_extend("force", opts or {}, {
-        category = "untethered",
-        prompt_title = "Untethered Notes",
-    }))
-end
-
--- Browse tethered notes
-M.tethered = function(opts)
-    M.search(vim.tbl_extend("force", opts or {}, {
-        category = "tethered",
-        prompt_title = "Tethered Notes",
+        prompt_title = "Concepts by Project",
     }))
 end
 

@@ -10,12 +10,12 @@ func buildTestGraph() *Graph {
 	// A -> E (branch)
 	// F is isolated
 	g := New()
-	g.AddNode(&Node{ID: "A", Title: "Node A", Category: "untethered", Links: []string{"B", "E"}})
-	g.AddNode(&Node{ID: "B", Title: "Node B", Category: "untethered", Links: []string{"C"}})
-	g.AddNode(&Node{ID: "C", Title: "Node C", Category: "tethered", Links: []string{"D"}})
-	g.AddNode(&Node{ID: "D", Title: "Node D", Category: "tethered"})
-	g.AddNode(&Node{ID: "E", Title: "Node E", Category: "untethered"})
-	g.AddNode(&Node{ID: "F", Title: "Node F", Category: "untethered"})
+	g.AddNode(&Node{ID: "A", Title: "Node A", Links: []string{"B", "E"}})
+	g.AddNode(&Node{ID: "B", Title: "Node B", Links: []string{"C"}})
+	g.AddNode(&Node{ID: "C", Title: "Node C", Links: []string{"D"}})
+	g.AddNode(&Node{ID: "D", Title: "Node D"})
+	g.AddNode(&Node{ID: "E", Title: "Node E"})
+	g.AddNode(&Node{ID: "F", Title: "Node F"})
 	return g
 }
 
@@ -97,45 +97,6 @@ func TestFindAllConnected_PicksMostConnected(t *testing.T) {
 	ids := nodeIDs(nodes)
 	if ids["F"] {
 		t.Error("Isolated node F should not be in results")
-	}
-}
-
-func TestExtractLinks(t *testing.T) {
-	content := `Some text [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] and
-also [[20260214100000-6ba7b810-9dad-11d1-80b4-00c04fd430c8|My Title]] here.
-Duplicate [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] should be deduplicated.`
-
-	links := ExtractWikiLinkIDs(content)
-	if len(links) != 2 {
-		t.Errorf("Expected 2 unique links, got %d: %v", len(links), links)
-	}
-}
-
-func TestExtractLinks_UUIDv7(t *testing.T) {
-	content := `Link to [[019680f0-7e00-7abc-8def-1234567890ab]] and
-also [[01968109-4700-7def-9abc-ffffffffffff|Title Here]].
-Duplicate [[019680f0-7e00-7abc-8def-1234567890ab]] should be deduplicated.`
-
-	links := ExtractWikiLinkIDs(content)
-	if len(links) != 2 {
-		t.Errorf("Expected 2 unique UUIDv7 links, got %d: %v", len(links), links)
-	}
-}
-
-func TestExtractLinks_MixedFormats(t *testing.T) {
-	content := `Legacy [[20260213143000-550e8400-e29b-41d4-a716-446655440000]] and
-UUIDv7 [[019680f0-7e00-7abc-8def-1234567890ab]] together.`
-
-	links := ExtractWikiLinkIDs(content)
-	if len(links) != 2 {
-		t.Errorf("Expected 2 links (mixed formats), got %d: %v", len(links), links)
-	}
-}
-
-func TestExtractLinks_NoLinks(t *testing.T) {
-	links := ExtractWikiLinkIDs("No links in this content")
-	if len(links) != 0 {
-		t.Errorf("Expected 0 links, got %d", len(links))
 	}
 }
 
@@ -465,9 +426,9 @@ func TestNormalizeTarget(t *testing.T) {
 	cases := []struct {
 		href, fromDir, want string
 	}{
-		{"/tables/customers.md", "untethered", "tables/customers.md"},
-		{"./other.md", "untethered", "untethered/other.md"},
-		{"../tethered/x.md", "untethered", "tethered/x.md"},
+		{"/tables/customers.md", "notes", "tables/customers.md"},
+		{"./other.md", "notes", "notes/other.md"},
+		{"../archive/x.md", "notes", "archive/x.md"},
 		{"foo.md", "", "foo.md"},
 		{"/a/b.md#frag", "", "a/b.md"},
 		{"https://example.com/x.md", "", ""},
@@ -490,25 +451,6 @@ func TestRewriteLinks(t *testing.T) {
 	want := "See [A](a-uuid.md) and [B](./b.md) and [ext](https://x/y.md)."
 	if out != want {
 		t.Errorf("RewriteLinks = %q, want %q", out, want)
-	}
-}
-
-func TestTransformWikiLinks(t *testing.T) {
-	id := "019680f0-7e00-7abc-8def-1234567890ab"
-	content := "Bare [[" + id + "]] and titled [[" + id + "|Custom]]."
-	out := TransformWikiLinks(content, func(gotID, display string) string {
-		if gotID != id {
-			t.Errorf("unexpected id %q", gotID)
-		}
-		title := display
-		if title == "" {
-			title = "Fallback"
-		}
-		return "[" + title + "](/notes/" + gotID + ".md)"
-	})
-	want := "Bare [Fallback](/notes/" + id + ".md) and titled [Custom](/notes/" + id + ".md)."
-	if out != want {
-		t.Errorf("TransformWikiLinks = %q, want %q", out, want)
 	}
 }
 

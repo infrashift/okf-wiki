@@ -11,37 +11,76 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed config-schema.cue
-var configSchema string
-
 //go:embed concept-schema.cue
 var conceptSchema string
 
-// Config represents the application configuration.
+// WikiDirName is the per-project wiki directory created by `okfw init` and
+// discovered by every command.
+const WikiDirName = ".okfw"
+
+// Fixed locations inside the wiki directory. Storage is standardized — there
+// is no user configuration.
+const (
+	IndexDirName = ".index"    // Bleve search index
+	GraphDBName  = ".graph.db" // bbolt graph database
+	TodosDirName = ".todos"    // generated todo lists
+)
+
+// Config carries the resolved paths of a discovered wiki.
 type Config struct {
-	RootPath  string  `json:"root_path" yaml:"root_path"`
-	IndexPath string  `json:"index_path" yaml:"index_path"`
-	GraphPath string  `json:"graph_path" yaml:"graph_path"`
-	TodosPath string  `json:"todos_path" yaml:"todos_path"`
-	Editor    string  `json:"editor" yaml:"editor"`
-	Folders   Folders `json:"folders" yaml:"folders"`
+	RootPath  string // absolute path of the .okfw directory (the OKF bundle root)
+	IndexPath string // absolute path of the Bleve index
+	GraphPath string // graph database path, relative to RootPath
+	TodosPath string // todos output directory, relative to RootPath
 }
 
-// Folders represents the folder configuration.
-type Folders struct {
-	Untethered string `json:"untethered" yaml:"untethered"`
-	Tethered   string `json:"tethered" yaml:"tethered"`
-	Tmp        string `json:"tmp" yaml:"tmp"`
+// ErrNoWiki is returned by Discover when no .okfw directory is found.
+type ErrNoWiki struct {
+	StartDir string
 }
 
-// LoadSchema compiles and returns the #Config CUE definition.
-func LoadSchema() (cue.Value, error) {
-	ctx := cuecontext.New()
-	val := ctx.CompileString(configSchema)
-	if val.Err() != nil {
-		return cue.Value{}, fmt.Errorf("failed to compile config schema: %w", val.Err())
+func (e *ErrNoWiki) Error() string {
+	return fmt.Sprintf("no OKF wiki found (searched upward from %s); run 'okfw init' at your project root to create one", e.StartDir)
+}
+
+// ConfigFor returns the Config for a wiki rooted at the given .okfw directory.
+func ConfigFor(wikiDir string) *Config {
+	return &Config{
+		RootPath:  wikiDir,
+		IndexPath: filepath.Join(wikiDir, IndexDirName),
+		GraphPath: GraphDBName,
+		TodosPath: TodosDirName,
 	}
-	return val.LookupPath(cue.ParsePath("#Config")), nil
+}
+
+// Discover walks from startDir (or the current working directory when "")
+// upward to the nearest directory containing .okfw/ and returns the resolved
+// Config. Returns *ErrNoWiki when no wiki is found.
+func Discover(startDir string) (*Config, error) {
+	if startDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		startDir = cwd
+	}
+	abs, err := filepath.Abs(startDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve %q: %w", startDir, err)
+	}
+
+	dir := abs
+	for {
+		wikiDir := filepath.Join(dir, WikiDirName)
+		if fi, err := os.Stat(wikiDir); err == nil && fi.IsDir() {
+			return ConfigFor(wikiDir), nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, &ErrNoWiki{StartDir: abs}
+		}
+		dir = parent
+	}
 }
 
 // LoadConceptSchema compiles and returns the #Concept CUE definition.
@@ -52,59 +91,6 @@ func LoadConceptSchema() (cue.Value, error) {
 		return cue.Value{}, fmt.Errorf("failed to compile concept schema: %w", val.Err())
 	}
 	return val.LookupPath(cue.ParsePath("#Concept")), nil
-}
-
-// Load loads the configuration from the specified path.
-// If configPath is empty, it returns the default configuration.
-func Load(configPath string) (*Config, error) {
-	schema, err := LoadSchema()
-	if err != nil {
-		return nil, err
-	}
-
-	ctx := schema.Context()
-
-	// Start with schema defaults
-	val := schema
-
-	// If a config file is specified, load and unify it
-	if configPath != "" {
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("failed to read config file: %w", err)
-			}
-			// File doesn't exist, use defaults
-		} else {
-			// Parse user config as CUE
-			userVal := ctx.CompileBytes(data)
-			if userVal.Err() != nil {
-				return nil, fmt.Errorf("failed to parse config file: %w", userVal.Err())
-			}
-
-			// Unify with schema
-			val = schema.Unify(userVal)
-			if val.Err() != nil {
-				return nil, fmt.Errorf("config validation failed: %w", val.Err())
-			}
-		}
-	}
-
-	var cfg Config
-	if err := val.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to decode config: %w", err)
-	}
-
-	// Expand ~ in root_path
-	if len(cfg.RootPath) > 0 && cfg.RootPath[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
-		}
-		cfg.RootPath = filepath.Join(home, cfg.RootPath[1:])
-	}
-
-	return &cfg, nil
 }
 
 // ValidateConceptYAML validates YAML frontmatter against the #Concept schema.

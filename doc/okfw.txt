@@ -6,10 +6,10 @@ License: MIT
 INTRODUCTION                                                *okfw* *okfw.nvim*
 
 okfw.nvim provides NeoVim integration for the okfw CLI tool, enabling seamless
-management of a Zettelkasten note-taking system directly from your editor.
+management of an OKF Wiki knowledge base directly from your editor.
 
 Features:
-  - Create untethered and tethered concepts
+  - Create concepts
   - Daily notes with review workflows
   - Note templates (meeting, user-story, feature, etc.)
   - Full-text search with snacks.nvim picker integration
@@ -24,12 +24,19 @@ REQUIREMENTS                                               *okfw-requirements*
   - plenary.nvim (required)
   - snacks.nvim (optional, for picker UI)
   - okfw CLI binary in $PATH
+  - An initialized wiki: run |:OkfwInit| (or `okfw init` from a shell) once
+    at your project root to create the .okfw/ directory
+
+There is no config file. The plugin discovers the wiki by running `okfw root`
+from NeoVim's current working directory, which searches upward for a .okfw/
+directory the way git finds .git — so the plugin works from any subdirectory
+of your project.
 
 INSTALLATION                                               *okfw-installation*
 
 Using lazy.nvim: >lua
     {
-        "infrashift/zettelkasten",
+        "infrashift/okf-wiki",
         dependencies = {
             "nvim-lua/plenary.nvim",
             "folke/snacks.nvim",
@@ -44,7 +51,7 @@ Using lazy.nvim: >lua
 
 Using packer.nvim: >lua
     use {
-        "infrashift/zettelkasten",
+        "infrashift/okf-wiki",
         requires = { "nvim-lua/plenary.nvim" },
         config = function()
             require("okfw").setup()
@@ -72,6 +79,15 @@ COMMANDS                                                       *okfw-commands*
 
 All commands are prefixed with "Okfw" for discoverability.
 
+Wiki Setup ~
+                                                                   *:OkfwInit*
+:OkfwInit               Initialize an OKF wiki for the current project.
+                        Runs `okfw init` in NeoVim's current working
+                        directory: creates .okfw/ at the git repository
+                        root (or the cwd outside git), writes
+                        .okfw/.gitignore, and generates the OKF root
+                        index.md. Running it again is a no-op.
+
 Daily Notes ~
                                                                   *:OkfwDaily*
 :OkfwDaily [date]       Open or create a daily note.
@@ -85,10 +101,9 @@ Daily Notes ~
 
 Note Creation ~
                                                                    *:OkfwNote*
-:OkfwNote [category] [project]
+:OkfwNote [--project NAME]
                         Create a new concept.
-                        {category}: "untethered" (default) or "tethered"
-                        {project}: optional project name
+                        --project {NAME}: optional project name
 
                                                                *:OkfwTemplate*
 :OkfwTemplate [name]    Create note from template.
@@ -101,7 +116,6 @@ Search ~
                         With !: live search (updates as you type)
 
                         Flags: ~
-                          --category {val}   untethered or tethered
                           --project {val}    filter by project name
                           --type {val}       note, todo, daily-note, issue
                           --status {val}     open, in_progress, closed
@@ -112,7 +126,6 @@ Search ~
 
                         Examples: >vim
                           :OkfwSearch authentication
-                          :OkfwSearch --category tethered
                           :OkfwSearch --type todo --status open
                           :OkfwSearch --project my-project --priority high
                           :OkfwSearch! --type todo
@@ -182,8 +195,9 @@ list_daily_sync({opts}) Get daily notes synchronously.
 
 Note Creation ~
                                                           *okfw.create_note()*
-create_note({category}, {project})
-                        Create a new concept.
+create_note({opts})     Create a new concept.
+                        opts.title: optional title (prompted if omitted)
+                        opts.project: optional project name
 
                                                    *okfw.create_from_template()*
 create_from_template({opts})
@@ -195,13 +209,6 @@ create_from_template({opts})
 template_picker({opts}) Open picker for templates.
 
 Note Management ~
-                                                          *okfw.tether_note()*
-tether_note({path}, {project})
-                        Tether a note (set category to tethered).
-
-                                                        *okfw.untether_note()*
-untether_note({path})   Untether a note (set category to untethered).
-
                                                           *okfw.set_project()*
 set_project({path}, {project})
                         Set project for a concept.
@@ -209,7 +216,7 @@ set_project({path}, {project})
 Search ~
                                                                *okfw.search()*
 search({query}, {opts}) Search concepts.
-                        opts.project, opts.category, opts.tags, opts.limit
+                        opts.project, opts.tags, opts.limit
                         opts.type, opts.status, opts.priority
                         opts.due_before, opts.due_after
                         opts.on_results: callback function
@@ -298,15 +305,12 @@ require("okfw.picker").live_search({opts}) Live search
 
     Search opts: ~
         {project}     Filter by project name
-        {category}    Filter by category (untethered/tethered)
         {type}        Filter by type (note/todo/daily-note/issue)
         {status}      Filter by status (open/in_progress/closed)
         {priority}    Filter by priority (high/medium/low)
         {due_before}  Filter due before date (YYYY-MM-DD)
         {due_after}   Filter due after date (YYYY-MM-DD)
         {tags}        Table of tag strings (AND logic)
-require("okfw.picker").untethered({opts})  Browse untethered concepts
-require("okfw.picker").tethered({opts})    Browse tethered concepts
 require("okfw.picker").insert_link({opts}) Insert link to concept
 
 Picker Keymaps ~
@@ -328,7 +332,6 @@ automatically sets up:
   - <localleader>a for adding tags (all concept types)
   - <localleader>v for validating frontmatter (all concept types)
   - <localleader>p for set project (note and todo types)
-  - <localleader>t for tether/untether picker (note and todo types)
   - <localleader>s for todo status picker (todo-type only)
 
 SUGGESTED KEYMAPS                                             *okfw-keymaps*
@@ -341,11 +344,8 @@ Add these to your configuration: >lua
     vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList<cr>")
 
     -- Note creation
-    vim.keymap.set("n", "<leader>zf", function()
-        require("okfw").create_note("untethered")
-    end)
-    vim.keymap.set("n", "<leader>zp", function()
-        require("okfw").create_note("tethered")
+    vim.keymap.set("n", "<leader>zn", function()
+        require("okfw").create_note()
     end)
     vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTemplate<cr>")
 

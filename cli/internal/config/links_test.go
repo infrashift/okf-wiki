@@ -12,7 +12,7 @@ func writeConcept(t *testing.T, root, rel, id string) string {
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nid: \"" + id + "\"\ntitle: \"T\"\ntype: \"note\"\ncategory: \"untethered\"\ntags: []\ncreated: \"2026-02-13T10:45:00Z\"\ntimestamp: \"2026-02-13T10:45:00Z\"\n---\n\n# T\n"
+	content := "---\nid: \"" + id + "\"\ntitle: \"T\"\ntype: \"note\"\ntags: []\ncreated: \"2026-02-13T10:45:00Z\"\ntimestamp: \"2026-02-13T10:45:00Z\"\n---\n\n# T\n"
 	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func TestResolveBodyLinkIDs(t *testing.T) {
 	root := t.TempDir()
 	idAlpha := "019680f0-7e00-7abc-8def-1234567890ab"
 	idBeta := "01968109-4700-7def-9abc-ffffffffffff"
-	srcPath := writeConcept(t, root, "untethered/alpha--0001.md", idAlpha)
+	srcPath := writeConcept(t, root, "notes/alpha--0001.md", idAlpha)
 	writeConcept(t, root, "projects/okf/beta--0002.md", idBeta)
 
 	body := "Absolute [Beta](/projects/okf/beta--0002.md), " +

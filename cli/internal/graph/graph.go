@@ -14,15 +14,15 @@ type Node struct {
 	Title    string
 	FilePath string
 	Project  string
-	Category string
 	Parent   string   // Optional parent concept ID
 	Children []string // Child concept IDs
-	Links    []string // Links found in body content via [[id]] or [[id|title]] scanning (not from frontmatter)
+	Links    []string // Target concept IDs resolved from markdown links in the body
 }
 
 // Graph represents the bundle link graph.
 type Graph struct {
-	nodes map[string]*Node
+	nodes     map[string]*Node
+	backlinks map[string][]string // target ID → IDs of nodes whose Links contain it
 }
 
 // New creates a new empty graph.
@@ -56,8 +56,14 @@ func (g *Graph) AllNodes() []*Node {
 	return nodes
 }
 
-// BuildRelationships processes parent fields and builds bidirectional relationships.
+// BuildRelationships processes parent fields and builds bidirectional
+// relationships, including the reverse-link index used by FindConnected.
+// Idempotent: safe to call again after adding nodes.
 func (g *Graph) BuildRelationships() {
+	for _, node := range g.nodes {
+		node.Children = nil
+	}
+	g.backlinks = make(map[string][]string, len(g.nodes))
 	for _, node := range g.nodes {
 		// Add this node as a child of its parent
 		if node.Parent != "" {
@@ -65,7 +71,20 @@ func (g *Graph) BuildRelationships() {
 				parent.Children = append(parent.Children, node.ID)
 			}
 		}
+		// Index reverse links (who links TO each target)
+		for _, linkID := range node.Links {
+			g.backlinks[linkID] = append(g.backlinks[linkID], node.ID)
+		}
 	}
+}
+
+// backlinksTo returns the IDs of nodes whose Links point at id, building the
+// index on first use if BuildRelationships hasn't been called.
+func (g *Graph) backlinksTo(id string) []string {
+	if g.backlinks == nil {
+		g.BuildRelationships()
+	}
+	return g.backlinks[id]
 }
 
 // bfsItem tracks a node ID and its distance from the start node.
@@ -131,16 +150,10 @@ func (g *Graph) FindConnected(startID string, limit int, maxDepth int) []*Node {
 				queue = append(queue, bfsItem{id: linkID, depth: nextDepth})
 			}
 		}
-		// Reverse links (notes that link TO this node)
-		for _, other := range g.nodes {
-			if visited[other.ID] {
-				continue
-			}
-			for _, linkID := range other.Links {
-				if linkID == node.ID {
-					queue = append(queue, bfsItem{id: other.ID, depth: nextDepth})
-					break
-				}
+		// Reverse links (notes that link TO this node), via the index
+		for _, srcID := range g.backlinksTo(node.ID) {
+			if !visited[srcID] {
+				queue = append(queue, bfsItem{id: srcID, depth: nextDepth})
 			}
 		}
 	}
@@ -430,49 +443,6 @@ func GenerateMermaid(nodes []*Node, edges []Edge) string {
 	}
 
 	return sb.String()
-}
-
-// idPattern matches either UUIDv7 or legacy YYYYMMDDHHmmss-UUID format.
-const idPattern = `(?:[0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
-
-// --- Legacy wiki-link helpers ([[id]] / [[id|title]]) ---
-// Retained for the one-time `migrate-okf` conversion to vanilla markdown links.
-
-var wikiLinkPattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|[^\]]+)?\]\]`)
-var wikiReplacePattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|([^\]]+))?\]\]`)
-
-// ExtractWikiLinkIDs finds all [[id]] / [[id|title]] IDs in content (legacy format).
-func ExtractWikiLinkIDs(content string) []string {
-	matches := wikiLinkPattern.FindAllStringSubmatch(content, -1)
-	var links []string
-	seen := make(map[string]bool)
-	for _, match := range matches {
-		if len(match) >= 2 {
-			id := match[1]
-			if !seen[id] {
-				links = append(links, id)
-				seen[id] = true
-			}
-		}
-	}
-	return links
-}
-
-// TransformWikiLinks rewrites each [[id]] / [[id|title]] occurrence using replace,
-// which receives the captured id and optional display text and returns the full
-// replacement markdown. If replace returns "", the original match is left intact.
-func TransformWikiLinks(content string, replace func(id, display string) string) string {
-	return wikiReplacePattern.ReplaceAllStringFunc(content, func(match string) string {
-		sub := wikiReplacePattern.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		out := replace(sub[1], sub[2])
-		if out == "" {
-			return match
-		}
-		return out
-	})
 }
 
 // --- Vanilla markdown link helpers (OKF) ---

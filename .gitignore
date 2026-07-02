@@ -22,8 +22,3 @@ Thumbs.db
 
 # Claude Code (user-specific)
 .claude/settings.local.json
-
-# Generated files (by okfw)
-.okfw_index/
-.okfw_graph.db
-.okfw_todos/

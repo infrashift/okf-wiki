@@ -1,11 +1,11 @@
 ---
 title: NeoVim okfw Plugin Tutorial
-description: Walk through building the devcontainer, connecting via SSH, and using the full Zettelkasten workflow with the NeoVim plugin.
+description: Walk through building the devcontainer, connecting via SSH, and using the full OKF Wiki workflow with the NeoVim plugin.
 ---
 
 This tutorial walks you through building the devcontainer, connecting via SSH,
-and using the full Zettelkasten workflow: creating notes, linking them together,
-tethering untethered thoughts into permanent knowledge, searching, generating
+and using the full OKF Wiki workflow: creating notes, linking them together,
+refining quick captures into permanent knowledge, searching, generating
 graphs, and managing todos.
 
 ## Prerequisites
@@ -19,8 +19,8 @@ graphs, and managing todos.
 Clone the repository and build the image:
 
 ```bash
-git clone https://github.com/infrashift/zettelkasten.git
-cd zettelkasten
+git clone https://github.com/infrashift/okf-wiki.git
+cd okf-wiki
 
 podman build -f Containerfiles/Containerfile -t okfw-devcontainer:latest .
 ```
@@ -99,11 +99,12 @@ preserved.
 
 ## 4. Where Are Notes Stored?
 
-All notes live under `~/okfw/` inside the container, organized by topic and
+Each project gets its own wiki: a `.okfw/` directory at the project's root,
+created by `okfw init`. All notes live inside `.okfw/`, organized by topic and
 project:
 
 ```
-~/okfw/                        Bundle root
+.okfw/                         Wiki root (at the project root)
   index.md                     Directory listing (reserved; carries okf_version)
   log.md                       Update history (reserved)
   infra/                       A project folder (concepts grouped by project)
@@ -115,74 +116,71 @@ project:
         2026-06-26--019f04a1.md
   any-other-folder/            Concepts may live in any directory you choose
     another-concept--019f04b8.md
-  ephemeral/                   Exports (gitignored)
-  .okfw_index/                 Full-text search index (auto-managed)
-  .okfw_graph.db               Persistent graph database (auto-managed)
+  ephemeral/                   Export scratch dir (gitignored)
+  .index/                      Full-text search index (auto-managed)
+  .graph.db                    Persistent graph database (auto-managed)
+  .todos/                      Generated todo lists
+  .gitignore                   Ignores .index/, .graph.db, .todos/, ephemeral/
 ```
+
+Every `okfw` command **discovers** the wiki automatically by searching upward
+from the current working directory (the way git finds `.git`), so commands
+work from any subdirectory of the project. Concept markdown is meant to be
+committed with the project; the generated artifacts are gitignored.
 
 Concept files are named `slug--shortid.md`, where the short id is the leading
 hex of the concept's UUID. `index.md` and `log.md` are **reserved filenames**
 that carry no concept frontmatter: `index.md` is a directory listing (for
 progressive disclosure) and `log.md` is an update history generated from git.
 
-Concepts are placed by topic and project, not by maturity. With no `--path`, a
-concept lands in a top-level folder named after its project (or the bundle root
-when there is no project); `--path <subdir>` overrides that.
+Concepts are placed by topic and project. With no `--path`, a concept lands in
+a top-level folder named after its project (or the wiki root when there is no
+project); `--path <subdir>` overrides that. A project is always optional — quick
+captures need nothing more than a title, and you can assign a project later.
 
-**Untethered notes** are quick captures: ideas, meeting notes, snippets. They
-don't require a project.
-
-**Tethered notes** are refined, rewritten knowledge that you've decided to
-keep. They require a project tag.
-
-A note's `category` (`untethered`/`tethered`) is a maturity marker stored in
-frontmatter; it is metadata only and does not affect where the file lives.
-
-**Daily notes** are date-stamped journal entries stored at the bundle root under
+**Daily notes** are date-stamped journal entries stored inside the wiki under
 `daily/` in a `YYYY/MM/` directory hierarchy.
 
 Each note has a UUIDv7 `id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
 embeds a timestamp for natural sorting while remaining collision-free. Legacy
 `YYYYMMDDHHmmss-UUID` IDs are still accepted. A concept's **OKF id is its
-bundle-relative path minus `.md`** — for example the file
-`infra/my-note-title--019f0494.md` has the id
+path within the wiki minus `.md`** — for example the file
+`.okfw/infra/my-note-title--019f0494.md` has the id
 `infra/my-note-title--019f0494`.
 
-To **persist notes across container restarts**, mount a host directory:
+To **persist notes across container restarts**, mount your project directory:
 
 ```bash
 podman run -d --name okfw-dev \
   --userns=keep-id \
   -p 2222:2222 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/okfw:/home/user/okfw:Z \
+  -v ~/my-project:/home/user/my-project:Z \
   okfw-devcontainer:latest
 ```
 
-## 5. Initialize Your Zettelkasten
+## 5. Initialize Your Wiki
 
 SSH into the container and switch to the bash pane (click it or press `Ctrl-b`
-then right-arrow). Initialize the zettelkasten directory:
+then right-arrow). Set up a project and initialize the wiki:
 
 ```bash
-mkdir -p ~/okfw
-cd ~/okfw
+mkdir -p ~/my-project
+cd ~/my-project
 git init
 git config user.email "you@example.com"
 git config user.name "Your Name"
+
+okfw init
 ```
 
-The `okfw` tool creates folders on demand as you add concepts — a top-level
-folder per project (or whatever `--path` you pass), plus `daily/` for daily
-notes. It does not create or require `untethered/`/`tethered/` folders.
+`okfw init` creates `.okfw/` at the git repository root (or the current
+directory outside git), writes `.okfw/.gitignore`, and generates the OKF root
+`index.md`. Running it again is a no-op. From here on, every `okfw` command
+finds the wiki automatically — from the project root or any subdirectory. The
+tool creates folders on demand as you add concepts — a top-level folder per
+project (or whatever `--path` you pass), plus `daily/` for daily notes.
 
-:::note
-**Migrating a legacy vault?** If you have an existing vault from the pre-OKF
-tool, run `okfw migrate-okf` to convert it: it relocates the legacy vault to the
-new `~/okfw` bundle root, renames files to `slug--shortid.md`, rewrites old
-wiki-style links to vanilla markdown links, and rebuilds the graph and index.
-Add `--dry-run` to preview the changes first. The command is idempotent.
-:::
 
 ## 6. Start Your Day with a Daily Note
 
@@ -201,7 +199,6 @@ id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Daily Note - 2026-02-19"
 type: "daily-note"
 kind: "daily-note"
-category: untethered
 tags:
   - daily
 created: "2026-02-19T14:30:00Z"
@@ -240,7 +237,7 @@ Or browse all daily notes with a picker:
 :OkfwDailyList
 ```
 
-## 7. Create an Untethered Note
+## 7. Create a Note
 
 Capture a quick idea. In NeoVim:
 
@@ -248,18 +245,18 @@ Capture a quick idea. In NeoVim:
 :OkfwNote
 ```
 
-You are prompted for a title. Type `Learning Zettelkasten Method` and press
-Enter. A new untethered note opens with frontmatter and an empty body. Write
+You are prompted for a title. Type `Linked Note-Taking Method` and press
+Enter. A new note opens with frontmatter and an empty body. Write
 some content:
 
 ```markdown
-The Zettelkasten method is a personal knowledge management system
-developed by Niklas Luhmann. Key principles:
+Linked note-taking is a personal knowledge management approach.
+Key principles:
 
 - One idea per note (atomicity)
 - Write in your own words (elaboration)
 - Connect notes to each other (linking)
-- Use untethered notes for captures, tethered notes for refined ideas
+- Capture quickly, refine later
 ```
 
 Save with `:w`.
@@ -307,12 +304,12 @@ and insert one:
 
 (`\` is the local leader key followed by `l`)
 
-A picker opens showing all your notes. Select `Learning Zettelkasten
+A picker opens showing all your notes. Select `Linked Note-Taking
 Method` and press Enter. A markdown link is inserted at your cursor. By default
-it uses a bundle-relative absolute path (a leading `/` means the bundle root):
+it uses a wiki-relative absolute path (a leading `/` means the wiki root):
 
 ```markdown
-[learning-zettelkasten-method--019f0494](/infra/learning-zettelkasten-method--019f0494.md)
+[linked-note-taking-method--019f0494](/infra/linked-note-taking-method--019f0494.md)
 ```
 
 To insert a link that uses the title as link text (more readable):
@@ -324,7 +321,7 @@ To insert a link that uses the title as link text (more readable):
 This inserts:
 
 ```markdown
-[Learning Zettelkasten Method](/infra/learning-zettelkasten-method--019f0494.md)
+[Linked Note-Taking Method](/infra/linked-note-taking-method--019f0494.md)
 ```
 
 You can also write relative links by hand, e.g. `[text](./other-note--019f04a1.md)`.
@@ -345,14 +342,14 @@ set. For each one, use `:OkfwNote`, write content, and link to related notes usi
 An atomic note contains exactly one idea, fully developed.
 This makes notes reusable across contexts.
 ```
-Link to: `Learning Zettelkasten Method`
+Link to: `Linked Note-Taking Method`
 
 **Note 3: "Linking as Thinking"**
 ```
 The act of linking notes forces you to articulate the relationship
 between ideas. This is where insight happens.
 ```
-Link to: `Learning Zettelkasten Method`, `Atomic Notes`
+Link to: `Linked Note-Taking Method`, `Atomic Notes`
 
 **Note 4: "Progressive Summarization"**
 ```
@@ -361,25 +358,25 @@ passages, then highlight the bold, then write a summary.
 ```
 Link to: `Atomic Notes`
 
-**Note 5: "Untethered vs Tethered Notes"**
+**Note 5: "Capture and Refine"**
 ```
-Untethered notes are raw captures. Tethered notes are refined ideas
-you've rewritten in your own words with context and connections.
+Capture ideas quickly as raw notes. Later, refine the valuable ones:
+rewrite them in your own words with context and connections.
 ```
-Link to: `Learning Zettelkasten Method`, `Atomic Notes`
+Link to: `Linked Note-Taking Method`, `Atomic Notes`
 
 **Note 6: "Graph Thinking"**
 ```
-A zettelkasten is a graph of ideas, not a hierarchy.
+A knowledge base is a graph of ideas, not a hierarchy.
 Any note can connect to any other note.
 ```
-Link to: `Linking as Thinking`, `Untethered vs Tethered Notes`
+Link to: `Linking as Thinking`, `Capture and Refine`
 
 After creating these, you have a small web of interconnected notes.
 
 ## 11. View Backlinks
 
-Open the `Learning Zettelkasten Method` note. Several notes link to it. View
+Open the `Linked Note-Taking Method` note. Several notes link to it. View
 its backlinks:
 
 ```vim
@@ -421,31 +418,25 @@ To peek at a note's raw content without leaving your current file:
 A floating preview window shows the note content. Inside the preview, press
 `Enter` to open it for editing or `q` to close.
 
-## 13. Tether a Note
+## 13. Set a Project
 
-The `Learning Zettelkasten Method` note has been refined and linked. Tether it
-to permanent status. With the note open, press `\t` and select `tether`:
-
-```
-\t  →  Pick: tether / untether
-```
-
-You are prompted for a project name. Enter `knowledge-management`. The note's
-frontmatter updates: `category` changes from `untethered` to `tethered` and the
-`project` field is set.
-
-You can set or change a project on any note with `\p`:
+The `Linked Note-Taking Method` note has been refined and linked. Give it a
+project context so it's easy to find later. With the note open, press `\p`:
 
 ```
 \p  →  Project: _
 ```
+
+Enter `knowledge-management`. The note's frontmatter updates: the `project`
+field is set. You can set or change a project on any note the same way, or from
+the CLI with `okfw set-project`.
 
 ## 14. Search Your Notes
 
 ### Quick search
 
 ```vim
-:OkfwSearch zettelkasten
+:OkfwSearch linked
 ```
 
 A picker shows matching notes. Select one and press Enter to open it,
@@ -465,7 +456,7 @@ real-time.
 Switch to the bash pane and search from the command line:
 
 ```bash
-cd ~/okfw
+cd ~/my-project    # or any subdirectory — the wiki is discovered automatically
 
 # Full-text search
 okfw search "atomic notes"
@@ -473,8 +464,8 @@ okfw search "atomic notes"
 # JSON output (for scripting)
 okfw search --json --limit 5
 
-# Filter by category
-okfw search --category tethered
+# Filter by project
+okfw search --project knowledge-management
 
 # Filter by tag
 okfw search --tag daily
@@ -497,13 +488,13 @@ visual graph.
 From the CLI:
 
 ```bash
-okfw graph ~/okfw --limit 20
+okfw graph --limit 20
 ```
 
 You can also start the tree from a specific note and control depth:
 
 ```bash
-okfw graph ~/okfw --start infra/learning-zettelkasten-method--019f0494 --depth 3
+okfw graph --start infra/linked-note-taking-method--019f0494 --depth 3
 ```
 
 ## 16. Manage Todos
@@ -541,7 +532,7 @@ This generates a markdown summary and opens it in a split.
 
 Beyond the meeting and snippet templates shown earlier, try these:
 
-**Book review** (creates a tethered note, requires a project):
+**Book review:**
 
 ```vim
 :OkfwTemplate book-review --project reading-list
@@ -579,7 +570,7 @@ expected vs actual behavior.
 
 When editing a note's YAML frontmatter, place your cursor in the `tags:`
 section and press `Ctrl-x Ctrl-t` in insert mode. This triggers tag
-autocompletion from all tags used across your zettelkasten.
+autocompletion from all tags used across your bundle.
 
 Refresh the tag cache if you've added new tags externally:
 
@@ -599,30 +590,8 @@ reindex everything:
 Or from the CLI:
 
 ```bash
-okfw index ~/okfw
+okfw index
 ```
-
-## 20. Day Start / Day End (Git Workflow)
-
-The CLI includes two convenience commands for a daily git workflow:
-
-**Start your day:**
-
-```bash
-okfw hello
-```
-
-This pulls the latest `main` branch and creates a new branch named with today's
-date (e.g., `20260219`).
-
-**End your day:**
-
-```bash
-okfw goodbye
-```
-
-This stages all changes, commits with a dated message, merges to main, and
-cleans up the dated branch.
 
 ## Quick Reference
 
@@ -633,8 +602,7 @@ cleans up the dated branch.
 | `:OkfwDaily` | Open/create today's daily note |
 | `:OkfwDaily yesterday` | Open yesterday's daily note |
 | `:OkfwDailyList` | Browse daily notes |
-| `:OkfwNote` | Create a new untethered note |
-| `:OkfwNote tethered` | Create a new tethered note |
+| `:OkfwNote` | Create a new note |
 | `:OkfwTemplate [name]` | Create from template |
 | `:OkfwSearch [query]` | Search notes |
 | `:OkfwSearch!` | Live search (updates as you type) |
@@ -654,7 +622,6 @@ cleans up the dated branch.
 | `gf` | Follow the link under the cursor |
 | `\b` | Toggle backlinks panel |
 | `\p` | Set project (note and todo types) |
-| `\t` | Tether / Untether (note and todo types) |
 | `\a` | Add tags (all concept types) |
 | `\v` | Validate frontmatter (all concept types) |
 | `\s` | Set todo status (todo-type only) |
@@ -672,6 +639,8 @@ cleans up the dated branch.
 
 | Command | Description |
 |---|---|
+| `okfw init` | Create a `.okfw/` wiki at the project root (no-op if it exists) |
+| `okfw connect` | Verify the discovered wiki and print a summary |
 | `okfw create [title]` | Create a note |
 | `okfw daily` | Create/open daily note |
 | `okfw todo [title]` | Create a todo |
@@ -679,20 +648,16 @@ cleans up the dated branch.
 | `okfw set-status [file] [status]` | Set todo status (open/in_progress/closed) |
 | `okfw search [query]` | Search notes |
 | `okfw graph [path]` | Show graph tree |
-| `okfw tether [file]` | Tether a note |
-| `okfw untether [file]` | Untether a note |
+| `okfw set-project [file] [project]` | Set project on a note |
 | `okfw backlinks [file]` | Show backlinks |
 | `okfw add-tags <file> <tag1> [tag2...]` | Add tags to a concept |
 | `okfw validate <file>` | Validate frontmatter against CUE schema |
-| `okfw validate --okf [path]` | Validate whole-bundle OKF conformance |
+| `okfw validate --okf [path]` | Validate whole-wiki OKF conformance |
 | `okfw index [path]` | Index notes |
 | `okfw index-md [path]` | Generate OKF `index.md` directory listings |
 | `okfw log [path]` | Generate OKF `log.md` from git history |
-| `okfw migrate-okf [path]` | Migrate a legacy bundle to OKF conventions |
-| `okfw root` | Print the configured bundle root path |
+| `okfw root` | Print the discovered `.okfw` path |
 | `okfw templates` | List templates |
-| `okfw hello` | Start-of-day git workflow |
-| `okfw goodbye` | End-of-day git workflow |
 
 ## Container Management
 
@@ -714,6 +679,6 @@ podman run -d --name okfw-dev \
   --userns=keep-id \
   -e SSH_PORT=3333 -p 3333:3333 \
   -v ~/.ssh/id_ed25519.pub:/home/user/.ssh/authorized_keys:ro,Z \
-  -v ~/okfw:/home/user/okfw:Z \
+  -v ~/my-project:/home/user/my-project:Z \
   okfw-devcontainer:latest
 ```

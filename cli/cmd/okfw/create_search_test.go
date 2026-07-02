@@ -8,12 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestGenerateBasicNote_Untethered(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "My Idea", "", "untethered", nil)
+func TestGenerateBasicNote_NoProject(t *testing.T) {
+	note := generateBasicNote("20260201100000-abc", "My Idea", "", nil)
 
-	if !strings.Contains(note, `category: "untethered"`) {
-		t.Error("Expected category: untethered")
-	}
 	if !strings.Contains(note, `type: "note"`) {
 		t.Error("Expected type: note")
 	}
@@ -21,7 +18,7 @@ func TestGenerateBasicNote_Untethered(t *testing.T) {
 		t.Error("Expected title")
 	}
 	if strings.Contains(note, "project:") {
-		t.Error("Untethered note without project should not have project field")
+		t.Error("Note without project should not have project field")
 	}
 	if !strings.Contains(note, "tags: []") {
 		t.Error("Expected empty tags as tags: []")
@@ -31,19 +28,16 @@ func TestGenerateBasicNote_Untethered(t *testing.T) {
 	}
 }
 
-func TestGenerateBasicNote_Tethered(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "Project Note", "backend", "tethered", nil)
+func TestGenerateBasicNote_WithProject(t *testing.T) {
+	note := generateBasicNote("20260201100000-abc", "Project Note", "backend", nil)
 
-	if !strings.Contains(note, `category: "tethered"`) {
-		t.Error("Expected category: tethered")
-	}
 	if !strings.Contains(note, `project: "backend"`) {
 		t.Error("Expected project: backend")
 	}
 }
 
 func TestGenerateBasicNote_WithTags(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "Tagged Note", "", "untethered", []string{"golang", "api"})
+	note := generateBasicNote("20260201100000-abc", "Tagged Note", "", []string{"golang", "api"})
 
 	if !strings.Contains(note, `- "golang"`) {
 		t.Error("Expected golang tag")
@@ -57,7 +51,7 @@ func TestGenerateBasicNote_WithTags(t *testing.T) {
 }
 
 func TestGenerateBasicNote_EmptyTags(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "No Tags", "", "untethered", []string{})
+	note := generateBasicNote("20260201100000-abc", "No Tags", "", []string{})
 
 	if !strings.Contains(note, "tags: []") {
 		t.Error("Expected tags: [] for empty tag slice")
@@ -65,7 +59,7 @@ func TestGenerateBasicNote_EmptyTags(t *testing.T) {
 }
 
 func TestGenerateBasicNote_NilTags(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "Nil Tags", "", "untethered", nil)
+	note := generateBasicNote("20260201100000-abc", "Nil Tags", "", nil)
 
 	if !strings.Contains(note, "tags: []") {
 		t.Error("Expected tags: [] for nil tag slice")
@@ -73,7 +67,7 @@ func TestGenerateBasicNote_NilTags(t *testing.T) {
 }
 
 func TestGenerateBasicNote_HasFrontmatter(t *testing.T) {
-	note := generateBasicNote("20260201100000-abc", "Test", "", "untethered", nil)
+	note := generateBasicNote("20260201100000-abc", "Test", "", nil)
 
 	if !strings.HasPrefix(note, "---\n") {
 		t.Error("Expected frontmatter to start with ---")
@@ -183,24 +177,24 @@ func TestUpdateFrontmatter_UpdatesExistingField(t *testing.T) {
 	content := []byte(`---
 id: "20260201100000-abc"
 title: "Old Title"
-category: "untethered"
+project: "old-proj"
 ---
 
 # Old Title
 `)
 	result, err := updateFrontmatter(content, map[string]string{
-		"category": "tethered",
+		"project": "new-proj",
 	})
 	if err != nil {
 		t.Fatalf("updateFrontmatter failed: %v", err)
 	}
 
 	s := string(result)
-	if !strings.Contains(s, `category: "tethered"`) {
-		t.Error("Expected category to be updated to tethered")
+	if !strings.Contains(s, `project: "new-proj"`) {
+		t.Error("Expected project to be updated to new-proj")
 	}
-	if strings.Contains(s, `category: "untethered"`) {
-		t.Error("Old category value should be replaced")
+	if strings.Contains(s, `project: "old-proj"`) {
+		t.Error("Old project value should be replaced")
 	}
 }
 

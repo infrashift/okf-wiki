@@ -21,7 +21,7 @@ func testStore(t *testing.T) *Store {
 }
 
 // helper: write a concept file to disk
-func writeConcept(t *testing.T, dir, id, title, project, category string, tags []string, parent string, links []string, body string) string {
+func writeConcept(t *testing.T, dir, id, title, project string, tags []string, parent string, links []string, body string) string {
 	t.Helper()
 	filename := id + ".md"
 	path := filepath.Join(dir, filename)
@@ -32,7 +32,6 @@ func writeConcept(t *testing.T, dir, id, title, project, category string, tags [
 	if project != "" {
 		fm += "project: \"" + project + "\"\n"
 	}
-	fm += "category: \"" + category + "\"\n"
 	if len(tags) > 0 {
 		fm += "tags:\n"
 		for _, t := range tags {
@@ -75,7 +74,7 @@ func TestSyncFile(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeConcept(t, dir, id, "Test Note", "myproject", "untethered", []string{"go", "test"}, "", nil, "Hello world")
+	writeConcept(t, dir, id, "Test Note", "myproject", []string{"go", "test"}, "", nil, "Hello world")
 
 	path := filepath.Join(dir, id+".md")
 	if err := s.SyncFile(path, dir); err != nil {
@@ -107,8 +106,8 @@ func TestSyncFull(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeConcept(t, dir, id1, "Note A", "", "untethered", []string{"alpha"}, "", []string{id2}, "Links to B")
-	writeConcept(t, dir, id2, "Note B", "", "untethered", []string{"beta"}, "", nil, "Standalone")
+	writeConcept(t, dir, id1, "Note A", "", []string{"alpha"}, "", []string{id2}, "Links to B")
+	writeConcept(t, dir, id2, "Note B", "", []string{"beta"}, "", nil, "Standalone")
 
 	result, err := s.Sync(dir)
 	if err != nil {
@@ -134,7 +133,7 @@ func TestSyncIncremental(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeConcept(t, dir, id, "Original Title", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id, "Original Title", "", nil, "", nil, "")
 
 	r1, err := s.Sync(dir)
 	if err != nil {
@@ -161,8 +160,8 @@ func TestSyncDeletesRemovedFiles(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeConcept(t, dir, id1, "Note A", "", "untethered", nil, "", nil, "")
-	writeConcept(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id1, "Note A", "", nil, "", nil, "")
+	writeConcept(t, dir, id2, "Note B", "", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -190,8 +189,8 @@ func TestPurgeNode(t *testing.T) {
 	id1 := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	id2 := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeConcept(t, dir, id1, "Note A", "", "untethered", []string{"go"}, "", []string{id2}, "Links to B")
-	writeConcept(t, dir, id2, "Note B", "", "untethered", nil, "", nil, "")
+	writeConcept(t, dir, id1, "Note A", "", []string{"go"}, "", []string{id2}, "Links to B")
+	writeConcept(t, dir, id2, "Note B", "", nil, "", nil, "")
 
 	s.Sync(dir)
 
@@ -220,8 +219,8 @@ func TestParentChildEdges(t *testing.T) {
 	parentID := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	childID := "20260214100000-11111111-2222-3333-4444-555555555555"
 
-	writeConcept(t, dir, parentID, "Parent", "", "untethered", nil, "", nil, "")
-	writeConcept(t, dir, childID, "Child", "", "untethered", nil, parentID, nil, "")
+	writeConcept(t, dir, parentID, "Parent", "", nil, "", nil, "")
+	writeConcept(t, dir, childID, "Child", "", nil, parentID, nil, "")
 
 	s.Sync(dir)
 
@@ -249,7 +248,7 @@ func TestExportJSON(t *testing.T) {
 	dir := t.TempDir()
 
 	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	writeConcept(t, dir, id, "Test", "", "untethered", []string{"go"}, "", nil, "")
+	writeConcept(t, dir, id, "Test", "", []string{"go"}, "", nil, "")
 	s.Sync(dir)
 
 	var buf struct {

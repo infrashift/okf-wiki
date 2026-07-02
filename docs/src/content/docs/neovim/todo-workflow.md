@@ -5,6 +5,8 @@ description: A comprehensive guide to managing todos with okfw directly from Neo
 
 A comprehensive guide to managing todos with `okfw` directly from your editor. Todos are a special type of concept designed for actionable tasks with status tracking, due dates, priorities, and links to other notes.
 
+Your project needs an initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at the project root to create the `.okfw/` directory. The plugin discovers the wiki via `okfw root` from NeoVim's current working directory. Generated todo lists land in `.okfw/.todos/` (gitignored).
+
 ---
 
 ## What Are Todos?
@@ -25,7 +27,7 @@ Todos in `okfw` are not just checkboxes - they're full concepts with:
 
 ---
 
-## Why Todos as Zettels?
+## Why Todos as Concepts?
 
 ### Traditional Task Managers
 
@@ -57,7 +59,6 @@ title: "Fix authentication bug"
 type: "todo"
 kind: "todo"
 project: "my-project"
-category: "untethered"
 status: "open"
 due: "2026-02-20"
 priority: "high"
@@ -389,6 +390,6 @@ Total: 3 todos
 
 ## Related Documentation
 
-- [Notes Workflow](/zettelkasten/neovim/notes-workflow/) - General note-taking workflow
-- [Daily Notes Workflow](/zettelkasten/neovim/daily-notes-workflow/) - Daily notes workflow
-- [CLI Commands](/zettelkasten/reference/cli-commands/) - Complete CLI reference
+- [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - General note-taking workflow
+- [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) - Daily notes workflow
+- [CLI Commands](/okf-wiki/reference/cli-commands/) - Complete CLI reference

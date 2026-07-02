@@ -3,7 +3,6 @@
 package graphdb
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -39,7 +38,6 @@ type NodeRecord struct {
 	Title    string   `json:"title"`
 	FilePath string   `json:"file_path"`
 	Project  string   `json:"project,omitempty"`
-	Category string   `json:"category"`
 	Tags     []string `json:"tags,omitempty"`
 	Parent   string   `json:"parent,omitempty"`
 	Links    []string `json:"links,omitempty"`
@@ -138,7 +136,9 @@ func (s *Store) Sync(rootPath string) (*SyncResult, error) {
 		if err != nil {
 			return err
 		}
-		if fi.IsDir() && (strings.HasPrefix(fi.Name(), ".") && fi.Name() != "." || fi.Name() == "ephemeral") {
+		// Skip hidden dirs and ephemeral/, but never the walk root itself
+		// (the bundle root is the hidden .okfw directory).
+		if fi.IsDir() && p != rootPath && (strings.HasPrefix(fi.Name(), ".") || fi.Name() == "ephemeral") {
 			return filepath.SkipDir
 		}
 		if !fi.IsDir() && strings.HasSuffix(p, ".md") && fi.Name() != "index.md" && fi.Name() != "log.md" {
@@ -289,15 +289,21 @@ func purgeNodeTx(tx *bolt.Tx, id string) error {
 
 	// Remove this node from other nodes' backlink lists (as a source).
 	for _, linkID := range node.Links {
-		removeFromIDList(backlinks, linkID, id)
+		if err := removeFromIDList(backlinks, linkID, id); err != nil {
+			return err
+		}
 	}
 	if node.Parent != "" {
-		removeFromIDList(backlinks, node.Parent, id)
+		if err := removeFromIDList(backlinks, node.Parent, id); err != nil {
+			return err
+		}
 	}
 
 	// Remove this node from tag indices.
 	for _, tag := range node.Tags {
-		removeFromIDList(tags, tag, id)
+		if err := removeFromIDList(tags, tag, id); err != nil {
+			return err
+		}
 	}
 
 	// Remove the node itself.
@@ -326,14 +332,20 @@ func (s *Store) upsertNode(node *NodeRecord) error {
 				}
 				// Remove from old backlink targets.
 				for _, linkID := range old.Links {
-					removeFromIDList(backlinksB, linkID, node.ID)
+					if err := removeFromIDList(backlinksB, linkID, node.ID); err != nil {
+						return err
+					}
 				}
 				if old.Parent != "" {
-					removeFromIDList(backlinksB, old.Parent, node.ID)
+					if err := removeFromIDList(backlinksB, old.Parent, node.ID); err != nil {
+						return err
+					}
 				}
 				// Remove from old tag indices.
 				for _, tag := range old.Tags {
-					removeFromIDList(tagsB, tag, node.ID)
+					if err := removeFromIDList(tagsB, tag, node.ID); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -354,7 +366,9 @@ func (s *Store) upsertNode(node *NodeRecord) error {
 			if err := edges.Put(edgeKey(node.ID, PredicateLinksTo, linkID), eData); err != nil {
 				return err
 			}
-			addToIDList(backlinksB, linkID, node.ID)
+			if err := addToIDList(backlinksB, linkID, node.ID); err != nil {
+				return err
+			}
 		}
 
 		// Insert edges: parent_of / child_of
@@ -371,7 +385,9 @@ func (s *Store) upsertNode(node *NodeRecord) error {
 			if err := edges.Put(edgeKey(node.Parent, PredicateParentOf, node.ID), eData2); err != nil {
 				return err
 			}
-			addToIDList(backlinksB, node.Parent, node.ID)
+			if err := addToIDList(backlinksB, node.Parent, node.ID); err != nil {
+				return err
+			}
 		}
 
 		// Insert edges: tagged
@@ -381,7 +397,9 @@ func (s *Store) upsertNode(node *NodeRecord) error {
 			if err := edges.Put(edgeKey(node.ID, PredicateTagged, tag), eData); err != nil {
 				return err
 			}
-			addToIDList(tagsB, tag, node.ID)
+			if err := addToIDList(tagsB, tag, node.ID); err != nil {
+				return err
+			}
 		}
 
 		return nil
@@ -513,7 +531,7 @@ func parseConceptFile(filePath, bundleRoot string) (*NodeRecord, error) {
 
 	absPath, _ := filepath.Abs(filePath)
 
-	body := extractBody(content)
+	body := config.ExtractBody(content)
 	links := config.ResolveBodyLinkIDs(body, absPath, bundleRoot)
 
 	return &NodeRecord{
@@ -521,36 +539,12 @@ func parseConceptFile(filePath, bundleRoot string) (*NodeRecord, error) {
 		Title:    z.Title,
 		FilePath: absPath,
 		Project:  z.Project,
-		Category: z.Category,
 		Tags:     z.Tags,
 		Parent:   z.Parent,
 		Links:    links,
 	}, nil
 }
 
-// extractBody returns the markdown body after the frontmatter.
-func extractBody(content []byte) string {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return string(content)
-	}
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return ""
-	}
-
-	body := rest[endIdx+4:]
-	if len(body) > 0 && body[0] == '\n' {
-		body = body[1:]
-	}
-
-	return string(body)
-}
 
 // hasPrefix checks if a byte slice has the given prefix.
 func hasPrefix(s, prefix []byte) bool {
@@ -566,30 +560,37 @@ func hasPrefix(s, prefix []byte) bool {
 }
 
 // addToIDList appends an ID to a JSON-encoded string list in a bucket.
-func addToIDList(b *bolt.Bucket, key, id string) {
+func addToIDList(b *bolt.Bucket, key, id string) error {
 	var ids []string
 	if data := b.Get([]byte(key)); data != nil {
-		json.Unmarshal(data, &ids)
+		if err := json.Unmarshal(data, &ids); err != nil {
+			return fmt.Errorf("corrupt ID list for key %q: %w", key, err)
+		}
 	}
 	// Check for duplicates.
 	for _, existing := range ids {
 		if existing == id {
-			return
+			return nil
 		}
 	}
 	ids = append(ids, id)
-	data, _ := json.Marshal(ids)
-	b.Put([]byte(key), data)
+	data, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	return b.Put([]byte(key), data)
 }
 
 // removeFromIDList removes an ID from a JSON-encoded string list in a bucket.
-func removeFromIDList(b *bolt.Bucket, key, id string) {
+func removeFromIDList(b *bolt.Bucket, key, id string) error {
 	var ids []string
 	data := b.Get([]byte(key))
 	if data == nil {
-		return
+		return nil
 	}
-	json.Unmarshal(data, &ids)
+	if err := json.Unmarshal(data, &ids); err != nil {
+		return fmt.Errorf("corrupt ID list for key %q: %w", key, err)
+	}
 	filtered := ids[:0]
 	for _, existing := range ids {
 		if existing != id {
@@ -597,9 +598,11 @@ func removeFromIDList(b *bolt.Bucket, key, id string) {
 		}
 	}
 	if len(filtered) == 0 {
-		b.Delete([]byte(key))
-	} else {
-		data, _ := json.Marshal(filtered)
-		b.Put([]byte(key), data)
+		return b.Delete([]byte(key))
 	}
+	data, err := json.Marshal(filtered)
+	if err != nil {
+		return err
+	}
+	return b.Put([]byte(key), data)
 }

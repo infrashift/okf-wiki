@@ -17,7 +17,6 @@ type Concept struct {
 	Description string    `yaml:"description,omitempty"` // OKF recommended: one-sentence summary
 	Resource    string    `yaml:"resource,omitempty"`    // OKF recommended: URI of the underlying asset
 	Project     string    `yaml:"project,omitempty"`
-	Category    string    `yaml:"category"`
 	Tags        []string  `yaml:"tags"`
 	Created     time.Time `yaml:"created"`
 	Timestamp   time.Time `yaml:"timestamp"` // OKF recommended: last meaningful change
@@ -96,6 +95,39 @@ func ExtractFrontmatter(content []byte) ([]byte, error) {
 	}
 
 	return rest[:endIdx], nil
+}
+
+// ExtractBody returns the markdown body following the frontmatter block.
+// Content without a frontmatter block is returned unchanged; content whose
+// frontmatter never closes yields an empty body. Handles both LF and CRLF
+// line endings.
+func ExtractBody(content []byte) string {
+	if !bytes.HasPrefix(content, []byte("---")) {
+		return string(content)
+	}
+
+	rest := content[3:]
+	// Skip the line ending after the opening ---
+	if len(rest) > 0 && rest[0] == '\n' {
+		rest = rest[1:]
+	} else if len(rest) > 1 && rest[0] == '\r' && rest[1] == '\n' {
+		rest = rest[2:]
+	}
+
+	endIdx := bytes.Index(rest, []byte("\n---"))
+	if endIdx == -1 {
+		return ""
+	}
+
+	body := rest[endIdx+4:]
+	// Skip the line ending after the closing ---
+	if len(body) > 1 && body[0] == '\r' && body[1] == '\n' {
+		body = body[2:]
+	} else if len(body) > 0 && body[0] == '\n' {
+		body = body[1:]
+	}
+
+	return string(body)
 }
 
 // ValidateConcept validates a Concept struct against the CUE schema and business rules.

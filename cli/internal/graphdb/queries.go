@@ -217,7 +217,6 @@ func (s *Store) ToGraph() (*graph.Graph, error) {
 				Title:    nr.Title,
 				FilePath: nr.FilePath,
 				Project:  nr.Project,
-				Category: nr.Category,
 				Parent:   nr.Parent,
 				Links:    nr.Links,
 			})

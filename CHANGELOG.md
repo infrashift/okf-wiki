@@ -2,6 +2,48 @@
 
 All notable changes to this project are documented here.
 
+## 2026-07-02
+
+### Changed (breaking)
+- **Wikis are now per-project.** The global `~/okfw` bundle and the config file are gone. A wiki is a `.okfw/` directory at the project root:
+  - `okfw init` creates it (at the git repository root, else the cwd), writes `.okfw/.gitignore` for generated artifacts, and generates the OKF root `index.md`. Re-running `init` is a no-op.
+  - Every command discovers the wiki by searching upward from the working directory (like git); commands run from any project subdirectory. Without a wiki they exit with "run `okfw init`" advice.
+  - `okfw connect` verifies the wiki (path, concept count, index/graph presence); `okfw root` prints the discovered path.
+  - Fixed layout inside `.okfw/`: concepts + `daily/` at the top level, `.index/` (search), `.graph.db` (graph), `.todos/` (todo lists), `ephemeral/` (exports). Concept markdown is meant to be committed with the project; generated artifacts are gitignored.
+  - The config file (`~/.config/okfw/config.cue`, `$OKFW_CONFIG`) and all its keys (`root_path`, `index_path`, `graph_path`, `todos_path`, the never-used `editor`) are removed.
+  - Neovim: new `:OkfwInit` command; the plugin resolves the wiki through `okfw root` per working directory.
+  - **Migrating an existing `~/okfw` bundle:** `cd <project> && okfw init && mv ~/okfw/* .okfw/ && okfw graph-sync && okfw index .okfw`
+
+### Removed (breaking)
+- **`okfw migrate-okf` is gone.** It existed to convert pre-OKF vaults (UUID filenames, `[[id]]` wiki links, `category:` fields); with no legacy bundles left to migrate it was pure maintenance surface. The legacy wiki-link helpers in the graph package went with it.
+- **`okfw hello` and `okfw goodbye` (dated-branch git workflow) are gone.** With per-project wikis they operated on the *project* repository — `goodbye` ran `git add -A` + commit + merge there, sweeping up unrelated code changes. Manage git however you like; okfw no longer prescribes a workflow.
+- **Project auto-detection from git is gone.** `create`/`todo` no longer derive `project` from the repo name (and no longer file notes under a repo-named subfolder). `--project`/`-p` remains as explicit, optional metadata; without it, notes land at the wiki root. The opt-in `okfw log` (log.md from git history) and `init`'s repo-root placement are unaffected.
+- **The `tethered`/`untethered` category feature is gone.** Categories were metadata-only and added workflow friction without affecting placement or search quality.
+  - `okfw create --category` and `okfw search --category` flags removed — scripts using them now fail with "unknown flag"
+  - `okfw tether` and `okfw untether` commands removed — use `okfw set-project <file> <project>` to assign a project
+  - `category` is no longer written to frontmatter; `project` is always optional
+  - Existing notes that still carry `category:` remain valid (the field is tolerated and ignored)
+  - `folders` config section (`untethered`/`tethered`/`tmp`) removed — it was never read by any command
+  - NeoVim: `:OkfwNote` no longer takes a category; `tether_note()`/`untether_note()`, the `untethered()`/`tethered()` pickers, and the `<localleader>t` tether keymap removed
+  - Search index: the `category` field and filter are gone — run `okfw index <bundle-root>` to rebuild, and `okfw graph-sync` to refresh the graph database
+
+### Added
+- **MCP server: `okfw mcp`.** Serves the wiki over the Model Context Protocol (stdio) for AI agents, designed to minimize token usage versus raw CLI access: five consolidated tools (`search`, `create`, `read`, `update`, `graph`) instead of one per command, terse schemas (< 3 KB total), and compact JSON responses with wiki-relative paths. Bodies are fully writable (`create` takes `body`; `update` supports `append`/`set_body`), so filesystem-less MCP clients get complete access. Dependency-free JSON-RPC implementation. Register with `claude mcp add okfw -- okfw mcp`.
+- **Agent skill: `skills/okfw.md`.** A drop-in Claude Code skill teaching agents the wiki's conventions — wiki-relative link syntax, atomic notes, descriptions, and the capture → refine → link workflow. Copy it into a project's `.claude/skills/`.
+- **`okfw create --body`** writes markdown body content at creation time.
+- **Agent/script-friendly help and output.** `okfw --help` now describes the product, the `.okfw/` discovery model, and the machine-readable surfaces; `okfw create --json` returns `{"id","path"}`, and plain create's `Created: <path>` line is documented as a stable contract.
+- **OKF `index.md` listings are maintained automatically.** Creating or updating a note regenerates every directory's `index.md` (root with `okf_version`, others frontmatter-free, entries with descriptions) — including a fresh `index.md` for any subdirectory a `--path`/`--project` note just created. `okfw index-md` remains for explicit regeneration; index files are owned by okfw and overwritten.
+
+### Fixed
+- **`okfw daily --list` showed no notes** — it tried to parse a date out of `slug--shortid.md` filenames; it now reads the date from frontmatter (`created`, falling back to the id's embedded timestamp).
+- **The search index was created relative to the current working directory**, scattering index directories wherever `okfw` was run and making search results depend on your cwd. The index now always lives inside the wiki (`.okfw/.index/`).
+- **CRLF line endings broke body extraction** (link scanning/indexing) — frontmatter/body splitting now handles `\r\n`; the duplicated logic was consolidated into `config.ExtractBody`.
+- **Corrupt graph-database index data was silently ignored** — backlink/tag index errors now propagate instead of being treated as an empty list.
+
+### Changed
+- **Note mutations keep the graph database fresh** — `set-project`, `add-tags`, and note creation now update the graph database (when it exists) alongside the search index.
+- **Graph queries use the persistent backlink index** — `okfw graph --start` and `okfw export --start` run the BFS against the graph database's precomputed indexes instead of loading the whole bundle; the in-memory fallback also replaced its O(n²) reverse-link scan with an indexed lookup.
+
 ## 2026-06-26
 
 ### Changed
