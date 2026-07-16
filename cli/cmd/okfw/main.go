@@ -1933,10 +1933,13 @@ func shortID(id string, n int) string {
 }
 
 // noteFilename builds a hybrid "slug--shortid.md" filename for title/id, unique
-// within dir (the short id is extended on collision). Returns the base name only.
+// within dir. The short id defaults to the first 12 hex chars of the id — the full
+// UUIDv7 millisecond timestamp — so filenames match the frontmatter id's first two
+// groups and sort chronologically; on collision it is extended into the random bits.
+// Returns the base name only.
 func noteFilename(dir, title, id string) string {
 	slug := slugify(title)
-	for n := 8; n <= 32; n += 2 {
+	for n := 12; n <= 32; n += 2 {
 		name := slug + "--" + shortID(id, n) + ".md"
 		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
 			return name

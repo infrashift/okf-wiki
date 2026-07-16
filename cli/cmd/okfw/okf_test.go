@@ -96,7 +96,7 @@ func TestNoteFilename_Collision(t *testing.T) {
 	dir := t.TempDir()
 	id := "019680f0-7e00-7abc-8def-1234567890ab"
 	first := noteFilename(dir, "Alpha", id)
-	if first != "alpha--019680f0.md" {
+	if first != "alpha--019680f07e00.md" {
 		t.Fatalf("first filename = %q", first)
 	}
 	// Create the file; a second call with the same slug+id must extend the short id.
