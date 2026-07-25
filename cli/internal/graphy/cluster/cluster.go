@@ -1,84 +1,130 @@
 // Package cluster assigns graph nodes to communities. Detection is LLM-free.
 //
-// The Detector interface isolates the algorithm choice: today gonum's Louvain
-// modularization; Leiden can slot in behind the same interface when a
-// credible Go implementation exists.
+// The Detector interface isolates the algorithm choice. Two are available:
+// Leiden (the default), a pure-Go implementation that guarantees every
+// returned community is internally connected; and gonum's Louvain, kept
+// selectable because it is what earlier graphs were built with. Both are
+// deterministic given a seed, and both number communities by their
+// lexicographically-smallest member so ids are comparable across runs.
 package cluster
 
 import (
-	"math/rand/v2"
-	"sort"
-
-	"gonum.org/v1/gonum/graph/community"
-	"gonum.org/v1/gonum/graph/simple"
+	"fmt"
+	"math"
+	"slices"
+	"strings"
 )
 
 // Detector assigns a community id to every node id.
+//
+// edges is a multiset of undirected pairs; implementations may treat repeated
+// pairs as edge weight. Self-loops and pairs naming ids absent from nodeIDs
+// are ignored. Implementations must return an entry for every distinct id in
+// nodeIDs, including isolated nodes — store.SetCommunities leaves nodes
+// missing from the assignment stamped with their previous community, so a
+// partial assignment silently preserves stale data.
 type Detector interface {
 	Detect(nodeIDs []string, edges [][2]string) (map[string]int, error)
 }
 
-// Louvain runs gonum's Louvain modularization over the undirected projection
-// of the graph. The fixed Seed makes assignments reproducible across runs.
-type Louvain struct {
-	Resolution float64 // 0 → default 1.0
-	Seed       uint64
+// Algorithm names a community detection implementation.
+type Algorithm string
+
+const (
+	AlgoLeiden  Algorithm = "leiden"
+	AlgoLouvain Algorithm = "louvain"
+)
+
+// Defaults applied wherever a zero value is supplied, so that a zero-valued
+// options struct means "Leiden, resolution 1, seed 1" everywhere.
+const (
+	DefaultAlgorithm  = AlgoLeiden
+	DefaultResolution = 1.0
+	DefaultSeed       = uint64(1)
+)
+
+// Algorithms lists the selectable algorithm names, for flag help and errors.
+func Algorithms() []string { return []string{string(AlgoLeiden), string(AlgoLouvain)} }
+
+// ParseAlgorithm normalizes and validates a user-supplied algorithm name.
+// The empty string yields DefaultAlgorithm.
+func ParseAlgorithm(s string) (Algorithm, error) {
+	switch Algorithm(strings.ToLower(strings.TrimSpace(s))) {
+	case "":
+		return DefaultAlgorithm, nil
+	case AlgoLeiden:
+		return AlgoLeiden, nil
+	case AlgoLouvain:
+		return AlgoLouvain, nil
+	default:
+		return "", fmt.Errorf("unknown clustering algorithm %q (want one of: %s)",
+			s, strings.Join(Algorithms(), ", "))
+	}
 }
 
-// Detect implements Detector. Community ids are renumbered deterministically:
-// communities are ordered by their lexicographically-smallest member.
-func (l Louvain) Detect(nodeIDs []string, edges [][2]string) (map[string]int, error) {
-	if len(nodeIDs) == 0 {
-		return map[string]int{}, nil
+// New returns the detector for an algorithm. A zero resolution or seed means
+// the package default.
+func New(algo Algorithm, resolution float64, seed uint64) (Detector, error) {
+	a, err := ParseAlgorithm(string(algo))
+	if err != nil {
+		return nil, err
 	}
-	resolution := l.Resolution
+	if resolution < 0 || math.IsNaN(resolution) || math.IsInf(resolution, 0) {
+		return nil, fmt.Errorf("invalid clustering resolution %v (want a finite value >= 0)", resolution)
+	}
 	if resolution == 0 {
-		resolution = 1.0
+		resolution = DefaultResolution
 	}
-
-	// Deterministic id mapping: sorted node ids → dense int64 indices.
-	sorted := append([]string(nil), nodeIDs...)
-	sort.Strings(sorted)
-	index := make(map[string]int64, len(sorted))
-	for i, id := range sorted {
-		index[id] = int64(i)
+	if seed == 0 {
+		seed = DefaultSeed
 	}
-
-	g := simple.NewUndirectedGraph()
-	for _, id := range sorted {
-		g.AddNode(simple.Node(index[id]))
+	switch a {
+	case AlgoLouvain:
+		return Louvain{Resolution: resolution, Seed: seed}, nil
+	default:
+		return Leiden{Resolution: resolution, Seed: seed}, nil
 	}
-	for _, e := range edges {
-		a, aok := index[e[0]]
-		b, bok := index[e[1]]
-		if !aok || !bok || a == b {
-			continue
-		}
-		g.SetEdge(simple.Edge{F: simple.Node(a), T: simple.Node(b)})
-	}
+}
 
-	src := rand.NewPCG(l.Seed, l.Seed)
-	reduced := community.Modularize(g, resolution, src)
+// sortUnique returns the node ids sorted and deduplicated. Deduplication
+// matters: a repeated id would otherwise claim two dense indices, and the
+// orphaned one would surface as a phantom singleton community.
+func sortUnique(ids []string) []string {
+	sorted := append([]string(nil), ids...)
+	slices.Sort(sorted)
+	return slices.Compact(sorted)
+}
 
-	assign := make(map[string]int, len(sorted))
+// renumber maps a dense membership array back onto node ids, numbering
+// communities by their lexicographically-smallest member so that the returned
+// ids are stable regardless of the order an algorithm happened to discover
+// the communities in.
+func renumber(sortedIDs []string, member []int32) map[string]int {
 	type comm struct {
 		smallest string
 		members  []string
 	}
+	byID := map[int32]int{} // community label → index into comms
 	var comms []comm
-	for _, nodes := range reduced.Communities() {
-		var members []string
-		for _, n := range nodes {
-			members = append(members, sorted[n.ID()])
+	for i, id := range sortedIDs {
+		c := member[i]
+		idx, seen := byID[c]
+		if !seen {
+			idx = len(comms)
+			byID[c] = idx
+			comms = append(comms, comm{smallest: id})
 		}
-		sort.Strings(members)
-		comms = append(comms, comm{smallest: members[0], members: members})
+		comms[idx].members = append(comms[idx].members, id)
 	}
-	sort.Slice(comms, func(i, j int) bool { return comms[i].smallest < comms[j].smallest })
+	// sortedIDs is ascending, so each community's first-seen member is already
+	// its smallest; sorting the communities by it gives the stable numbering.
+	slices.SortFunc(comms, func(a, b comm) int { return strings.Compare(a.smallest, b.smallest) })
+
+	assign := make(map[string]int, len(sortedIDs))
 	for id, c := range comms {
-		for _, member := range c.members {
-			assign[member] = id
+		for _, m := range c.members {
+			assign[m] = id
 		}
 	}
-	return assign, nil
+	return assign
 }

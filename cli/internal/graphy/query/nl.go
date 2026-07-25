@@ -29,7 +29,12 @@ type NLResult struct {
 
 const nlSystemPrompt = `You are a retrieval planner over a code knowledge graph.
 The user asks a question about a codebase. You receive an index of graph nodes
-as TSV lines: id, kind, label, file, community.
+as TSV lines: id, kind, label, file, community, summary.
+
+Nodes of kind "rationale" are recorded intent — a WHY/DECISION/TODO comment or
+an architecture decision record — and carry a summary in the last column. They
+are linked to the code they justify by "explains" edges. Prefer them as seeds
+when the question asks why something is the way it is.
 
 Reply with ONLY a JSON object, no prose, no markdown fences:
 {"node_ids": ["<id>", ...], "depth": 1}
@@ -37,7 +42,7 @@ Reply with ONLY a JSON object, no prose, no markdown fences:
 Pick the 3-10 node ids most relevant to the question (seeds for a graph
 expansion). "depth" is 1 or 2: use 2 only when the question is about flows or
 relationships spanning several steps. Optionally add
-"relations": ["calls","imports","inherits","implements","references","contains","defines"]
+"relations": ["calls","imports","inherits","implements","references","contains","defines","explains"]
 to filter which edge kinds matter.`
 
 // plan is what the LLM must produce.
@@ -160,29 +165,61 @@ func keywordFallback(s *store.Store, question string, opts NLOptions) (*NLResult
 
 // candidateIndex renders the top-N nodes by degree as compact TSV, keeping
 // the LLM prompt bounded regardless of repo size.
+// rationaleBudget is the share of the candidate index reserved for rationale
+// nodes, as a divisor of topN.
+const rationaleBudget = 10
+
 func candidateIndex(s *store.Store, topN int) (string, error) {
-	var nodes []model.Node
+	var nodes, rationale []model.Node
 	if err := s.EachNode(func(n model.Node) error {
-		if n.Kind == model.KindHeading {
+		switch n.Kind {
+		case model.KindHeading:
 			return nil
+		case model.KindRationale:
+			rationale = append(rationale, n)
+		default:
+			nodes = append(nodes, n)
 		}
-		nodes = append(nodes, n)
 		return nil
 	}); err != nil {
 		return "", err
 	}
-	sort.Slice(nodes, func(i, j int) bool {
-		if nodes[i].Degree != nodes[j].Degree {
-			return nodes[i].Degree > nodes[j].Degree
-		}
-		return nodes[i].ID < nodes[j].ID
-	})
+	byDegree := func(ns []model.Node) {
+		sort.Slice(ns, func(i, j int) bool {
+			if ns[i].Degree != ns[j].Degree {
+				return ns[i].Degree > ns[j].Degree
+			}
+			return ns[i].ID < ns[j].ID
+		})
+	}
+	byDegree(nodes)
 	if len(nodes) > topN {
 		nodes = nodes[:topN]
 	}
+	// Rationale nodes are degree-2 leaves and would be crowded out of a purely
+	// degree-ranked index — yet they are exactly what a "why" question needs
+	// as a seed. Reserve a slice of the budget for them.
+	sort.Slice(rationale, func(i, j int) bool { return rationale[i].ID < rationale[j].ID })
+	if cap := topN / rationaleBudget; len(rationale) > cap {
+		rationale = rationale[:cap]
+	}
+
 	var b strings.Builder
 	for _, n := range nodes {
-		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\n", n.ID, n.Kind, n.Label, n.File, n.Community)
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t\n", n.ID, n.Kind, n.Label, n.File, n.Community)
+	}
+	for _, n := range rationale {
+		fmt.Fprintf(&b, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			n.ID, n.Kind, n.Label, n.File, n.Community, truncate(n.Doc, 40))
 	}
 	return b.String(), nil
+}
+
+// truncate shortens a summary so the prompt stays bounded.
+func truncate(s string, n int) string {
+	s = strings.ReplaceAll(s, "\t", " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

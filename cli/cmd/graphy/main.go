@@ -8,13 +8,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
 	"okfw/cli/internal/graphy/build"
+	"okfw/cli/internal/graphy/cluster"
 	"okfw/cli/internal/graphy/export"
+	"okfw/cli/internal/graphy/extract"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/skills"
 	"okfw/cli/internal/graphy/store"
@@ -52,9 +55,15 @@ func buildCmd() *cobra.Command {
 		Long: `Runs the pipeline: detect files, extract changed ones (tree-sitter AST +
 markdown links), resolve cross-file references into confidence-tagged edges,
 and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuild(build.Options{Full: full, Langs: langs})
-		},
+	}
+	cf := clusterFlags(cmd)
+	rf := rationaleFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		co, err := cf.options()
+		if err != nil {
+			return err
+		}
+		return runBuild(build.Options{Full: full, Langs: langs, Cluster: co, Rationale: rf.options()})
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "wipe the extraction cache and re-extract everything")
 	cmd.Flags().StringSliceVar(&langs, "langs", nil, "restrict to these languages (default: all supported)")
@@ -62,13 +71,81 @@ and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
 }
 
 func updateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Incrementally refresh the graph (alias of build)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuild(build.Options{})
-		},
 	}
+	// The clustering flags belong here too: without them, a graph built with
+	// --cluster-algorithm louvain would be silently re-clustered with the
+	// default on the next `graphy update`.
+	cf := clusterFlags(cmd)
+	rf := rationaleFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		co, err := cf.options()
+		if err != nil {
+			return err
+		}
+		return runBuild(build.Options{Cluster: co, Rationale: rf.options()})
+	}
+	return cmd
+}
+
+// rationaleFlagVals holds the raw rationale-extraction flag values.
+type rationaleFlagVals struct {
+	disabled bool
+	markers  []string
+	adrDirs  []string
+}
+
+// rationaleFlags binds the rationale-extraction flags shared by build and
+// update. All three feed the extraction fingerprint, so changing any of them
+// forces a full re-extract on the next build.
+func rationaleFlags(cmd *cobra.Command) *rationaleFlagVals {
+	v := &rationaleFlagVals{}
+	cmd.Flags().BoolVar(&v.disabled, "no-rationale", false,
+		"skip rationale extraction (WHY:/DECISION: comments and ADRs)")
+	cmd.Flags().StringSliceVar(&v.markers, "markers", extract.DefaultMarkers,
+		"comment markers that become rationale nodes")
+	cmd.Flags().StringSliceVar(&v.adrDirs, "adr-dirs", extract.DefaultADRDirs,
+		"directory names holding architecture decision records")
+	return v
+}
+
+func (v *rationaleFlagVals) options() extract.RationaleOptions {
+	return extract.RationaleOptions{
+		Enabled: !v.disabled,
+		Markers: v.markers,
+		ADRDirs: v.adrDirs,
+	}
+}
+
+// clusterFlagVals holds the raw community-detection flag values.
+type clusterFlagVals struct {
+	algorithm  string
+	resolution float64
+	seed       uint64
+}
+
+// clusterFlags binds the community-detection flags shared by build and update,
+// so the two cannot drift apart.
+func clusterFlags(cmd *cobra.Command) *clusterFlagVals {
+	v := &clusterFlagVals{}
+	cmd.Flags().StringVar(&v.algorithm, "cluster-algorithm", string(cluster.DefaultAlgorithm),
+		"community detection algorithm: "+strings.Join(cluster.Algorithms(), " or "))
+	cmd.Flags().Float64Var(&v.resolution, "cluster-resolution", cluster.DefaultResolution,
+		"resolution parameter: higher splits into more, smaller communities")
+	cmd.Flags().Uint64Var(&v.seed, "cluster-seed", cluster.DefaultSeed,
+		"RNG seed for reproducible community assignments")
+	return v
+}
+
+// options validates the flags and converts them for the build.
+func (v *clusterFlagVals) options() (build.ClusterOptions, error) {
+	algo, err := cluster.ParseAlgorithm(v.algorithm)
+	if err != nil {
+		return build.ClusterOptions{}, err
+	}
+	return build.ClusterOptions{Algorithm: algo, Resolution: v.resolution, Seed: v.seed}, nil
 }
 
 func runBuild(opts build.Options) error {
@@ -91,8 +168,9 @@ func runBuild(opts build.Options) error {
 	}
 	fmt.Printf("Scanned %d files (%d extracted, %d purged)\n",
 		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged)
-	fmt.Printf("Graph: %d nodes, %d edges, %d communities (%d refs resolved, %d ambiguous, %d dropped)\n",
-		stats.Nodes, stats.Edges, stats.Communities, stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
+	fmt.Printf("Graph: %d nodes, %d edges, %d communities via %s (%d refs resolved, %d ambiguous, %d dropped)\n",
+		stats.Nodes, stats.Edges, stats.Communities, stats.ClusterAlgorithm,
+		stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
 	fmt.Printf("Wrote %s\n", w.JSONPath())
 	return nil
 }
@@ -158,14 +236,15 @@ func exportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Export the graph to another format",
 	}
-	export.AddCommand(exportJSONCmd(), exportOkfwCmd())
+	export.AddCommand(exportJSONCmd(), exportGraphMLCmd(), exportJGFCmd(), exportCypherCmd(), exportOkfwCmd())
 	return export
 }
 
 func exportOkfwCmd() *cobra.Command {
 	var bundlePath, project, repoURL string
 	var minDegree int
-	var communitiesOnly, keepStale bool
+	var communitiesOnly, keepStale, noRationale bool
+	var rationaleMarkers []string
 	cmd := &cobra.Command{
 		Use:   "okfw",
 		Short: "Export the graph as concepts into an OKF Wiki bundle",
@@ -205,6 +284,9 @@ idempotent: concept ids and filenames stay stable across runs.`,
 				KeepStale:       keepStale,
 				RepoURL:         repoURL,
 				Generator:       "graphy " + version,
+
+				NoRationale:      noRationale,
+				RationaleMarkers: rationaleMarkers,
 			})
 			if err != nil {
 				return err
@@ -223,10 +305,13 @@ idempotent: concept ids and filenames stay stable across runs.`,
 	}
 	cmd.Flags().StringVar(&bundlePath, "bundle", "", "bundle location (default: discover .okfw from cwd)")
 	cmd.Flags().StringVar(&project, "project", "", "project folder under graphy/ (default: repo dir name)")
-	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept")
+	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept (does not apply to rationale)")
 	cmd.Flags().BoolVar(&communitiesOnly, "communities-only", false, "export only community concepts")
 	cmd.Flags().BoolVar(&keepStale, "keep-stale", false, "keep concepts whose graph nodes vanished")
 	cmd.Flags().StringVar(&repoURL, "repo-url", "", "web base URL (e.g. https://github.com/org/repo) — turns resource into a commit-pinned permalink")
+	cmd.Flags().BoolVar(&noRationale, "no-rationale", false, "skip rationale concepts")
+	cmd.Flags().StringSliceVar(&rationaleMarkers, "rationale-markers", export.DefaultRationaleMarkers,
+		"which rationale markers become concepts (extraction still captures all of them)")
 	return cmd
 }
 
@@ -236,63 +321,144 @@ func exportJSONCmd() *cobra.Command {
 		Use:   "json",
 		Short: "Write the portable graph.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			w, s, err := openStore()
-			if err != nil {
-				return err
-			}
-			defer s.Close()
-			path := out
-			if path == "" {
-				path = w.JSONPath()
-			}
-			if err := writeGraphJSON(w, s, path); err != nil {
-				return err
-			}
-			fmt.Printf("Wrote %s\n", path)
-			return nil
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JSONPath() },
+				func(f *os.File, g *export.Graph) error {
+					st := g.Stats()
+					return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+				})
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.json)")
 	return cmd
 }
 
-// writeGraphJSON dumps the store into a deterministic graph.json file.
-func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
-	var nodes []model.Node
-	if err := s.EachNode(func(n model.Node) error {
-		nodes = append(nodes, n)
-		return nil
-	}); err != nil {
-		return err
+func exportGraphMLCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "graphml",
+		Short: "Write the graph as GraphML",
+		Long: `Writes a GraphML document readable by Gephi, yEd, Cytoscape and networkx.
+Node and edge attributes (kind, language, source location, community,
+relation, confidence) are declared as GraphML keys. The output carries no
+timestamp, so an unchanged graph re-exports byte for byte identically.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.GraphMLPath() },
+				func(f *os.File, g *export.Graph) error {
+					return export.WriteGraphML(f, g, "graphy "+version)
+				})
+		},
 	}
-	var edges []model.Edge
-	if err := s.EachEdge(func(e model.Edge) error {
-		edges = append(edges, e)
-		return nil
-	}); err != nil {
-		return err
-	}
-	communities := 0
-	if err := s.EachCommunity(func(store.Community) error {
-		communities++
-		return nil
-	}); err != nil {
-		return err
-	}
-	files := 0
-	if err := s.EachFile(func(store.FileRecord) error {
-		files++
-		return nil
-	}); err != nil {
-		return err
-	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.graphml)")
+	return cmd
+}
 
+func exportJGFCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "jgf",
+		Short: "Write the graph as JSON Graph Format",
+		Long: `Writes a JSON Graph Format v2 document (https://jsongraphformat.info):
+nodes keyed by graphy node id, edges carrying source/target/relation, and
+everything graphy-specific under "metadata". The output carries no timestamp,
+so an unchanged graph re-exports byte for byte identically.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JGFPath() },
+				func(f *os.File, g *export.Graph) error {
+					return export.WriteJGF(f, g, "graphy "+version)
+				})
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.jgf.json)")
+	return cmd
+}
+
+func exportCypherCmd() *cobra.Command {
+	var out, graphName string
+	var batchSize int
+	var noTruncate bool
+	cmd := &cobra.Command{
+		Use:   "cypher",
+		Short: "Write a Cypher load script for Apache AGE (PostgreSQL)",
+		Long: `Writes a psql script that loads the graph into Apache AGE. AGE consumes
+Cypher only inside SQL cypher() calls, so the output is .sql rather than
+.cypher; run it with:
+
+  psql -d <database> -f .graphy/graph.age.sql
+
+Vertices carry one label — the entity kind, since AGE allows a single label
+per vertex — and edges are labelled with the relation. The script creates the
+graph if it is missing, and by default clears it first so that re-exporting
+after a rebuild cannot leave behind vertices for code that no longer exists.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.CypherPath() },
+				func(f *os.File, g *export.Graph) error {
+					name := graphName
+					if name == "" {
+						name = filepath.Base(g.Root)
+					}
+					return export.WriteCypher(f, g, export.CypherOptions{
+						Generator:  "graphy " + version,
+						GraphName:  name,
+						BatchSize:  batchSize,
+						NoTruncate: noTruncate,
+					})
+				})
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.age.sql)")
+	cmd.Flags().StringVar(&graphName, "graph-name", "", "AGE graph name (default: repo directory name)")
+	cmd.Flags().IntVar(&batchSize, "batch-size", export.DefaultCypherBatch, "elements per cypher() statement")
+	cmd.Flags().BoolVar(&noTruncate, "no-truncate", false, "append into the existing graph instead of clearing it first")
+	return cmd
+}
+
+// writeGraphJSON dumps the store into a deterministic graph.json file. Builds
+// refresh it directly, without going through the export command.
+func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
+	g, err := export.Load(w.Root, s)
+	if err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return model.EncodeGraphJSON(f, w.Root, nodes, edges, communities, files)
+	st := g.Stats()
+	return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+}
+
+// runGraphExport loads the store into a snapshot and hands it to a writer.
+// The output file is created only once the snapshot has succeeded, so a failed
+// export cannot truncate the previous one.
+func runGraphExport(out string, def func(*workspace.Workspace) string, write func(*os.File, *export.Graph) error) error {
+	w, s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	g, err := export.Load(w.Root, s)
+	if err != nil {
+		return err
+	}
+	path := out
+	if path == "" {
+		path = def(w)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := write(f, g); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	st := g.Stats()
+	fmt.Printf("Wrote %s (%d nodes, %d edges)\n", path, st.Nodes, st.Edges)
+	return nil
 }
 
 func installCmd() *cobra.Command {

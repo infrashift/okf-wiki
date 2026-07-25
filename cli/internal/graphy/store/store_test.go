@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 
@@ -197,5 +199,50 @@ func TestExportsAndMeta(t *testing.T) {
 	}
 	if v, _ := s.GetMeta("seed"); v != "42" {
 		t.Errorf("meta = %q, want 42", v)
+	}
+}
+
+// TestPutExportsIsAtomicPerKey covers the batched write path: every record in
+// the map lands, and none of the untouched ones are disturbed.
+func TestPutExportsIsAtomicPerKey(t *testing.T) {
+	s := openTemp(t)
+	if err := s.PutExport("keep", ExportRecord{ConceptID: "id-keep"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutExports(nil); err != nil {
+		t.Errorf("empty batch: %v", err)
+	}
+	if err := s.PutExports(map[string]ExportRecord{
+		"a": {ConceptID: "id-a", MemberDigest: []byte{1, 2}},
+		"b": {ConceptID: "id-b"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"a": "id-a", "b": "id-b", "keep": "id-keep"} {
+		rec, err := s.GetExport(key)
+		if err != nil || rec == nil || rec.ConceptID != want {
+			t.Errorf("GetExport(%q) = %+v, %v; want %q", key, rec, err, want)
+		}
+	}
+	if rec, _ := s.GetExport("a"); !bytes.Equal(rec.MemberDigest, []byte{1, 2}) {
+		t.Errorf("digest round-trip = %v", rec.MemberDigest)
+	}
+}
+
+// TestLegacyMembersRecordDecodes pins the reason MemberDigest uses a new JSON
+// key: a record written before the digest existed carried a []string under
+// "members". Decoding it must yield an empty digest — which the next export
+// refreshes — rather than a type error that would fail the whole export.
+func TestLegacyMembersRecordDecodes(t *testing.T) {
+	legacy := []byte(`{"concept_id":"id-1","rel_path":"graphy/p/a.md","members":["go:function:f.go#A"]}`)
+	var rec ExportRecord
+	if err := json.Unmarshal(legacy, &rec); err != nil {
+		t.Fatalf("legacy record failed to decode: %v", err)
+	}
+	if rec.ConceptID != "id-1" || rec.RelPath != "graphy/p/a.md" {
+		t.Errorf("legacy fields lost: %+v", rec)
+	}
+	if len(rec.MemberDigest) != 0 {
+		t.Errorf("MemberDigest = %v, want empty", rec.MemberDigest)
 	}
 }

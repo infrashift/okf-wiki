@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -49,10 +50,34 @@ type Community struct {
 	NodeIDs []string `json:"node_ids"`
 }
 
+// ClusterMeta records how the persisted community assignment was produced, so
+// a graph's communities can be reproduced or explained after the fact. It is
+// stored as JSON under MetaClusterKey in the meta bucket, and surfaced in
+// GRAPH_REPORT.md.
+type ClusterMeta struct {
+	Algorithm  string  `json:"algorithm"`
+	Resolution float64 `json:"resolution"`
+	Seed       uint64  `json:"seed"`
+}
+
+// MetaClusterKey is the meta bucket key holding the JSON ClusterMeta.
+const MetaClusterKey = "cluster"
+
 // ExportRecord maps a graph node to the okfw concept it was exported as.
 type ExportRecord struct {
 	ConceptID string `json:"concept_id"`
 	RelPath   string `json:"rel_path"` // bundle-relative concept file path
+	// MemberDigest is a community's node membership as of the last export,
+	// packed as sorted 64-bit hashes (see export.memberDigest); it is empty for
+	// node records. It has to live here rather than be read from the
+	// communities bucket because that bucket is rebuilt from scratch on every
+	// build — by export time the previous partition is gone, and comparing
+	// against it is the only way to recognize a community whose label changed.
+	//
+	// The JSON key deliberately differs from the plain id list this replaced,
+	// so a record written by an older build decodes with an empty digest
+	// instead of failing: it simply gets refreshed on the next export.
+	MemberDigest []byte `json:"member_digest,omitempty"`
 }
 
 // Store is a graphy graph database handle.
@@ -171,11 +196,7 @@ func symbolKeys(n model.Node) [][]byte {
 }
 
 func indexableSymbol(n model.Node) bool {
-	switch n.Kind {
-	case model.KindFile, model.KindDoc, model.KindHeading, model.KindConfig, model.KindExternal:
-		return false
-	}
-	return !n.External && n.Label != ""
+	return model.Indexable(n) && n.Label != ""
 }
 
 func addSymbolTx(tx *bolt.Tx, n model.Node) error {
@@ -552,6 +573,33 @@ func (s *Store) PutExport(nodeID string, rec ExportRecord) error {
 	})
 }
 
+// PutExports writes several export records in a single transaction. An export
+// refreshes one record per community, and a separate commit (and fsync) for
+// each would dominate the cost of an otherwise no-op run.
+func (s *Store) PutExports(recs map[string]ExportRecord) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(recs))
+	for k := range recs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // deterministic write order
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("exports"))
+		for _, k := range keys {
+			data, err := json.Marshal(recs[k])
+			if err != nil {
+				return err
+			}
+			if err := b.Put([]byte(k), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // DeleteExport removes a node's export record.
 func (s *Store) DeleteExport(nodeID string) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
@@ -587,6 +635,37 @@ func (s *Store) GetMeta(key string) (string, error) {
 		return nil
 	})
 	return v, err
+}
+
+// DeleteMeta removes a metadata key. Deleting an absent key is not an error.
+func (s *Store) DeleteMeta(key string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("meta")).Delete([]byte(key))
+	})
+}
+
+// PutClusterMeta records how the current community assignment was produced.
+func (s *Store) PutClusterMeta(m ClusterMeta) error {
+	blob, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return s.PutMeta(MetaClusterKey, string(blob))
+}
+
+// GetClusterMeta returns the recorded clustering parameters. A store built
+// before this was recorded yields the zero value and no error, so callers can
+// render "unknown" rather than fail.
+func (s *Store) GetClusterMeta() (ClusterMeta, error) {
+	var m ClusterMeta
+	raw, err := s.GetMeta(MetaClusterKey)
+	if err != nil || raw == "" {
+		return m, err
+	}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return ClusterMeta{}, nil // unreadable legacy value: treat as absent
+	}
+	return m, nil
 }
 
 // Counts returns node and edge totals.

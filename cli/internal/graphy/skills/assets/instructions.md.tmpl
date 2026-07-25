@@ -7,7 +7,11 @@ architecture and impact questions, query the graph instead of scanning files:
   natural-language question (works offline without an API key)
 - `graphy path <a> <b>` — how two entities connect
 - `graphy explain <entity>` — location, signature, community, all edges
-- `graphy report` — stats, god nodes, and subsystem communities
+- `graphy report` — stats, god nodes, subsystem communities, rationale
+
+The graph also holds `rationale` nodes — WHY:/DECISION:/HACK: comments and
+architecture decision records — joined to the code they justify by `explains`
+edges. Ask "why does X work this way?" before changing unfamiliar code.
 
 After editing code, run `graphy update` (incremental, sub-second) to keep the
 graph fresh. `graphy mcp` serves these as MCP stdio tools.

@@ -11,11 +11,14 @@ package export
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -37,7 +40,17 @@ type OkfwOptions struct {
 	KeepStale       bool   // keep concepts whose graph nodes vanished
 	RepoURL         string // optional web base (e.g. https://github.com/org/repo) for clickable resource permalinks
 	Generator       string // stamped into the graphy frontmatter block (e.g. "graphy 0.1.0")
+	// NoRationale skips rationale concepts entirely.
+	NoRationale bool
+	// RationaleMarkers selects which markers reach the bundle. Defaults to
+	// DefaultRationaleMarkers — deliberately narrower than what extraction
+	// captures, since a repo with 800 TODOs should not dump 800 concepts into
+	// a wiki by default. The rest stay queryable via graphy and MCP.
+	RationaleMarkers []string
 }
+
+// DefaultRationaleMarkers are the markers exported as concepts by default.
+var DefaultRationaleMarkers = []string{"WHY", "RATIONALE", "DECISION", "ADR"}
 
 // OkfwResult summarizes an export.
 type OkfwResult struct {
@@ -57,7 +70,7 @@ const communityKeyPrefix = "\x00community:"
 // item is one concept to emit (a community or a node).
 type item struct {
 	key         string // exports-bucket key
-	rid         string // recovery id written to frontmatter/marker (node id or "community:<n>")
+	rid         string // recovery id written to frontmatter/marker (node id or "community:<slug>")
 	title       string
 	conceptType string // OKF free-form type: "code-<entity>" / "code-community"
 	description string
@@ -66,6 +79,9 @@ type item struct {
 	tags        []string
 	node        *model.Node      // nil for communities
 	community   *store.Community // nil for nodes
+	// parentKey overrides the community parent with another item's key. A
+	// rationale prefers to hang off the entity it explains.
+	parentKey string
 }
 
 // markerRe matches the machine-readable node marker embedded in concept
@@ -98,15 +114,27 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		return nil, err
 	}
 
+	// Membership digests feed both the adoption matching in pass 1 and the
+	// refresh that follows it.
+	digests := map[string][]byte{}
+	for _, it := range items {
+		if it.community != nil {
+			digests[it.key] = memberDigest(it.community.NodeIDs)
+		}
+	}
+
 	// Pass 1: ensure every item has a concept file; collect key → placement.
 	// Resolution order for an item with no live export record:
-	//   1. recovery scan — the mapping was lost (.graphy/ deleted) but the
+	//   1. community adoption — an older key scheme, or a changed label
+	//   2. recovery scan — the mapping was lost (.graphy/ deleted) but the
 	//      concept exists with the same embedded node identity
-	//   2. rename/move adoption — a vanished node's concept carries over so
+	//   3. rename/move adoption — a vanished node's concept carries over so
 	//      refactors keep their concept id (and history)
-	//   3. create a fresh concept
+	//   4. create a fresh concept
 	placed := map[string]placement{}
+	upToDate := map[string]bool{}      // community records already holding the current digest
 	var recovered map[string]placement // rid → placement; scanned lazily
+	var adopter *communityAdopter      // community re-key/relabel matching; loaded lazily
 	var pending []int                  // item indices still needing a concept
 	for i, it := range items {
 		rec, err := s.GetExport(it.key)
@@ -116,6 +144,35 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		if rec != nil {
 			if _, statErr := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))); statErr == nil {
 				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+				if it.community != nil && bytes.Equal(rec.MemberDigest, digests[it.key]) {
+					upToDate[it.key] = true
+				}
+				continue
+			}
+		}
+		// A community whose key no longer matches — an older key scheme, or a
+		// changed label — adopts its own concept rather than letting the stale
+		// sweep delete it and creating a duplicate alongside.
+		if it.community != nil {
+			if adopter == nil {
+				if adopter, err = newCommunityAdopter(cfg, s); err != nil {
+					return nil, err
+				}
+			}
+			if cr, ok := adopter.adopt(it, digests[it.key]); ok {
+				rec, err := renameToTitle(cfg, cr.rec, it.title)
+				if err != nil {
+					return nil, err
+				}
+				if cr.key != it.key {
+					if err := s.DeleteExport(cr.key); err != nil {
+						return nil, err
+					}
+				}
+				// The record itself is (re)written by the membership refresh
+				// below, which runs for every community.
+				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+				res.Recovered++
 				continue
 			}
 		}
@@ -173,6 +230,26 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		res.Created++
 	}
 
+	// Record each community's current membership. This has to consider every
+	// community, not just the ones written above, because the live-record path
+	// skips the write entirely — and a membership left stale would make the
+	// next relabelling unrecognizable. Records already holding the current
+	// digest are skipped, so an unchanged export writes nothing at all, and
+	// the rest go out in one transaction rather than one commit apiece.
+	updates := map[string]store.ExportRecord{}
+	for _, it := range items {
+		if it.community == nil || upToDate[it.key] {
+			continue
+		}
+		p := placed[it.key]
+		updates[it.key] = store.ExportRecord{
+			ConceptID: p.conceptID, RelPath: p.relPath, MemberDigest: digests[it.key],
+		}
+	}
+	if err := s.PutExports(updates); err != nil {
+		return nil, err
+	}
+
 	// Pass 2: render every concept in full — frontmatter (preserving id and
 	// created) and body — with links now that all placements are known.
 	//
@@ -200,17 +277,30 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			return nil, fmt.Errorf("parsing %s: %w", p.relPath, err)
 		}
 		parentID := ""
-		if it.node != nil {
-			if c, ok := nodeCommunity[it.node.ID]; ok {
-				if cp, ok := placed[communityKey(c)]; ok {
+		// A rationale prefers the entity it explains; that entity is only a
+		// valid parent if it was exported too, so fall through to the
+		// community otherwise (which is what ADRs, explaining many entities,
+		// always do). Never leave a dangling parent: the CUE schema requires
+		// a real concept id.
+		if it.parentKey != "" {
+			if p, ok := placed[it.parentKey]; ok {
+				parentID = p.conceptID
+			}
+		}
+		if parentID == "" && it.node != nil {
+			if ck, ok := nodeCommunity[it.node.ID]; ok {
+				if cp, ok := placed[ck]; ok {
 					parentID = cp.conceptID
 				}
 			}
 		}
 		var body string
-		if it.community != nil {
+		switch {
+		case it.community != nil:
 			body = communityBody(it, nodes, linkTo)
-		} else {
+		case it.node != nil && it.node.Kind == model.KindRationale:
+			body = rationaleBody(s, it, nodes, linkTo)
+		default:
 			body = nodeBody(s, it, nodes, linkTo)
 		}
 		if !prev.Timestamp.IsZero() {
@@ -244,9 +334,17 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			key string
 			rec store.ExportRecord
 		}
+		// A file some live item now points at is never stale, whatever key it
+		// used to be filed under. Without this, any re-keying (community
+		// label-slug migration, say) would delete the very concept it just
+		// adopted.
+		claimed := map[string]bool{}
+		for _, p := range placed {
+			claimed[p.relPath] = true
+		}
 		var gone []stale
 		if err := s.EachExport(func(key string, rec store.ExportRecord) error {
-			if !want[key] {
+			if !want[key] && !claimed[rec.RelPath] {
 				gone = append(gone, stale{key, rec})
 			}
 			return nil
@@ -272,15 +370,12 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 // selectItems picks the communities and significant nodes to export, ordered
 // deterministically (communities first).
-func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]int, error) {
+func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]string, error) {
 	var items []item
-	nodeCommunity := map[string]int{}
+	nodeCommunity := map[string]string{}
 
 	var comms []store.Community
 	if err := s.EachCommunity(func(c store.Community) error {
-		for _, id := range c.NodeIDs {
-			nodeCommunity[id] = c.ID
-		}
 		if len(c.NodeIDs) >= 2 && c.Label != "" {
 			comms = append(comms, c)
 		}
@@ -289,11 +384,17 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		return nil, nil, err
 	}
 	sort.Slice(comms, func(i, j int) bool { return comms[i].ID < comms[j].ID })
+	usedSlugs := map[string]bool{}
 	for i := range comms {
 		c := comms[i]
+		slug := uniqueSlug(bundle.Slugify(c.Label), usedSlugs)
+		key := communityKey(slug)
+		for _, id := range c.NodeIDs {
+			nodeCommunity[id] = key
+		}
 		items = append(items, item{
-			key:         communityKey(c.ID),
-			rid:         fmt.Sprintf("community:%d", c.ID),
+			key:         key,
+			rid:         "community:" + slug,
 			title:       "Community: " + c.Label,
 			conceptType: "code-community",
 			description: fmt.Sprintf("graphy community of %d code entities", len(c.NodeIDs)),
@@ -304,12 +405,20 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 	}
 
 	if !opts.CommunitiesOnly {
+		wantMarker := markerFilter(opts)
 		var selected []model.Node
 		for _, n := range nodes {
 			if n.External || n.Kind == model.KindFile || n.Kind == model.KindHeading {
 				continue
 			}
-			if n.Degree < opts.MinDegree {
+			if n.Kind == model.KindRationale {
+				// MinDegree is a significance proxy for code entities; for a
+				// rationale it is meaningless (always ~2). Marker selection
+				// takes its place.
+				if opts.NoRationale || !wantMarker(n.ID) {
+					continue
+				}
+			} else if n.Degree < opts.MinDegree {
 				continue
 			}
 			selected = append(selected, n)
@@ -317,6 +426,10 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		sort.Slice(selected, func(i, j int) bool { return selected[i].ID < selected[j].ID })
 		for i := range selected {
 			n := selected[i]
+			if n.Kind == model.KindRationale {
+				items = append(items, rationaleItem(s, n))
+				continue
+			}
 			desc := n.Doc
 			if desc == "" {
 				desc = n.Signature
@@ -337,7 +450,272 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 	return items, nodeCommunity, nil
 }
 
-func communityKey(id int) string { return fmt.Sprintf("%s%d", communityKeyPrefix, id) }
+// markerFilter reports whether a rationale node id carries an exported marker.
+func markerFilter(opts OkfwOptions) func(nodeID string) bool {
+	want := opts.RationaleMarkers
+	if len(want) == 0 {
+		want = DefaultRationaleMarkers
+	}
+	set := make(map[string]bool, len(want))
+	for _, m := range want {
+		if m = strings.ToUpper(strings.TrimSpace(m)); m != "" {
+			set[m] = true
+		}
+	}
+	return func(nodeID string) bool {
+		_, marker, _, ok := model.ParseRationaleQual(qualOfNodeID(nodeID))
+		return ok && set[marker]
+	}
+}
+
+// rationaleItem builds the concept for one rationale node. It parents to the
+// entity the rationale explains when that entity was itself exported, falling
+// back to the community parent otherwise (which is what ADRs, explaining many
+// entities, always do).
+func rationaleItem(s *store.Store, n model.Node) item {
+	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
+	title := marker + ": " + truncateTitle(n.Doc)
+	if marker == "ADR" {
+		title = "ADR: " + truncateTitle(n.Doc)
+	}
+	parentKey := ""
+	if out, err := s.OutEdges(n.ID); err == nil {
+		var owners []string
+		for _, e := range out {
+			if e.Relation == model.RelExplains {
+				owners = append(owners, e.Target)
+			}
+		}
+		if len(owners) == 1 {
+			parentKey = owners[0]
+		}
+	}
+	return item{
+		key:         n.ID,
+		rid:         n.ID,
+		title:       title,
+		conceptType: "code-rationale",
+		description: n.Doc,
+		language:    n.Language,
+		entity:      string(model.KindRationale),
+		tags: []string{"graphy", "graphy/" + n.Language, "graphy/rationale",
+			"graphy/rationale/" + strings.ToLower(marker)},
+		node:      &n,
+		parentKey: parentKey,
+	}
+}
+
+// maxTitleRunes caps a rationale title. bundle.Slugify has no length cap and
+// NoteFilename concatenates the whole slug, so an untruncated prose first line
+// would produce a filename past the 255-byte limit. Truncation is on a word
+// boundary and deterministic, so the filename stays stable.
+const maxTitleRunes = 60
+
+func truncateTitle(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) <= maxTitleRunes {
+		return s
+	}
+	cut := string(r[:maxTitleRunes])
+	if i := strings.LastIndexByte(cut, ' '); i > maxTitleRunes/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,.;:-")
+}
+
+// communityRecord is an existing community export record, with the state
+// needed to decide whether a current community is the same subsystem.
+type communityRecord struct {
+	key     string
+	rec     store.ExportRecord
+	title   string
+	members map[uint64]bool // decoded from rec.MemberDigest
+}
+
+// communityAdopter matches communities to concepts they should inherit when
+// the exports-bucket key no longer matches — either because the key scheme
+// changed, or because the community's label did.
+type communityAdopter struct {
+	records  []communityRecord
+	consumed map[string]bool
+}
+
+// newCommunityAdopter loads every community export record whose concept file
+// still exists. Records for vanished files are skipped; the stale sweep cleans
+// them up.
+func newCommunityAdopter(cfg *config.Config, s *store.Store) (*communityAdopter, error) {
+	a := &communityAdopter{consumed: map[string]bool{}}
+	err := s.EachExport(func(key string, rec store.ExportRecord) error {
+		if !strings.HasPrefix(key, communityKeyPrefix) {
+			return nil
+		}
+		content, err := os.ReadFile(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath)))
+		if err != nil {
+			return nil
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			return nil
+		}
+		a.records = append(a.records, communityRecord{
+			key: key, rec: rec, title: z.Title, members: digestSet(rec.MemberDigest),
+		})
+		return nil
+	})
+	// bbolt iterates keys in byte order, but sorting explicitly keeps the
+	// tie-breaks below independent of the key scheme.
+	sort.Slice(a.records, func(i, j int) bool { return a.records[i].key < a.records[j].key })
+	return a, err
+}
+
+// adopt returns the record a community should inherit, if any.
+//
+// Two matchers, in order of confidence:
+//
+//  1. Identical concept title — the label is unchanged, so only the key
+//     scheme moved (a bundle written before label-slug keying). Titles are not
+//     unique, so records are consumed one per same-titled community.
+//
+//  2. Membership overlap above communityOverlapThreshold — the label changed
+//     but it is the same subsystem, so the concept should follow the members
+//     rather than the name.
+func (a *communityAdopter) adopt(it item, digest []byte) (communityRecord, bool) {
+	for i := range a.records {
+		r := &a.records[i]
+		if !a.consumed[r.key] && r.title == it.title {
+			a.consumed[r.key] = true
+			return *r, true
+		}
+	}
+	if it.community == nil {
+		return communityRecord{}, false
+	}
+	best, bestScore := -1, communityOverlapThreshold
+	for i := range a.records {
+		r := &a.records[i]
+		if a.consumed[r.key] || len(r.members) == 0 {
+			continue
+		}
+		score := jaccardDigest(digest, r.members)
+		// Strictly greater, and ties broken on key, so the choice never
+		// depends on iteration order.
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	if best < 0 {
+		return communityRecord{}, false
+	}
+	a.consumed[a.records[best].key] = true
+	return a.records[best], true
+}
+
+// memberDigest packs a community's membership into sorted 64-bit FNV-1a hashes
+// of its node ids, big-endian.
+//
+// Hashing rather than storing the ids keeps the record roughly six times
+// smaller — node ids average ~60 bytes — without giving up exact set
+// semantics. At 64 bits, a collision anywhere in a 100k-node repo has
+// probability ~3e-10, and its worst effect would be to shift one similarity
+// score by a single member. That exactness is worth protecting: the
+// unambiguity argument below is a proof about real set overlap, and a
+// probabilistic sketch (MinHash and friends) would reduce it to an estimate
+// precisely where it is most sensitive — at the threshold. Matching a 1%
+// standard error would also cost ~78KB per community, far more than the exact
+// digest it replaces.
+//
+// Sorting makes the blob canonical, so an unchanged membership compares equal
+// byte for byte and its write can be skipped entirely.
+func memberDigest(ids []string) []byte {
+	seen := make(map[uint64]struct{}, len(ids))
+	for _, id := range ids {
+		h := fnv.New64a()
+		h.Write([]byte(id))
+		seen[h.Sum64()] = struct{}{}
+	}
+	hashes := make([]uint64, 0, len(seen))
+	for h := range seen {
+		hashes = append(hashes, h)
+	}
+	slices.Sort(hashes)
+	out := make([]byte, 8*len(hashes))
+	for i, h := range hashes {
+		binary.BigEndian.PutUint64(out[i*8:], h)
+	}
+	return out
+}
+
+// digestSet decodes a packed digest into a lookup set.
+func digestSet(b []byte) map[uint64]bool {
+	out := make(map[uint64]bool, len(b)/8)
+	for i := 0; i+8 <= len(b); i += 8 {
+		out[binary.BigEndian.Uint64(b[i:])] = true
+	}
+	return out
+}
+
+// jaccardDigest is |A∩B| / |A∪B| for a packed digest against a decoded set.
+// The digest is already deduplicated, so its length is |A|.
+func jaccardDigest(a []byte, b map[uint64]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter, n := 0, 0
+	for i := 0; i+8 <= len(a); i += 8 {
+		n++
+		if b[binary.BigEndian.Uint64(a[i:])] {
+			inter++
+		}
+	}
+	union := n + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+// communityOverlapThreshold is the share of the union two membership sets must
+// have in common for one to count as the same subsystem as the other.
+//
+// A half is not a tuning knob, it is what makes the match provably
+// unambiguous. Communities partition the graph, so both the old records and
+// the new communities are internally disjoint; for disjoint sets the overlaps
+// against any single opposing set sum to at most 1, so at most one candidate
+// on either side can exceed a half. A community that splits down the middle,
+// or two that merge, therefore adopt nothing and start fresh — which is the
+// honest outcome, because no surviving concept is "the same subsystem".
+const communityOverlapThreshold = 0.5
+
+// communityKey is the exports-bucket key for a community, namespaced by its
+// label slug.
+//
+// Keying on the label rather than the detection id is what keeps community
+// concepts stable. Community ids are assigned by ordering on each community's
+// lexicographically-smallest member, so adding or removing a single node can
+// renumber most of the graph — and every renumbering used to delete and
+// recreate the affected concepts, losing their ids and repointing `parent:` on
+// every child. A label only changes when the community's most prominent member
+// does, which is far rarer.
+func communityKey(slug string) string { return communityKeyPrefix + slug }
+
+// uniqueSlug disambiguates two communities that name themselves after
+// same-named members (say, a `Store` in two packages). Callers must pass
+// communities in ascending id order, which — because ids are ordered by
+// smallest member — makes the suffix assignment as stable as the ids are.
+func uniqueSlug(slug string, used map[string]bool) string {
+	if !used[slug] {
+		used[slug] = true
+		return slug
+	}
+	for n := 2; ; n++ {
+		cand := fmt.Sprintf("%s-%d", slug, n)
+		if !used[cand] {
+			used[cand] = true
+			return cand
+		}
+	}
+}
 
 // placement locates an exported concept inside the bundle.
 type placement struct {
@@ -541,11 +919,23 @@ func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []in
 		return nil, err
 	}
 	// Rule 2 — in-file renames: 1:1 pairing within (lang, kind, file).
+	//
+	// Rationale is excluded from this rule only. Its qualname already encodes
+	// owner, marker and ordinal, so rule 1 handles it correctly; but pairing
+	// on (lang, kind, file) alone would match a deleted WHY against a newly
+	// added TODO in the same file and adopt the old concept, carrying a stale
+	// identity into entirely unrelated reasoning.
+	rationaleKind := string(model.KindRationale)
 	renames := pair(
-		func(sc *staleConcept) string { return sc.lang + "\x00" + sc.kind + "\x00" + sc.file },
+		func(sc *staleConcept) string {
+			if sc.kind == rationaleKind {
+				return "\x00none-stale-" + sc.key
+			}
+			return sc.lang + "\x00" + sc.kind + "\x00" + sc.file
+		},
 		func(it item) string {
-			if it.node == nil {
-				return "\x00none"
+			if it.node == nil || it.node.Kind == model.KindRationale {
+				return "\x00none-" + it.key
 			}
 			return it.language + "\x00" + it.entity + "\x00" + it.node.File
 		},
@@ -559,15 +949,9 @@ func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []in
 // adoptOne re-keys a stale concept to the new item and renames its file to
 // match the new title (same concept id, so the shortid suffix is unchanged).
 func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, placed map[string]placement) error {
-	rec := sc.rec
-	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
-	newDir := filepath.Dir(oldAbs)
-	newName := bundle.NoteFilename(newDir, it.title, rec.ConceptID)
-	if newName != filepath.Base(oldAbs) {
-		if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
-			return fmt.Errorf("renaming %s: %w", rec.RelPath, err)
-		}
-		rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
+	rec, err := renameToTitle(cfg, sc.rec, it.title)
+	if err != nil {
+		return err
 	}
 	if err := s.PutExport(it.key, rec); err != nil {
 		return err
@@ -577,6 +961,24 @@ func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, pla
 	}
 	placed[it.key] = placement{rec.ConceptID, rec.RelPath}
 	return nil
+}
+
+// renameToTitle moves an adopted concept file so its filename reflects the
+// title it now carries, keeping the concept id (and so the shortid suffix)
+// unchanged. Without this an adopted concept keeps a filename describing what
+// it used to be, which reads as a bug long after the fact.
+func renameToTitle(cfg *config.Config, rec store.ExportRecord, title string) (store.ExportRecord, error) {
+	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
+	newDir := filepath.Dir(oldAbs)
+	newName := bundle.NoteFilename(newDir, title, rec.ConceptID)
+	if newName == filepath.Base(oldAbs) {
+		return rec, nil
+	}
+	if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
+		return rec, fmt.Errorf("renaming %s: %w", rec.RelPath, err)
+	}
+	rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
+	return rec, nil
 }
 
 // parseNodeID decomposes "<lang>:<kind>:<file>#<qual>" node ids; ok=false for
@@ -649,9 +1051,14 @@ func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(
 		fmt.Fprintf(&b, "- Location: `%s:%d`\n", n.File, n.Span.StartLine)
 	}
 	fmt.Fprintf(&b, "- Degree: %d\n", n.Degree)
+	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
+	return b.String()
+}
 
-	out, _ := s.OutEdges(n.ID)
-	in, _ := s.InEdges(n.ID)
+// writeEdgeSections appends the Outgoing and Incoming edge lists for a node.
+func writeEdgeSections(b *strings.Builder, s *store.Store, nodeID string, nodes map[string]model.Node, linkTo func(string) string) {
+	out, _ := s.OutEdges(nodeID)
+	in, _ := s.InEdges(nodeID)
 	writeEdges := func(title string, edges []model.Edge, forward bool) {
 		if len(edges) == 0 {
 			return
@@ -674,16 +1081,37 @@ func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(
 				label = other.Label
 			}
 			if href := linkTo(otherID); href != "" {
-				fmt.Fprintf(&b, "- %s [%s](%s) (%s)\n", e.Relation, label, href, e.Confidence)
+				fmt.Fprintf(b, "- %s [%s](%s) (%s)\n", e.Relation, label, href, e.Confidence)
 			} else if ok && other.File != "" {
-				fmt.Fprintf(&b, "- %s %s — `%s:%d` (%s)\n", e.Relation, label, other.File, other.Span.StartLine, e.Confidence)
+				fmt.Fprintf(b, "- %s %s — `%s:%d` (%s)\n", e.Relation, label, other.File, other.Span.StartLine, e.Confidence)
 			} else {
-				fmt.Fprintf(&b, "- %s %s (%s)\n", e.Relation, label, e.Confidence)
+				fmt.Fprintf(b, "- %s %s (%s)\n", e.Relation, label, e.Confidence)
 			}
 		}
 	}
 	writeEdges("Outgoing", out, true)
 	writeEdges("Incoming", in, false)
+}
+
+// rationaleBody renders a rationale concept: the recorded reasoning, where it
+// was written, and what it explains.
+//
+// Deliberately no Degree bullet — it is meaningless for a rationale, and it
+// would rewrite the concept whenever an unrelated edge count shifted.
+func rationaleBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(string) string) string {
+	n := *it.node
+	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
+	var b strings.Builder
+	if n.Body != "" {
+		b.WriteString(n.Body + "\n\n")
+	} else if n.Doc != "" {
+		b.WriteString(n.Doc + "\n\n")
+	}
+	fmt.Fprintf(&b, "- Marker: %s\n", marker)
+	if n.File != "" {
+		fmt.Fprintf(&b, "- Source: `%s:%d`\n", n.File, n.Span.StartLine)
+	}
+	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
 	return b.String()
 }
 
@@ -777,4 +1205,10 @@ func syncBundle(cfg *config.Config, relPaths []string) error {
 		}
 	}
 	return nil
+}
+
+// qualOfNodeID returns just the qualified-name half of a node id.
+func qualOfNodeID(id string) string {
+	_, _, _, qual, _ := parseNodeID(id)
+	return qual
 }

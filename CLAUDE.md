@@ -28,8 +28,9 @@ cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git project-context helper
 cli/internal/graphy/         — graphy packages: model, store (own bbolt schema with
                                typed+confidence edges), detect, extract (tree-sitter,
-                               CGo), build, cluster (Louvain), analyze, report, query,
-                               llm (Claude/Gemini/OpenAI REST), export (okfw bundle),
+                               CGo), build, cluster (Leiden + Louvain), analyze, report, query,
+                               llm (Claude/Gemini/OpenAI REST),
+                               export (okfw bundle + GraphML/JGF/Cypher-for-AGE),
                                skills, workspace (.graphy/ discovery)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
 plugin/okfw.lua              — Neovim plugin auto-load
@@ -61,7 +62,95 @@ location, commit-pinned permalink with `--repo-url`), and the optional
 No-op re-exports write nothing (content compared with previous
 timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
 renamed/moved entities keep their concept id: unique same-name-different-file
-or 1:1 same-file-same-kind pairings adopt the old concept and rename its file.
+or 1:1 same-file-same-kind pairings adopt the old concept and rename its file
+(rationale is excluded from the same-file pairing — see below). Community
+concepts are keyed in the exports bucket by their **label slug**, not their
+detection id: ids are ordered by each community's smallest member, so one added
+node renumbers most of them, and integer keys silently *repurposed* concepts
+(a stable concept id whose subject quietly became a different subsystem). When
+the label itself changes, the concept is adopted by **membership overlap**: the
+export record stores the community's membership as sorted 64-bit hashes of its
+node ids (the `communities` bucket is rebuilt every build, so the previous
+partition is gone by export time — and hashing keeps exact set semantics, which
+the unambiguity proof below depends on, at a sixth of the size), and a
+successor sharing more than half the union inherits it. More-than-half is not a
+tuned threshold — successive partitions are disjoint, so at most one candidate
+on either side can exceed it, which makes the match unambiguous by
+construction; an even split or a merge therefore adopts nothing and starts
+fresh. Bundles exported under the old integer keys are re-keyed in place on the
+next export, matched by concept title, one record per same-titled community.
+The membership refresh has to run for *every* community, including those whose
+concept was already up to date (the live-record path skips the concept write, and
+a stale membership breaks the next relabelling) — so the digest is canonical and
+records already holding it are skipped, keeping a no-op export write-free; the
+rest go out in one `PutExports` transaction. Records predating the digest decode
+with an empty one (the JSON key changed with the type) and are backfilled on the
+next export.
+
+Besides the bundle, the whole graph exports to four **interchange formats**
+(`graphy export json|graphml|jgf|cypher`), all fed by one sorted snapshot
+(`export.Load`) so they cannot disagree or churn: none stamps a timestamp, so
+an unchanged graph re-exports byte for byte and the file can be committed and
+diffed. Community membership in these comes from the communities bucket, never
+from `Node.Community` — ids start at 0 and so does the field's zero value, so
+the field alone cannot tell "in the first community" from "never clustered",
+and the attribute is omitted rather than defaulted. GraphML declares its
+attribute vocabulary as `<key>` elements (a `<data>` with an undeclared key, or
+one declared `int` carrying an empty string, is what makes Gephi and networkx
+reject a file). JGF is v2 (jsongraphformat.info): nodes keyed by node id, edges
+with source/target/relation, everything graphy-specific under `metadata`, and
+HTML escaping off so signatures stay readable.
+
+`graphy export cypher` targets **Apache AGE**, which consumes Cypher only
+inside SQL `cypher('<graph>', $tag$ … $tag$) AS (v agtype)` calls — so the
+output is a `.sql` psql script, not `.cypher`, and it was verified end to end
+against AGE 1.7. Three AGE constraints shape it: a vertex takes exactly one
+label (so the label is the entity kind, CamelCased, with the kind repeated as a
+property), a pattern's label must be a literal (so edges are grouped by
+relation *and* by which site properties they carry, which also keeps every
+UNWIND row the same shape — no null padding), and endpoint lookup by id is a
+sequential scan until indexed (so per-label `id` btree indexes go in between
+the vertex and edge statements, each guarded by an exception handler because
+the property-index syntax is version-sensitive and a lost index is not a lost
+load). The script is a full snapshot: it creates the graph if missing and
+clears it first, so a reload after a rebuild cannot strand vertices for deleted
+code (`--no-truncate` appends instead). Two escaping layers have to hold at
+once — Cypher literals are backslash-escaped (`\'`, `\\`, `\n`; other control
+characters are dropped) while the SQL dollar-quote tag is chosen to appear in
+no statement body, since a doc comment containing `$graphy$` would otherwise
+close the block and spill the rest of the query into psql.
+
+Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
+via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`
+on both `build` and `update`). Leiden guarantees internally-connected
+communities, which Louvain does not, and that matters because communities
+become subsystem concepts in the bundle. Both are deterministic given a seed
+and number communities by their lexicographically-smallest member. The
+algorithm/resolution/seed are recorded in the store's meta bucket and rendered
+into GRAPH_REPORT.md. Two mutations silently degrade Leiden into Louvain —
+skipping refinement, or aggregating the coarse partition instead of the
+refined one — so both are pinned by tests (`TestRefineSplitsDisconnectedCommunity`,
+`TestLevelAggregatesTheRefinedPartition`); keep them passing.
+
+**Rationale nodes** (`kind: rationale`, `explains` edges) record *why* code is
+the way it is, from marked comments (WHY/RATIONALE/DECISION/HACK/FIXME/TODO)
+and ADR files. Extraction is a Session-level post-pass in `extract/rationale.go`
+so it covers every language, including the pure-Go config extractors; it tracks
+string-literal state so a marker inside a string is not a comment, and a marker
+must be the leading word of its line. Node identity is
+`<ownerQual>@<MARKER>@<ordinal>` — no line numbers, no content hash — so it
+survives both rewording and code moving down the file. Exported as
+`type: code-rationale` concepts parented to the entity they explain, exempt
+from `--min-degree`, and filtered by `--rationale-markers` (default
+WHY/RATIONALE/DECISION/ADR — narrower than extraction, so a repo full of TODOs
+does not flood the wiki).
+
+Two invariants worth knowing before touching extraction: rationale nodes are
+excluded from clustering input (they are degree-2 leaves, and perturbing the
+partition rewrites `parent:` on every exported concept), and any change to
+extraction output must bump `build.extractorVersion` — the per-file cache keys
+on content sha256 alone, so new extraction capability would otherwise apply
+only to files that happen to change next.
 
 ## Data Model
 

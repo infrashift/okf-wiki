@@ -1,0 +1,138 @@
+{
+  "Nodes": [
+    {
+      "id": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "label": "testdata/markdown/0001-use-bbolt.md",
+      "kind": "doc",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 1
+      },
+      "doc": "Use bbolt for the graph store",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/0001-use-bbolt.md#use-bbolt-for-the-graph-store",
+      "label": "Use bbolt for the graph store",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 1
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/0001-use-bbolt.md#context",
+      "label": "Context",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 3
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/0001-use-bbolt.md#decision",
+      "label": "Decision",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 8
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/0001-use-bbolt.md#consequences",
+      "label": "Consequences",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 13
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:rationale:testdata/markdown/0001-use-bbolt.md#@ADR@0",
+      "label": "ADR: Use bbolt for the graph store",
+      "kind": "rationale",
+      "language": "markdown",
+      "source_file": "testdata/markdown/0001-use-bbolt.md",
+      "source_location": {
+        "start_line": 1
+      },
+      "doc": "Use `bbolt`: embedded, pure Go, single file, read-optimized. The write path goes through `Store.PutFile`.",
+      "body": "**Decision:** Use `bbolt`: embedded, pure Go, single file, read-optimized. The write path goes through `Store.PutFile`.\n\n**Context:** We considered `Neo4j` and Postgres AGE, but both add a server dependency that a single-binary CLI cannot justify.",
+      "community": 0,
+      "degree": 0
+    }
+  ],
+  "Edges": [
+    {
+      "source": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "target": "markdown:heading:testdata/markdown/0001-use-bbolt.md#use-bbolt-for-the-graph-store",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/0001-use-bbolt.md",
+      "site_line": 1
+    },
+    {
+      "source": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "target": "markdown:heading:testdata/markdown/0001-use-bbolt.md#context",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/0001-use-bbolt.md",
+      "site_line": 3
+    },
+    {
+      "source": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "target": "markdown:heading:testdata/markdown/0001-use-bbolt.md#decision",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/0001-use-bbolt.md",
+      "site_line": 8
+    },
+    {
+      "source": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "target": "markdown:heading:testdata/markdown/0001-use-bbolt.md#consequences",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/0001-use-bbolt.md",
+      "site_line": 13
+    },
+    {
+      "source": "markdown:doc:testdata/markdown/0001-use-bbolt.md#",
+      "target": "markdown:rationale:testdata/markdown/0001-use-bbolt.md#@ADR@0",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/0001-use-bbolt.md",
+      "site_line": 1
+    }
+  ],
+  "Refs": [
+    {
+      "from": "markdown:rationale:testdata/markdown/0001-use-bbolt.md#@ADR@0",
+      "name": "Neo4j",
+      "relation": "explains"
+    },
+    {
+      "from": "markdown:rationale:testdata/markdown/0001-use-bbolt.md#@ADR@0",
+      "name": "bbolt",
+      "relation": "explains"
+    },
+    {
+      "from": "markdown:rationale:testdata/markdown/0001-use-bbolt.md#@ADR@0",
+      "name": "Store.PutFile",
+      "relation": "explains"
+    }
+  ]
+}

@@ -29,13 +29,31 @@ The most-connected entities — the graph's flow hubs.
 
 ## Communities
 
-Subsystems detected by modularity clustering (Louvain, deterministic seed).
+{{ if .Cluster.Algorithm -}}
+Subsystems detected by modularity clustering (`{{ .Cluster.Algorithm }}`, resolution {{ .Cluster.Resolution }}, seed {{ .Cluster.Seed }}).
+{{- else -}}
+Subsystems detected by modularity clustering.
+{{- end }}
 
 {{ range .Communities -}}
 ### {{ .Label }} ({{ .Size }} nodes)
 
 {{ range .Top -}}
 - {{ .Label }} ({{ .Kind }}, degree {{ .Degree }}){{ with loc . }} — {{ . }}{{ end }}
+{{ end }}
+{{ end -}}
+
+{{ if .Rationale -}}
+## Rationale
+
+Recorded intent extracted from marked comments and decision records:
+{{ markers .Rationale }}.
+{{ if .ADRs }}
+| Decision record | Location |
+|---|---|
+{{- range .ADRs }}
+| {{ .Doc }} | {{ loc . }} |
+{{- end }}
 {{ end }}
 {{ end -}}
 

@@ -111,6 +111,15 @@ func printCard(s storeReader, card *query.Card) {
 	if n.Doc != "" {
 		fmt.Printf("  doc:       %s\n", n.Doc)
 	}
+	if n.Body != "" && n.Body != n.Doc {
+		for i, line := range strings.Split(n.Body, "\n") {
+			label := "  body:    "
+			if i > 0 {
+				label = "           "
+			}
+			fmt.Printf("%s  %s\n", label, line)
+		}
+	}
 	if card.CommunityLabel != "" {
 		fmt.Printf("  community: %s (#%d)\n", card.CommunityLabel, n.Community)
 	}
