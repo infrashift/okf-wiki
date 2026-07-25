@@ -66,9 +66,16 @@ or 1:1 same-file-same-kind pairings adopt the old concept and rename its file
 concepts are keyed in the exports bucket by their **label slug**, not their
 detection id: ids are ordered by each community's smallest member, so one added
 node renumbers most of them, and integer keys silently *repurposed* concepts
-(a stable concept id whose subject quietly became a different subsystem).
-Bundles exported under the old integer keys are re-keyed in place on the next
-export — matched by concept title, one record per same-titled community.
+(a stable concept id whose subject quietly became a different subsystem). When
+the label itself changes, the concept is adopted by **membership overlap**: the
+export record stores the community's members (the `communities` bucket is
+rebuilt every build, so the previous partition is gone by export time), and a
+successor sharing more than half the union inherits it. More-than-half is not a
+tuned threshold — successive partitions are disjoint, so at most one candidate
+on either side can exceed it, which makes the match unambiguous by
+construction; an even split or a merge therefore adopts nothing and starts
+fresh. Bundles exported under the old integer keys are re-keyed in place on the
+next export, matched by concept title, one record per same-titled community.
 
 Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
 via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`

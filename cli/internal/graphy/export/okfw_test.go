@@ -1,8 +1,10 @@
 package export
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 
@@ -1033,6 +1035,275 @@ func TestExportMigratesCollidingLegacyCommunities(t *testing.T) {
 	for _, oldID := range []string{"0", "1"} {
 		if rec, err := s.GetExport(communityKeyPrefix + oldID); err != nil || rec != nil {
 			t.Errorf("legacy record %q survived migration", oldID)
+		}
+	}
+}
+
+// --- community identity across relabelling -------------------------------
+
+// partitionFixture builds a store of n plain nodes plus an empty bundle. Tests
+// then declare partitions directly, which is the only variable that matters
+// for community identity.
+func partitionFixture(t *testing.T, n int) (*store.Store, *config.Config) {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	var nodes []model.Node
+	for i := 0; i < n; i++ {
+		nodes = append(nodes, model.Node{
+			ID: fmt.Sprintf("go:function:f.go#N%d", i), Label: fmt.Sprintf("N%d", i),
+			Kind: model.KindFunction, Language: "go", File: "f.go",
+			Span: model.Span{StartLine: i + 1}, Degree: 2,
+		})
+	}
+	if err := s.PutFile(store.FileRecord{Path: "f.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	bundleRoot := filepath.Join(t.TempDir(), ".okfw")
+	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return s, config.ConfigFor(bundleRoot)
+}
+
+func node(i int) string { return fmt.Sprintf("go:function:f.go#N%d", i) }
+
+// partition assigns the listed node indices to communities and labels them.
+func partition(t *testing.T, s *store.Store, groups map[string][]int) {
+	t.Helper()
+	assign := map[string]int{}
+	labels := map[int]string{}
+	// Sort labels so community ids are assigned deterministically.
+	var names []string
+	for name := range groups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for id, name := range names {
+		labels[id] = name
+		for _, i := range groups[name] {
+			assign[node(i)] = id
+		}
+	}
+	if err := s.SetCommunities(assign, labels); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// communityConcepts maps each exported community concept's title to its id.
+func communityConcepts(t *testing.T, cfg *config.Config, dir string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for name, content := range conceptFiles(t, cfg, dir) {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		if z.Type == "code-community" {
+			out[z.Title] = z.ID
+		}
+	}
+	return out
+}
+
+// TestExportCommunitySurvivesLabelChange is the point of membership matching:
+// a community's label is its most prominent member's name, which changes as
+// the code does — but the subsystem, and so the concept, is the same.
+func TestExportCommunitySurvivesLabelChange(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3}})
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := communityConcepts(t, cfg, first.Dir)
+	id := before["Community: alpha"]
+	if id == "" {
+		t.Fatalf("no community concept: %v", before)
+	}
+
+	// Same members, different label.
+	partition(t, s, map[string][]int{"renamed": {0, 1, 2, 3}})
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Deleted != 0 {
+		t.Errorf("relabelling churned the bundle: %+v", second)
+	}
+	if second.Recovered != 1 {
+		t.Errorf("Recovered = %d, want 1 (adopted via membership)", second.Recovered)
+	}
+	after := communityConcepts(t, cfg, second.Dir)
+	if after["Community: renamed"] != id {
+		t.Errorf("concept id changed on relabelling: %q → %q", id, after["Community: renamed"])
+	}
+	if _, stale := after["Community: alpha"]; stale {
+		t.Error("the old title is still present; the concept was duplicated")
+	}
+	// The filename must follow the new title, or it describes what the concept
+	// used to be.
+	for name := range conceptFiles(t, cfg, second.Dir) {
+		if strings.HasPrefix(name, "community-alpha--") {
+			t.Errorf("filename %q still reflects the old label", name)
+		}
+	}
+}
+
+// TestExportCommunityNotAdoptedWhenMembershipReplaced: a different set of
+// nodes under a different name is a different subsystem, whatever it is called.
+func TestExportCommunityNotAdoptedWhenMembershipReplaced(t *testing.T) {
+	s, cfg := partitionFixture(t, 8)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	partition(t, s, map[string][]int{"beta": {4, 5, 6, 7}})
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Recovered != 0 {
+		t.Errorf("Recovered = %d: a disjoint community must not adopt", second.Recovered)
+	}
+	if second.Created != 1 || second.Deleted != 1 {
+		t.Errorf("want 1 created + 1 deleted, got %+v", second)
+	}
+}
+
+// TestExportCommunitySplitEvenly: neither half is "the same subsystem", and
+// the half-overlap rule makes that unambiguous rather than arbitrary.
+func TestExportCommunitySplitEvenly(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	partition(t, s, map[string][]int{"left": {0, 1}, "right": {2, 3}})
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Recovered != 0 {
+		t.Errorf("Recovered = %d: an even split has no majority successor", second.Recovered)
+	}
+	if second.Created != 2 || second.Deleted != 1 {
+		t.Errorf("want 2 created + 1 deleted, got %+v", second)
+	}
+}
+
+// TestExportCommunitySplitUnevenly: the majority successor keeps the concept,
+// and — critically — the minority one cannot also claim it.
+func TestExportCommunitySplitUnevenly(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3}})
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := communityConcepts(t, cfg, first.Dir)["Community: alpha"]
+
+	// {0,1,2} keeps 3 of 4 (0.75); {3,4} shares 1 of 5 (0.2).
+	partition(t, s, map[string][]int{"major": {0, 1, 2}, "minor": {3, 4}})
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Recovered != 1 {
+		t.Errorf("Recovered = %d, want exactly 1", second.Recovered)
+	}
+	if second.Created != 1 || second.Deleted != 0 {
+		t.Errorf("want 1 created + 0 deleted, got %+v", second)
+	}
+	after := communityConcepts(t, cfg, second.Dir)
+	if after["Community: major"] != id {
+		t.Errorf("majority successor did not inherit: %q → %q", id, after["Community: major"])
+	}
+	if after["Community: minor"] == id {
+		t.Error("minority successor also claimed the concept")
+	}
+}
+
+// TestExportCommunityMembershipRefreshedOnEveryExport guards the subtle part:
+// the live-record path skips the write, so without an explicit refresh the
+// stored membership would stay frozen at whatever it was when the key was
+// last created — and the relabelling after that would not be recognized.
+func TestExportCommunityMembershipRefreshedOnEveryExport(t *testing.T) {
+	s, cfg := partitionFixture(t, 8)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1}})
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := communityConcepts(t, cfg, first.Dir)["Community: alpha"]
+
+	// Grow under the same label — the key is unchanged, so this run takes the
+	// live-record path and writes nothing but the refresh.
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3, 4, 5}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.GetExport(communityKey("alpha"))
+	if err != nil || rec == nil {
+		t.Fatal("community record missing")
+	}
+	if len(rec.Members) != 6 {
+		t.Fatalf("stored membership = %d nodes, want the current 6: %v", len(rec.Members), rec.Members)
+	}
+
+	// Now relabel. Matching against the refreshed membership finds it; against
+	// the stale two-node membership it would score 2/6 and fail.
+	partition(t, s, map[string][]int{"renamed": {0, 1, 2, 3, 4, 5}})
+	third, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Recovered != 1 || third.Created != 0 || third.Deleted != 0 {
+		t.Errorf("relabelling after growth churned: %+v", third)
+	}
+	if communityConcepts(t, cfg, third.Dir)["Community: renamed"] != id {
+		t.Error("concept id changed")
+	}
+}
+
+func TestJaccard(t *testing.T) {
+	set := func(ids ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, id := range ids {
+			m[id] = true
+		}
+		return m
+	}
+	for _, tc := range []struct {
+		name string
+		a    []string
+		b    map[string]bool
+		want float64
+	}{
+		{"identical", []string{"a", "b"}, set("a", "b"), 1},
+		{"disjoint", []string{"a", "b"}, set("c", "d"), 0},
+		{"half", []string{"a", "b"}, set("b", "c"), 1.0 / 3},
+		{"subset", []string{"a", "b", "c"}, set("a", "b", "c", "d"), 0.75},
+		{"empty left", nil, set("a"), 0},
+		{"empty right", []string{"a"}, set(), 0},
+		{"repeated id counts once", []string{"a", "a", "b"}, set("a", "b"), 1},
+	} {
+		if got := jaccard(tc.a, tc.b); got != tc.want {
+			t.Errorf("%s: jaccard = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

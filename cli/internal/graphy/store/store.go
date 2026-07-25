@@ -66,6 +66,12 @@ const MetaClusterKey = "cluster"
 type ExportRecord struct {
 	ConceptID string `json:"concept_id"`
 	RelPath   string `json:"rel_path"` // bundle-relative concept file path
+	// Members is a community's node membership as of the last export, and is
+	// empty for node records. It has to live here rather than be read from the
+	// communities bucket because that bucket is rebuilt from scratch on every
+	// build — by export time the previous partition is gone, and comparing
+	// against it is the only way to recognize a community whose label changed.
+	Members []string `json:"members,omitempty"`
 }
 
 // Store is a graphy graph database handle.

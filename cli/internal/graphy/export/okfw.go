@@ -119,9 +119,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	//      refactors keep their concept id (and history)
 	//   3. create a fresh concept
 	placed := map[string]placement{}
-	var recovered map[string]placement    // rid → placement; scanned lazily
-	var legacy map[string][]legacyCommunity // concept title → old records; scanned lazily
-	var pending []int                     // item indices still needing a concept
+	var recovered map[string]placement // rid → placement; scanned lazily
+	var adopter *communityAdopter      // community re-key/relabel matching; loaded lazily
+	var pending []int                  // item indices still needing a concept
 	for i, it := range items {
 		rec, err := s.GetExport(it.key)
 		if err != nil {
@@ -133,27 +133,28 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 				continue
 			}
 		}
-		// Communities exported before label-slug keying are still keyed by
-		// their integer id. Re-key them in place rather than letting the
-		// stale sweep delete and recreate every one of them.
+		// A community whose key no longer matches — an older key scheme, or a
+		// changed label — adopts its own concept rather than letting the stale
+		// sweep delete it and creating a duplicate alongside.
 		if it.community != nil {
-			if legacy == nil {
-				if legacy, err = legacyCommunities(cfg, s); err != nil {
+			if adopter == nil {
+				if adopter, err = newCommunityAdopter(cfg, s); err != nil {
 					return nil, err
 				}
 			}
-			if queue := legacy[it.title]; len(queue) > 0 {
-				lc := queue[0]
-				legacy[it.title] = queue[1:] // consumed; same-titled siblings take the rest
-				if err := s.PutExport(it.key, lc.rec); err != nil {
+			if cr, ok := adopter.adopt(it); ok {
+				rec, err := renameToTitle(cfg, cr.rec, it.title)
+				if err != nil {
 					return nil, err
 				}
-				if lc.key != it.key {
-					if err := s.DeleteExport(lc.key); err != nil {
+				if cr.key != it.key {
+					if err := s.DeleteExport(cr.key); err != nil {
 						return nil, err
 					}
 				}
-				placed[it.key] = placement{lc.rec.ConceptID, lc.rec.RelPath}
+				// The record itself is (re)written by the membership refresh
+				// below, which runs for every community.
+				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
 				res.Recovered++
 				continue
 			}
@@ -210,6 +211,25 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		placed[it.key] = placement{id, rel}
 		created[rel] = true
 		res.Created++
+	}
+
+	// Record each community's current membership. This runs for every
+	// community, not just the ones written above, because the live-record path
+	// skips the write entirely — and a membership left stale would make the
+	// next relabelling unrecognizable. Members are sorted so the record does
+	// not depend on the store's map-iteration order.
+	for _, it := range items {
+		if it.community == nil {
+			continue
+		}
+		p := placed[it.key]
+		members := append([]string(nil), it.community.NodeIDs...)
+		sort.Strings(members)
+		if err := s.PutExport(it.key, store.ExportRecord{
+			ConceptID: p.conceptID, RelPath: p.relPath, Members: members,
+		}); err != nil {
+			return nil, err
+		}
 	}
 
 	// Pass 2: render every concept in full — frontmatter (preserving id and
@@ -486,26 +506,28 @@ func truncateTitle(s string) string {
 	return strings.TrimRight(cut, " ,.;:-")
 }
 
-// legacyCommunity is a community export record under an older key scheme.
-type legacyCommunity struct {
-	key string
-	rec store.ExportRecord
+// communityRecord is an existing community export record, with the state
+// needed to decide whether a current community is the same subsystem.
+type communityRecord struct {
+	key     string
+	rec     store.ExportRecord
+	title   string
+	members map[string]bool
 }
 
-// legacyCommunities indexes existing community export records by the title of
-// the concept they point at, so a community whose key scheme changed can adopt
-// its own concept instead of creating a duplicate.
-//
-// Title is the join key because it is the one thing that survives a re-keying:
-// it is rendered from the community label, which is exactly what the new key
-// is derived from. Records whose file has vanished are skipped — the stale
-// sweep will clean them up.
-//
-// Titles are not unique — two communities can name themselves after same-named
-// members in different packages — so each title holds a queue, sorted by key
-// for determinism, and callers consume one entry per matching community.
-func legacyCommunities(cfg *config.Config, s *store.Store) (map[string][]legacyCommunity, error) {
-	out := map[string][]legacyCommunity{}
+// communityAdopter matches communities to concepts they should inherit when
+// the exports-bucket key no longer matches — either because the key scheme
+// changed, or because the community's label did.
+type communityAdopter struct {
+	records  []communityRecord
+	consumed map[string]bool
+}
+
+// newCommunityAdopter loads every community export record whose concept file
+// still exists. Records for vanished files are skipped; the stale sweep cleans
+// them up.
+func newCommunityAdopter(cfg *config.Config, s *store.Store) (*communityAdopter, error) {
+	a := &communityAdopter{consumed: map[string]bool{}}
 	err := s.EachExport(func(key string, rec store.ExportRecord) error {
 		if !strings.HasPrefix(key, communityKeyPrefix) {
 			return nil
@@ -515,16 +537,97 @@ func legacyCommunities(cfg *config.Config, s *store.Store) (map[string][]legacyC
 			return nil
 		}
 		z, err := config.ParseFrontmatter(content)
-		if err != nil || z.Title == "" {
+		if err != nil {
 			return nil
 		}
-		out[z.Title] = append(out[z.Title], legacyCommunity{key: key, rec: rec})
+		members := make(map[string]bool, len(rec.Members))
+		for _, id := range rec.Members {
+			members[id] = true
+		}
+		a.records = append(a.records, communityRecord{key: key, rec: rec, title: z.Title, members: members})
 		return nil
 	})
-	for _, list := range out {
-		sort.Slice(list, func(i, j int) bool { return list[i].key < list[j].key })
+	// bbolt iterates keys in byte order, but sorting explicitly keeps the
+	// tie-breaks below independent of the key scheme.
+	sort.Slice(a.records, func(i, j int) bool { return a.records[i].key < a.records[j].key })
+	return a, err
+}
+
+// adopt returns the record a community should inherit, if any.
+//
+// Two matchers, in order of confidence:
+//
+//  1. Identical concept title — the label is unchanged, so only the key
+//     scheme moved (a bundle written before label-slug keying). Titles are not
+//     unique, so records are consumed one per same-titled community.
+//
+//  2. Membership overlap above communityOverlapThreshold — the label changed
+//     but it is the same subsystem, so the concept should follow the members
+//     rather than the name.
+func (a *communityAdopter) adopt(it item) (communityRecord, bool) {
+	for i := range a.records {
+		r := &a.records[i]
+		if !a.consumed[r.key] && r.title == it.title {
+			a.consumed[r.key] = true
+			return *r, true
+		}
 	}
-	return out, err
+	if it.community == nil {
+		return communityRecord{}, false
+	}
+	best, bestScore := -1, communityOverlapThreshold
+	for i := range a.records {
+		r := &a.records[i]
+		if a.consumed[r.key] || len(r.members) == 0 {
+			continue
+		}
+		score := jaccard(it.community.NodeIDs, r.members)
+		// Strictly greater, and ties broken on key, so the choice never
+		// depends on iteration order.
+		if score > bestScore {
+			best, bestScore = i, score
+		}
+	}
+	if best < 0 {
+		return communityRecord{}, false
+	}
+	a.consumed[a.records[best].key] = true
+	return a.records[best], true
+}
+
+// communityOverlapThreshold is the share of the union two membership sets must
+// have in common for one to count as the same subsystem as the other.
+//
+// A half is not a tuning knob, it is what makes the match provably
+// unambiguous. Communities partition the graph, so both the old records and
+// the new communities are internally disjoint; for disjoint sets the overlaps
+// against any single opposing set sum to at most 1, so at most one candidate
+// on either side can exceed a half. A community that splits down the middle,
+// or two that merge, therefore adopt nothing and start fresh — which is the
+// honest outcome, because no surviving concept is "the same subsystem".
+const communityOverlapThreshold = 0.5
+
+// jaccard is |A∩B| / |A∪B| for a slice and a set.
+func jaccard(a []string, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	seen := make(map[string]bool, len(a))
+	inter := 0
+	for _, id := range a {
+		if seen[id] {
+			continue // membership is a set; tolerate a repeated id
+		}
+		seen[id] = true
+		if b[id] {
+			inter++
+		}
+	}
+	union := len(seen) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
 }
 
 // communityKey is the exports-bucket key for a community, namespaced by its
@@ -789,15 +892,9 @@ func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []in
 // adoptOne re-keys a stale concept to the new item and renames its file to
 // match the new title (same concept id, so the shortid suffix is unchanged).
 func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, placed map[string]placement) error {
-	rec := sc.rec
-	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
-	newDir := filepath.Dir(oldAbs)
-	newName := bundle.NoteFilename(newDir, it.title, rec.ConceptID)
-	if newName != filepath.Base(oldAbs) {
-		if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
-			return fmt.Errorf("renaming %s: %w", rec.RelPath, err)
-		}
-		rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
+	rec, err := renameToTitle(cfg, sc.rec, it.title)
+	if err != nil {
+		return err
 	}
 	if err := s.PutExport(it.key, rec); err != nil {
 		return err
@@ -807,6 +904,24 @@ func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, pla
 	}
 	placed[it.key] = placement{rec.ConceptID, rec.RelPath}
 	return nil
+}
+
+// renameToTitle moves an adopted concept file so its filename reflects the
+// title it now carries, keeping the concept id (and so the shortid suffix)
+// unchanged. Without this an adopted concept keeps a filename describing what
+// it used to be, which reads as a bug long after the fact.
+func renameToTitle(cfg *config.Config, rec store.ExportRecord, title string) (store.ExportRecord, error) {
+	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
+	newDir := filepath.Dir(oldAbs)
+	newName := bundle.NoteFilename(newDir, title, rec.ConceptID)
+	if newName == filepath.Base(oldAbs) {
+		return rec, nil
+	}
+	if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
+		return rec, fmt.Errorf("renaming %s: %w", rec.RelPath, err)
+	}
+	rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
+	return rec, nil
 }
 
 // parseNodeID decomposes "<lang>:<kind>:<file>#<qual>" node ids; ok=false for
