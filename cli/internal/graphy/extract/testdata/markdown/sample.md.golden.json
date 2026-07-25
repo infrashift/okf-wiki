@@ -1,0 +1,71 @@
+{
+  "Nodes": [
+    {
+      "id": "markdown:doc:testdata/markdown/sample.md#",
+      "label": "testdata/markdown/sample.md",
+      "kind": "doc",
+      "language": "markdown",
+      "source_file": "testdata/markdown/sample.md",
+      "source_location": {
+        "start_line": 1
+      },
+      "doc": "Sample Document",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/sample.md#sample-document",
+      "label": "Sample Document",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/sample.md",
+      "source_location": {
+        "start_line": 1
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "label": "Architecture",
+      "kind": "heading",
+      "language": "markdown",
+      "source_file": "testdata/markdown/sample.md",
+      "source_location": {
+        "start_line": 5
+      },
+      "community": 0,
+      "degree": 0
+    }
+  ],
+  "Edges": [
+    {
+      "source": "markdown:doc:testdata/markdown/sample.md#",
+      "target": "markdown:heading:testdata/markdown/sample.md#sample-document",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/sample.md",
+      "site_line": 1
+    },
+    {
+      "source": "markdown:doc:testdata/markdown/sample.md#",
+      "target": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/markdown/sample.md",
+      "site_line": 5
+    }
+  ],
+  "Refs": [
+    {
+      "from": "markdown:doc:testdata/markdown/sample.md#",
+      "name": "testdata/markdown/design.md",
+      "relation": "references"
+    },
+    {
+      "from": "markdown:doc:testdata/markdown/sample.md#",
+      "name": "testdata/src/main.go",
+      "relation": "references"
+    }
+  ]
+}

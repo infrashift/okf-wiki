@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -33,11 +34,12 @@ var buckets = []string{"nodes", "edges", "rev", "files", "symbols", "communities
 // are skipped on incremental builds and their refs can be re-resolved without
 // re-parsing.
 type FileRecord struct {
-	Path    string      `json:"path"` // repo-relative, slash-separated
-	SHA256  string      `json:"sha256"`
-	Size    int64       `json:"size"`
-	NodeIDs []string    `json:"node_ids"`
-	Refs    []model.Ref `json:"refs,omitempty"`
+	Path    string       `json:"path"` // repo-relative, slash-separated
+	SHA256  string       `json:"sha256"`
+	Size    int64        `json:"size"`
+	NodeIDs []string     `json:"node_ids"`
+	Refs    []model.Ref  `json:"refs,omitempty"`
+	Edges   []model.Edge `json:"edges,omitempty"` // intra-file edges, re-emitted on every ReplaceEdges
 }
 
 // Community is a detected community with a human label.
@@ -157,9 +159,15 @@ func purgeFileTx(tx *bolt.Tx, relPath string) error {
 	return fb.Delete([]byte(relPath))
 }
 
-// symbolKey indexes definition nodes by language and bare label.
-func symbolKey(n model.Node) []byte {
-	return []byte(n.Language + sep + n.Label)
+// symbolKeys indexes a definition under its full label and — for qualified
+// labels like "Store.Close" — its bare trailing name, so call sites that only
+// see "Close" still find it.
+func symbolKeys(n model.Node) [][]byte {
+	keys := [][]byte{[]byte(n.Language + sep + n.Label)}
+	if i := strings.LastIndex(n.Label, "."); i >= 0 && i+1 < len(n.Label) {
+		keys = append(keys, []byte(n.Language+sep+n.Label[i+1:]))
+	}
+	return keys
 }
 
 func indexableSymbol(n model.Node) bool {
@@ -175,23 +183,33 @@ func addSymbolTx(tx *bolt.Tx, n model.Node) error {
 		return nil
 	}
 	sb := tx.Bucket([]byte("symbols"))
-	var ids []string
-	if raw := sb.Get(symbolKey(n)); raw != nil {
-		if err := json.Unmarshal(raw, &ids); err != nil {
+	for _, key := range symbolKeys(n) {
+		var ids []string
+		if raw := sb.Get(key); raw != nil {
+			if err := json.Unmarshal(raw, &ids); err != nil {
+				return err
+			}
+		}
+		present := false
+		for _, id := range ids {
+			if id == n.ID {
+				present = true
+				break
+			}
+		}
+		if present {
+			continue
+		}
+		ids = append(ids, n.ID)
+		data, err := json.Marshal(ids)
+		if err != nil {
+			return err
+		}
+		if err := sb.Put(key, data); err != nil {
 			return err
 		}
 	}
-	for _, id := range ids {
-		if id == n.ID {
-			return nil
-		}
-	}
-	ids = append(ids, n.ID)
-	data, err := json.Marshal(ids)
-	if err != nil {
-		return err
-	}
-	return sb.Put(symbolKey(n), data)
+	return nil
 }
 
 func removeSymbolTx(tx *bolt.Tx, n model.Node) error {
@@ -199,28 +217,36 @@ func removeSymbolTx(tx *bolt.Tx, n model.Node) error {
 		return nil
 	}
 	sb := tx.Bucket([]byte("symbols"))
-	raw := sb.Get(symbolKey(n))
-	if raw == nil {
-		return nil
-	}
-	var ids []string
-	if err := json.Unmarshal(raw, &ids); err != nil {
-		return err
-	}
-	out := ids[:0]
-	for _, id := range ids {
-		if id != n.ID {
-			out = append(out, id)
+	for _, key := range symbolKeys(n) {
+		raw := sb.Get(key)
+		if raw == nil {
+			continue
+		}
+		var ids []string
+		if err := json.Unmarshal(raw, &ids); err != nil {
+			return err
+		}
+		out := ids[:0]
+		for _, id := range ids {
+			if id != n.ID {
+				out = append(out, id)
+			}
+		}
+		if len(out) == 0 {
+			if err := sb.Delete(key); err != nil {
+				return err
+			}
+			continue
+		}
+		data, err := json.Marshal(out)
+		if err != nil {
+			return err
+		}
+		if err := sb.Put(key, data); err != nil {
+			return err
 		}
 	}
-	if len(out) == 0 {
-		return sb.Delete(symbolKey(n))
-	}
-	data, err := json.Marshal(out)
-	if err != nil {
-		return err
-	}
-	return sb.Put(symbolKey(n), data)
+	return nil
 }
 
 // LookupSymbol returns the definition node ids indexed under (lang, name).

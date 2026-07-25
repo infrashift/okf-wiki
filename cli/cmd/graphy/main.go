@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"okfw/cli/internal/gitctx"
+	"okfw/cli/internal/graphy/build"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
@@ -34,8 +35,62 @@ deterministic AST extraction (tree-sitter), detects communities, and answers
 graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		SilenceUsage: true,
 	}
-	root.AddCommand(initCmd(), exportCmd(), versionCmd())
+	root.AddCommand(initCmd(), buildCmd(), updateCmd(), exportCmd(), versionCmd())
 	return root
+}
+
+func buildCmd() *cobra.Command {
+	var full bool
+	var langs []string
+	cmd := &cobra.Command{
+		Use:   "build",
+		Short: "Extract the repository into the knowledge graph",
+		Long: `Runs the pipeline: detect files, extract changed ones (tree-sitter AST +
+markdown links), resolve cross-file references into confidence-tagged edges,
+and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBuild(build.Options{Full: full, Langs: langs})
+		},
+	}
+	cmd.Flags().BoolVar(&full, "full", false, "wipe the extraction cache and re-extract everything")
+	cmd.Flags().StringSliceVar(&langs, "langs", nil, "restrict to these languages (default: all supported)")
+	return cmd
+}
+
+func updateCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "update",
+		Short: "Incrementally refresh the graph (alias of build)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBuild(build.Options{})
+		},
+	}
+}
+
+func runBuild(opts build.Options) error {
+	w, err := openWorkspace()
+	if err != nil {
+		return err
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+
+	stats, err := build.Run(w, s, opts)
+	if err != nil {
+		return err
+	}
+	if err := writeGraphJSON(w, s, w.JSONPath()); err != nil {
+		return err
+	}
+	fmt.Printf("Scanned %d files (%d extracted, %d purged)\n",
+		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged)
+	fmt.Printf("Graph: %d nodes, %d edges (%d refs resolved, %d ambiguous, %d dropped)\n",
+		stats.Nodes, stats.Edges, stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
+	fmt.Printf("Wrote %s\n", w.JSONPath())
+	return nil
 }
 
 // openWorkspace discovers the workspace from the cwd.
