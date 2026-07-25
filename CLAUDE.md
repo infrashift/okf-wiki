@@ -28,7 +28,7 @@ cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git project-context helper
 cli/internal/graphy/         — graphy packages: model, store (own bbolt schema with
                                typed+confidence edges), detect, extract (tree-sitter,
-                               CGo), build, cluster (Louvain), analyze, report, query,
+                               CGo), build, cluster (Leiden + Louvain), analyze, report, query,
                                llm (Claude/Gemini/OpenAI REST), export (okfw bundle),
                                skills, workspace (.graphy/ discovery)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
@@ -61,7 +61,40 @@ location, commit-pinned permalink with `--repo-url`), and the optional
 No-op re-exports write nothing (content compared with previous
 timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
 renamed/moved entities keep their concept id: unique same-name-different-file
-or 1:1 same-file-same-kind pairings adopt the old concept and rename its file.
+or 1:1 same-file-same-kind pairings adopt the old concept and rename its file
+(rationale is excluded from the same-file pairing — see below).
+
+Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
+via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`
+on both `build` and `update`). Leiden guarantees internally-connected
+communities, which Louvain does not, and that matters because communities
+become subsystem concepts in the bundle. Both are deterministic given a seed
+and number communities by their lexicographically-smallest member. The
+algorithm/resolution/seed are recorded in the store's meta bucket and rendered
+into GRAPH_REPORT.md. Two mutations silently degrade Leiden into Louvain —
+skipping refinement, or aggregating the coarse partition instead of the
+refined one — so both are pinned by tests (`TestRefineSplitsDisconnectedCommunity`,
+`TestLevelAggregatesTheRefinedPartition`); keep them passing.
+
+**Rationale nodes** (`kind: rationale`, `explains` edges) record *why* code is
+the way it is, from marked comments (WHY/RATIONALE/DECISION/HACK/FIXME/TODO)
+and ADR files. Extraction is a Session-level post-pass in `extract/rationale.go`
+so it covers every language, including the pure-Go config extractors; it tracks
+string-literal state so a marker inside a string is not a comment, and a marker
+must be the leading word of its line. Node identity is
+`<ownerQual>@<MARKER>@<ordinal>` — no line numbers, no content hash — so it
+survives both rewording and code moving down the file. Exported as
+`type: code-rationale` concepts parented to the entity they explain, exempt
+from `--min-degree`, and filtered by `--rationale-markers` (default
+WHY/RATIONALE/DECISION/ADR — narrower than extraction, so a repo full of TODOs
+does not flood the wiki).
+
+Two invariants worth knowing before touching extraction: rationale nodes are
+excluded from clustering input (they are degree-2 leaves, and perturbing the
+partition rewrites `parent:` on every exported concept), and any change to
+extraction output must bump `build.extractorVersion` — the per-file cache keys
+on content sha256 alone, so new extraction capability would otherwise apply
+only to files that happen to change next.
 
 ## Data Model
 
