@@ -184,11 +184,7 @@ func symbolKeys(n model.Node) [][]byte {
 }
 
 func indexableSymbol(n model.Node) bool {
-	switch n.Kind {
-	case model.KindFile, model.KindDoc, model.KindHeading, model.KindConfig, model.KindExternal:
-		return false
-	}
-	return !n.External && n.Label != ""
+	return model.Indexable(n) && n.Label != ""
 }
 
 func addSymbolTx(tx *bolt.Tx, n model.Node) error {

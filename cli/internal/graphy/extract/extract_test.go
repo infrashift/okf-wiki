@@ -742,3 +742,10 @@ func TestMarkdownExtractShape(t *testing.T) {
 		t.Errorf("link targets = %v, want docs/design.md + src/main.go", targets)
 	}
 }
+
+// Rationale goldens. The go and yaml fixtures both carry a marker inside a
+// string literal, so these double as regression canaries for the scanner's
+// literal tracking.
+func TestGoRationaleGolden(t *testing.T)   { golden(t, "go", "rationale.go") }
+func TestYAMLRationaleGolden(t *testing.T) { golden(t, "yaml", "rationale.yaml") }
+func TestADRGolden(t *testing.T)           { golden(t, "markdown", "0001-use-bbolt.md") }

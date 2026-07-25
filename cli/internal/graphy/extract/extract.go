@@ -34,16 +34,27 @@ type Extractor interface {
 // Close it when done.
 type Session struct {
 	extractors map[string]Extractor
+	opts       SessionOptions
+}
+
+// SessionOptions configures extraction passes that are not language-specific.
+type SessionOptions struct {
+	Rationale RationaleOptions
 }
 
 // NewSession builds extractors for the requested languages (all supported
-// languages when langs is empty).
+// languages when langs is empty), with rationale extraction enabled.
 func NewSession(langs []string) (*Session, error) {
+	return NewSessionWith(langs, SessionOptions{Rationale: DefaultRationaleOptions()})
+}
+
+// NewSessionWith is NewSession with explicit non-language options.
+func NewSessionWith(langs []string, opts SessionOptions) (*Session, error) {
 	want := map[string]bool{}
 	for _, l := range langs {
 		want[l] = true
 	}
-	s := &Session{extractors: map[string]Extractor{}}
+	s := &Session{extractors: map[string]Extractor{}, opts: opts}
 	for lang, factory := range factories {
 		if len(want) > 0 && !want[lang] {
 			continue
@@ -64,13 +75,27 @@ func (s *Session) Supported(lang string) bool {
 	return ok
 }
 
-// Extract runs the file's language extractor.
+// Extract runs the file's language extractor, then the language-agnostic
+// rationale pass.
+//
+// Rationale lives here rather than inside each Extractor for three reasons:
+// it covers all languages without touching eleven files, it needs one toggle
+// rather than eleven, and the ordering constraint is satisfied for free —
+// the Result already holds the file's definition nodes and their spans, which
+// is exactly what attaching a comment to its owner requires.
 func (s *Session) Extract(file detect.File, src []byte) (*Result, error) {
 	ex, ok := s.extractors[file.Language]
 	if !ok {
 		return nil, fmt.Errorf("no extractor for language %q", file.Language)
 	}
-	return ex.Extract(file, src)
+	res, err := ex.Extract(file, src)
+	if err != nil {
+		return nil, err
+	}
+	if s.opts.Rationale.Enabled {
+		attachRationale(file, src, res, s.opts.Rationale)
+	}
+	return res, nil
 }
 
 // Close releases all extractor resources.

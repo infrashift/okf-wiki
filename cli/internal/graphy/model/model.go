@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -31,6 +33,10 @@ const (
 	KindConfig    Kind = "config"   // a config-file entry (yaml/json key, manifest)
 	KindResource  Kind = "resource" // an infrastructure resource (terraform resource/data)
 	KindExternal  Kind = "external"
+	// KindRationale is recorded intent: a marked source comment (WHY:,
+	// DECISION:, TODO: …) or an architecture decision record. It is the only
+	// kind whose content is prose rather than code.
+	KindRationale Kind = "rationale"
 )
 
 // Relation is the typed relationship an edge carries.
@@ -44,6 +50,12 @@ const (
 	RelReferences Relation = "references"
 	RelContains   Relation = "contains"
 	RelDefines    Relation = "defines"
+	// RelExplains points from a rationale to the entity it justifies. The
+	// rationale is the source because Ref.FromID is the only end an unresolved
+	// reference can pin, and ADR→code links must resolve through refs; keeping
+	// one direction for the whole kind means an entity's reasoning always
+	// shows up under its incoming edges.
+	RelExplains Relation = "explains"
 )
 
 // Confidence tags how an edge was established.
@@ -78,6 +90,11 @@ type Node struct {
 	Span      Span   `json:"source_location"`
 	Signature string `json:"signature,omitempty"`
 	Doc       string `json:"doc,omitempty"` // first doc-comment line
+	// Body is free-form multi-line prose for nodes whose content IS text
+	// (rationale, ADRs). Empty for code entities, whose text is Signature+Doc.
+	// Doc stays single-line for everyone: it feeds concept descriptions,
+	// terminal cards and search snippets, all of which want one line.
+	Body      string `json:"body,omitempty"`
 	Community int    `json:"community"`
 	Degree    int    `json:"degree"`
 	External  bool   `json:"external,omitempty"` // unresolved import target
@@ -107,6 +124,66 @@ func NodeID(lang string, kind Kind, relFile, qualName string) string {
 	return fmt.Sprintf("%s:%s:%s#%s", lang, kind, relFile, qualName)
 }
 
+// rationaleSep separates the parts of a rationale's qualified name. It is '@'
+// rather than '#' because '#' already separates file from qualname in a node
+// id, and the export's id parser splits on the LAST '#'.
+const rationaleSep = "@"
+
+// RationaleQual builds a rationale node's qualified name from the qualified
+// name of the entity it explains, the marker word, and its ordinal among the
+// rationales sharing that owner and marker ("" owner = file-level).
+//
+// Deliberately free of line numbers and of the rationale's own text: comments
+// get reworded and code moves down the file constantly, and either would
+// otherwise destroy the identity — and with it the exported concept's id and
+// creation date. Keying on the owner instead means a rationale survives edits
+// to itself and follows its owner across renames and file moves.
+func RationaleQual(ownerQual, marker string, ord int) string {
+	return fmt.Sprintf("%s%s%s%s%d", ownerQual, rationaleSep, marker, rationaleSep, ord)
+}
+
+// ParseRationaleQual splits a qualified name built by RationaleQual.
+func ParseRationaleQual(qual string) (owner, marker string, ord int, ok bool) {
+	last := strings.LastIndex(qual, rationaleSep)
+	if last < 0 {
+		return "", "", 0, false
+	}
+	ord, err := strconv.Atoi(qual[last+len(rationaleSep):])
+	if err != nil {
+		return "", "", 0, false
+	}
+	head := qual[:last]
+	prev := strings.LastIndex(head, rationaleSep)
+	if prev < 0 {
+		return "", "", 0, false
+	}
+	marker = head[prev+len(rationaleSep):]
+	if marker == "" {
+		return "", "", 0, false
+	}
+	return head[:prev], marker, ord, true
+}
+
+// nonIndexableKinds are the kinds excluded from the definition-symbol index:
+// they are scaffolding or prose, never the target of a code reference.
+var nonIndexableKinds = map[Kind]bool{
+	KindFile:     true,
+	KindDoc:      true,
+	KindHeading:  true,
+	KindConfig:   true,
+	KindExternal: true,
+	// Rationale labels are prose, never a call target. Indexing them would let
+	// a code reference resolve onto a comment.
+	KindRationale: true,
+}
+
+// Indexable reports whether a node belongs in the definition-symbol index.
+// Both the store's index writer and the build's in-memory resolution index
+// gate on this, so the two cannot drift apart.
+func Indexable(n Node) bool {
+	return !n.External && !nonIndexableKinds[n.Kind]
+}
+
 // Stats summarizes a graph for reports and graph.json.
 type Stats struct {
 	Nodes       int `json:"nodes"`
@@ -125,8 +202,10 @@ type GraphJSON struct {
 	Edges         []Edge `json:"edges"`
 }
 
-// SchemaVersion is the current graph.json schema version.
-const SchemaVersion = 1
+// SchemaVersion is the current graph.json schema version. Bumped to 2 when
+// the rationale kind, the explains relation and Node.Body were added — the
+// document is advertised as portable, so new vocabulary is a contract change.
+const SchemaVersion = 2
 
 // EncodeGraphJSON writes a deterministic (sorted) graph.json document.
 func EncodeGraphJSON(w io.Writer, root string, nodes []Node, edges []Edge, communities int, files int) error {
