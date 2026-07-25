@@ -222,7 +222,7 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 				}
 
 			case model.RelImports:
-				target := resolveImport(lang, goModule, ref.Name, dirHasFiles, synthetic)
+				target := resolveImport(lang, goModule, ref.Name, rec.Path, dirHasFiles, fileFirstNode, synthetic)
 				addEdge(model.Edge{
 					Source: ref.FromID, Target: target,
 					Relation: model.RelImports, Confidence: model.ConfInferred,
@@ -342,22 +342,41 @@ func lookupSymbol(symbols map[string][]string, lang, name string) []string {
 }
 
 // resolveImport returns (creating on demand) the node an import edge targets:
-// an internal package node when the import maps to a directory with extracted
-// files, else an external module node.
-func resolveImport(lang, goModule, importPath string, dirHasFiles map[string]bool, synthetic map[string]model.Node) string {
-	if lang == "go" && goModule != "" {
-		if rel, ok := strings.CutPrefix(importPath, goModule); ok {
-			rel = strings.TrimPrefix(rel, "/")
-			if rel == "" {
-				rel = "."
-			}
-			if dirHasFiles[rel] {
-				id := model.NodeID("go", model.KindModule, rel, rel)
-				if _, ok := synthetic[id]; !ok {
-					synthetic[id] = model.Node{
-						ID: id, Label: rel, Kind: model.KindModule, Language: "go",
-					}
+// an internal package/file node when the import maps into the repo, else an
+// external module node.
+func resolveImport(lang, goModule, importPath, sitePath string, dirHasFiles map[string]bool, fileFirstNode map[string]string, synthetic map[string]model.Node) string {
+	switch lang {
+	case "go":
+		if goModule != "" {
+			if rel, ok := strings.CutPrefix(importPath, goModule); ok {
+				rel = strings.TrimPrefix(rel, "/")
+				if rel == "" {
+					rel = "."
 				}
+				if dirHasFiles[rel] {
+					id := model.NodeID("go", model.KindModule, rel, rel)
+					if _, ok := synthetic[id]; !ok {
+						synthetic[id] = model.Node{
+							ID: id, Label: rel, Kind: model.KindModule, Language: "go",
+						}
+					}
+					return id
+				}
+			}
+		}
+	case "javascript", "typescript":
+		if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+			base := joinRel(dirOf(sitePath), importPath)
+			for _, cand := range scriptImportCandidates(base) {
+				if id, ok := fileFirstNode[cand]; ok {
+					return id
+				}
+			}
+		}
+	case "python":
+		base := strings.ReplaceAll(importPath, ".", "/")
+		for _, cand := range []string{base + ".py", base + "/__init__.py"} {
+			if id, ok := fileFirstNode[cand]; ok {
 				return id
 			}
 		}
@@ -369,6 +388,46 @@ func resolveImport(lang, goModule, importPath string, dirHasFiles map[string]boo
 		}
 	}
 	return id
+}
+
+// scriptImportCandidates lists the repo paths a JS/TS relative import may
+// resolve to, in preference order.
+func scriptImportCandidates(base string) []string {
+	out := []string{base}
+	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"} {
+		out = append(out, base+ext)
+	}
+	for _, idx := range []string{"/index.ts", "/index.tsx", "/index.js", "/index.jsx"} {
+		out = append(out, base+idx)
+	}
+	return out
+}
+
+func dirOf(path string) string {
+	if i := strings.LastIndex(path, "/"); i >= 0 {
+		return path[:i]
+	}
+	return ""
+}
+
+// joinRel resolves a ./ or ../ href against a slash-separated directory.
+func joinRel(dir, href string) string {
+	parts := []string{}
+	if dir != "" {
+		parts = strings.Split(dir, "/")
+	}
+	for _, seg := range strings.Split(href, "/") {
+		switch seg {
+		case "", ".":
+		case "..":
+			if len(parts) > 0 {
+				parts = parts[:len(parts)-1]
+			}
+		default:
+			parts = append(parts, seg)
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // symbolMemKeys mirrors the store's symbol indexing for the in-memory pass.

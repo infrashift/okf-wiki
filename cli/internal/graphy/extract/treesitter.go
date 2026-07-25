@@ -110,6 +110,8 @@ func firstDocLine(n *ts.Node, src []byte) string {
 	}
 	line = strings.TrimPrefix(line, "//")
 	line = strings.TrimPrefix(line, "/*")
+	line = strings.TrimSuffix(strings.TrimSpace(line), "*/")
+	line = strings.TrimLeft(line, "* ")
 	return strings.TrimSpace(line)
 }
 
