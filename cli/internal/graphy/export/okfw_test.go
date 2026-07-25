@@ -179,17 +179,184 @@ func TestExportIsIdempotent(t *testing.T) {
 	if res.Created != 0 || res.Deleted != 0 {
 		t.Errorf("re-export created=%d deleted=%d, want 0/0", res.Created, res.Deleted)
 	}
+	// Nothing changed → every file is skipped byte-for-byte (no timestamp churn).
+	if res.Updated != 0 || res.Unchanged != len(first) {
+		t.Errorf("re-export updated=%d unchanged=%d, want 0/%d", res.Updated, res.Unchanged, len(first))
+	}
 	second := conceptFiles(t, cfg, "graphy/myproj")
 	if len(second) != len(first) {
 		t.Fatalf("file count changed: %d → %d", len(first), len(second))
 	}
 	for name, content := range second {
+		if string(first[name]) != string(content) {
+			t.Errorf("%s bytes changed on no-op re-export", name)
+		}
 		c, err := config.ParseFrontmatter(content)
 		if err != nil {
 			t.Fatal(err)
 		}
 		if firstIDs[name] != c.ID {
 			t.Errorf("%s concept id changed: %s → %s", name, firstIDs[name], c.ID)
+		}
+	}
+}
+
+func TestExportRewritesOnMeaningfulChange(t *testing.T) {
+	s, cfg := fixture(t)
+	if _, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Alpha's doc changes — its concept (and only content that renders
+	// differently) must be rewritten; the rest skip.
+	nodes := []model.Node{
+		{ID: "go:function:a.go#Alpha", Label: "Alpha", Kind: model.KindFunction, Language: "go",
+			File: "a.go", Span: model.Span{StartLine: 3}, Doc: "Alpha now does MORE things.",
+			Signature: "func Alpha()", Degree: 4},
+		{ID: "go:function:b.go#Beta", Label: "Beta", Kind: model.KindFunction, Language: "go",
+			File: "b.go", Span: model.Span{StartLine: 8}, Degree: 3},
+		{ID: "go:function:c.go#Tiny", Label: "Tiny", Kind: model.KindFunction, Language: "go",
+			File: "c.go", Span: model.Span{StartLine: 1}, Degree: 1},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCommunities(map[string]int{nodes[0].ID: 0, nodes[1].ID: 0, nodes[2].ID: 0},
+		map[int]string{0: "core"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Updated != 1 || res.Unchanged != 2 {
+		t.Errorf("updated=%d unchanged=%d, want 1/2", res.Updated, res.Unchanged)
+	}
+	for name, content := range conceptFiles(t, cfg, "graphy/myproj") {
+		if strings.HasPrefix(name, "alpha--") && !strings.Contains(string(content), "MORE things") {
+			t.Errorf("Alpha concept not rewritten:\n%s", content)
+		}
+	}
+}
+
+func TestExportRenameKeepsConceptIdentity(t *testing.T) {
+	s, cfg := fixture(t)
+	if _, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3}); err != nil {
+		t.Fatal(err)
+	}
+	var alphaID string
+	for name, content := range conceptFiles(t, cfg, "graphy/myproj") {
+		if strings.HasPrefix(name, "alpha--") {
+			z, _ := config.ParseFrontmatter(content)
+			alphaID = z.ID
+		}
+	}
+	if alphaID == "" {
+		t.Fatal("no alpha concept after first export")
+	}
+
+	// Alpha is renamed to AlphaPrime in the same file — same kind, 1:1.
+	nodes := []model.Node{
+		{ID: "go:function:a.go#AlphaPrime", Label: "AlphaPrime", Kind: model.KindFunction, Language: "go",
+			File: "a.go", Span: model.Span{StartLine: 3}, Doc: "Alpha does things.",
+			Signature: "func AlphaPrime()", Degree: 4},
+		{ID: "go:function:b.go#Beta", Label: "Beta", Kind: model.KindFunction, Language: "go",
+			File: "b.go", Span: model.Span{StartLine: 8}, Degree: 3},
+		{ID: "go:function:c.go#Tiny", Label: "Tiny", Kind: model.KindFunction, Language: "go",
+			File: "c.go", Span: model.Span{StartLine: 1}, Degree: 1},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCommunities(map[string]int{nodes[0].ID: 0, nodes[1].ID: 0, nodes[2].ID: 0},
+		map[int]string{0: "core"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Renamed != 1 || res.Created != 0 || res.Deleted != 0 {
+		t.Errorf("renamed=%d created=%d deleted=%d, want 1/0/0", res.Renamed, res.Created, res.Deleted)
+	}
+	files := conceptFiles(t, cfg, "graphy/myproj")
+	found := false
+	for name, content := range files {
+		if strings.HasPrefix(name, "alpha--") {
+			t.Errorf("old alpha file survived: %s", name)
+		}
+		if strings.HasPrefix(name, "alphaprime--") {
+			found = true
+			z, err := config.ParseAndValidate(content)
+			if err != nil {
+				t.Fatalf("renamed concept invalid: %v", err)
+			}
+			if z.ID != alphaID {
+				t.Errorf("concept id changed on rename: %s → %s", alphaID, z.ID)
+			}
+			if z.Title != "AlphaPrime" || z.Graphy.NodeID != "go:function:a.go#AlphaPrime" {
+				t.Errorf("renamed concept = %q / %+v", z.Title, z.Graphy)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("no alphaprime concept: %v", keys(files))
+	}
+}
+
+func TestExportMoveKeepsConceptIdentity(t *testing.T) {
+	s, cfg := fixture(t)
+	if _, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3}); err != nil {
+		t.Fatal(err)
+	}
+	var betaID string
+	for name, content := range conceptFiles(t, cfg, "graphy/myproj") {
+		if strings.HasPrefix(name, "beta--") {
+			z, _ := config.ParseFrontmatter(content)
+			betaID = z.ID
+		}
+	}
+
+	// Beta moves b.go → pkg/moved.go keeping its name.
+	nodes := []model.Node{
+		{ID: "go:function:a.go#Alpha", Label: "Alpha", Kind: model.KindFunction, Language: "go",
+			File: "a.go", Span: model.Span{StartLine: 3}, Doc: "Alpha does things.",
+			Signature: "func Alpha()", Degree: 4},
+		{ID: "go:function:pkg/moved.go#Beta", Label: "Beta", Kind: model.KindFunction, Language: "go",
+			File: "pkg/moved.go", Span: model.Span{StartLine: 12}, Degree: 3},
+		{ID: "go:function:c.go#Tiny", Label: "Tiny", Kind: model.KindFunction, Language: "go",
+			File: "c.go", Span: model.Span{StartLine: 1}, Degree: 1},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCommunities(map[string]int{nodes[0].ID: 0, nodes[1].ID: 0, nodes[2].ID: 0},
+		map[int]string{0: "core"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Renamed != 1 || res.Created != 0 || res.Deleted != 0 {
+		t.Errorf("renamed=%d created=%d deleted=%d, want 1/0/0", res.Renamed, res.Created, res.Deleted)
+	}
+	for name, content := range conceptFiles(t, cfg, "graphy/myproj") {
+		if !strings.HasPrefix(name, "beta--") {
+			continue
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if z.ID != betaID {
+			t.Errorf("concept id changed on move: %s → %s", betaID, z.ID)
+		}
+		if z.Resource != "pkg/moved.go#L12" {
+			t.Errorf("resource not updated after move: %q", z.Resource)
 		}
 	}
 }

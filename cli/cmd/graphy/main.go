@@ -209,12 +209,15 @@ idempotent: concept ids and filenames stay stable across runs.`,
 			if err != nil {
 				return err
 			}
-			recovered := ""
-			if res.Recovered > 0 {
-				recovered = fmt.Sprintf(", %d recovered", res.Recovered)
+			extra := ""
+			if res.Renamed > 0 {
+				extra += fmt.Sprintf(", %d renamed", res.Renamed)
 			}
-			fmt.Printf("Exported to %s/%s: %d created, %d updated%s, %d deleted\n",
-				cfg.RootPath, res.Dir, res.Created, res.Updated, recovered, res.Deleted)
+			if res.Recovered > 0 {
+				extra += fmt.Sprintf(", %d recovered", res.Recovered)
+			}
+			fmt.Printf("Exported to %s/%s: %d created, %d updated, %d unchanged%s, %d deleted\n",
+				cfg.RootPath, res.Dir, res.Created, res.Updated, res.Unchanged, extra, res.Deleted)
 			return nil
 		},
 	}

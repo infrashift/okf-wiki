@@ -43,6 +43,8 @@ type OkfwOptions struct {
 type OkfwResult struct {
 	Created   int
 	Updated   int
+	Unchanged int // skipped: rendered content identical to what's on disk
+	Renamed   int // adopted from a vanished node via rename/move detection
 	Recovered int // adopted from markers after a lost exports mapping
 	Deleted   int
 	Dir       string // bundle-relative concept directory
@@ -59,7 +61,6 @@ type item struct {
 	title       string
 	conceptType string // OKF free-form type: "code-<entity>" / "code-community"
 	description string
-	resource    string // OKF resource: source location (or permalink)
 	language    string
 	entity      string // node kind or "community"
 	tags        []string
@@ -92,19 +93,22 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	}
 
 	commit := gitCommit(root)
-	items, nodeCommunity, err := selectItems(s, nodes, opts, commit)
+	items, nodeCommunity, err := selectItems(s, nodes, opts)
 	if err != nil {
 		return nil, err
 	}
 
 	// Pass 1: ensure every item has a concept file; collect key → placement.
-	// When the exports mapping is missing (e.g. .graphy/ was deleted), adopt
-	// existing concepts by their embedded node identity instead of
-	// duplicating them.
+	// Resolution order for an item with no live export record:
+	//   1. recovery scan — the mapping was lost (.graphy/ deleted) but the
+	//      concept exists with the same embedded node identity
+	//   2. rename/move adoption — a vanished node's concept carries over so
+	//      refactors keep their concept id (and history)
+	//   3. create a fresh concept
 	placed := map[string]placement{}
 	var recovered map[string]placement // rid → placement; scanned lazily
-	var createdPaths []string
-	for _, it := range items {
+	var pending []int                  // item indices still needing a concept
+	for i, it := range items {
 		rec, err := s.GetExport(it.key)
 		if err != nil {
 			return nil, err
@@ -126,6 +130,26 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			res.Recovered++
 			continue
 		}
+		pending = append(pending, i)
+	}
+
+	if len(pending) > 0 {
+		adopted, err := adoptRenames(cfg, s, items, pending, placed, res)
+		if err != nil {
+			return nil, err
+		}
+		remaining := pending[:0]
+		for _, i := range pending {
+			if !adopted[items[i].key] {
+				remaining = append(remaining, i)
+			}
+		}
+		pending = remaining
+	}
+
+	created := map[string]bool{}
+	for _, i := range pending {
+		it := items[i]
 		absPath, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 			Title:       it.title,
 			Project:     opts.Project,
@@ -145,16 +169,18 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			return nil, err
 		}
 		placed[it.key] = placement{id, rel}
-		createdPaths = append(createdPaths, rel)
+		created[rel] = true
 		res.Created++
 	}
-	created := map[string]bool{}
-	for _, p := range createdPaths {
-		created[p] = true
-	}
 
-	// Pass 2: rewrite every concept in full — frontmatter (preserving id and
+	// Pass 2: render every concept in full — frontmatter (preserving id and
 	// created) and body — with links now that all placements are known.
+	//
+	// Change detection: the file is first re-rendered with its PREVIOUS
+	// timestamp and commit; a byte-identical result means nothing meaningful
+	// changed, so the write and index/graph syncs are skipped entirely and
+	// `timestamp` keeps its OKF meaning of "last meaningful change" (with
+	// graphy.commit pinning the repo state that change was derived from).
 	linkTo := func(key string) string {
 		if p, ok := placed[key]; ok {
 			return "./" + p.relPath[strings.LastIndex(p.relPath, "/")+1:]
@@ -187,7 +213,18 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		} else {
 			body = nodeBody(s, it, nodes, linkTo)
 		}
-		content := renderConcept(prev, it, opts, parentID, commit, body)
+		if !prev.Timestamp.IsZero() {
+			prevCommit := commit
+			if prev.Graphy != nil && prev.Graphy.Commit != "" {
+				prevCommit = prev.Graphy.Commit
+			}
+			candidate := renderConcept(prev, it, opts, parentID, prevCommit, prev.Timestamp, body)
+			if bytes.Equal(candidate, existing) {
+				res.Unchanged++
+				continue
+			}
+		}
+		content := renderConcept(prev, it, opts, parentID, commit, time.Now(), body)
 		if err := os.WriteFile(abs, content, 0644); err != nil {
 			return nil, err
 		}
@@ -235,7 +272,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 // selectItems picks the communities and significant nodes to export, ordered
 // deterministically (communities first).
-func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions, commit string) ([]item, map[string]int, error) {
+func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]int, error) {
 	var items []item
 	nodeCommunity := map[string]int{}
 
@@ -290,7 +327,6 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions, 
 				title:       n.Label,
 				conceptType: "code-" + string(n.Kind),
 				description: desc,
-				resource:    resourceFor(n, opts.RepoURL, commit),
 				language:    n.Language,
 				entity:      string(n.Kind),
 				tags:        []string{"graphy", "graphy/" + n.Language, "graphy/" + string(n.Kind)},
@@ -339,11 +375,17 @@ func gitCommit(root string) string {
 
 // renderConcept produces the concept file in full: frontmatter in okfw's
 // quoted house style (preserving the existing id and created stamp) plus the
-// body and the machine-readable node marker.
-func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, commit, body string) []byte {
+// body and the machine-readable node marker. The caller controls ts and
+// commit so it can render both the "did anything change?" candidate (previous
+// stamps) and the final content (fresh stamps).
+func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, commit string, ts time.Time, body string) []byte {
 	created := prev.Created
 	if created.IsZero() {
 		created = time.Now()
+	}
+	resource := ""
+	if it.node != nil {
+		resource = resourceFor(*it.node, opts.RepoURL, commit)
 	}
 	var b bytes.Buffer
 	b.WriteString("---\n")
@@ -353,8 +395,8 @@ func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, co
 	if it.description != "" {
 		fmt.Fprintf(&b, "description: %q\n", it.description)
 	}
-	if it.resource != "" {
-		fmt.Fprintf(&b, "resource: %q\n", it.resource)
+	if resource != "" {
+		fmt.Fprintf(&b, "resource: %q\n", resource)
 	}
 	if opts.Project != "" {
 		fmt.Fprintf(&b, "project: %q\n", opts.Project)
@@ -364,7 +406,7 @@ func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, co
 		fmt.Fprintf(&b, "  - %q\n", tag)
 	}
 	fmt.Fprintf(&b, "created: %q\n", created.Format(time.RFC3339))
-	fmt.Fprintf(&b, "timestamp: %q\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(&b, "timestamp: %q\n", ts.Format(time.RFC3339))
 	if parentID != "" {
 		fmt.Fprintf(&b, "parent: %q\n", parentID)
 	}
@@ -385,6 +427,171 @@ func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, co
 	b.WriteString(strings.TrimRight(body, "\n"))
 	fmt.Fprintf(&b, "\n\n<!-- graphy:node %s -->\n", it.rid)
 	return b.Bytes()
+}
+
+// staleConcept is an export record whose graph node vanished this run,
+// decomposed for rename matching.
+type staleConcept struct {
+	key  string // old exports-bucket key
+	rec  store.ExportRecord
+	lang string
+	kind string
+	file string
+	qual string
+}
+
+// adoptRenames matches pending new items against stale concepts so renamed or
+// moved entities keep their concept identity (id, created, history). Two
+// conservative rules, each requiring a unique 1:1 pairing:
+//
+//   - move:   same language+kind+qualified-name, different file
+//   - rename: same language+kind+file, different name — only when that file
+//     has exactly one vanished and exactly one new entity of that kind
+//
+// Adopted concepts are re-keyed in the exports bucket and their files renamed
+// to the new title's slug (keeping the concept id's shortid), so filenames
+// stay truthful. Returns the set of adopted item keys.
+func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []int, placed map[string]placement, res *OkfwResult) (map[string]bool, error) {
+	adopted := map[string]bool{}
+
+	// Collect stale, parseable node concepts (communities never adopt).
+	want := map[string]bool{}
+	for _, it := range items {
+		want[it.key] = true
+	}
+	var stale []*staleConcept
+	if err := s.EachExport(func(key string, rec store.ExportRecord) error {
+		if want[key] || strings.HasPrefix(key, communityKeyPrefix) {
+			return nil
+		}
+		if _, err := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))); err != nil {
+			return nil // file already gone — nothing to adopt
+		}
+		lang, kind, file, qual, ok := parseNodeID(key)
+		if !ok {
+			return nil
+		}
+		stale = append(stale, &staleConcept{key: key, rec: rec, lang: lang, kind: kind, file: file, qual: qual})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if len(stale) == 0 {
+		return adopted, nil
+	}
+
+	// Candidate new nodes among the pending items.
+	type newEntry struct {
+		idx  int
+		item item
+	}
+	var fresh []newEntry
+	for _, i := range pending {
+		if items[i].node != nil {
+			fresh = append(fresh, newEntry{idx: i, item: items[i]})
+		}
+	}
+
+	pair := func(groupStale func(*staleConcept) string, groupNew func(item) string) map[*staleConcept]newEntry {
+		sGroups := map[string][]*staleConcept{}
+		for _, sc := range stale {
+			if sc != nil {
+				sGroups[groupStale(sc)] = append(sGroups[groupStale(sc)], sc)
+			}
+		}
+		nGroups := map[string][]newEntry{}
+		for _, ne := range fresh {
+			if !adopted[ne.item.key] {
+				nGroups[groupNew(ne.item)] = append(nGroups[groupNew(ne.item)], ne)
+			}
+		}
+		out := map[*staleConcept]newEntry{}
+		for g, scs := range sGroups {
+			if len(scs) == 1 && len(nGroups[g]) == 1 && scs[0] != nil {
+				out[scs[0]] = nGroups[g][0]
+			}
+		}
+		return out
+	}
+	apply := func(matches map[*staleConcept]newEntry) error {
+		for sc, ne := range matches {
+			if err := adoptOne(cfg, s, sc, ne.item, placed); err != nil {
+				return err
+			}
+			adopted[ne.item.key] = true
+			res.Renamed++
+			for i := range stale {
+				if stale[i] == sc {
+					stale[i] = nil
+				}
+			}
+		}
+		return nil
+	}
+
+	// Rule 1 — file moves: identity is the qualified name.
+	moves := pair(
+		func(sc *staleConcept) string { return sc.lang + "\x00" + sc.kind + "\x00" + sc.qual },
+		func(it item) string {
+			_, _, _, qual, _ := parseNodeID(it.rid)
+			return it.language + "\x00" + it.entity + "\x00" + qual
+		},
+	)
+	if err := apply(moves); err != nil {
+		return nil, err
+	}
+	// Rule 2 — in-file renames: 1:1 pairing within (lang, kind, file).
+	renames := pair(
+		func(sc *staleConcept) string { return sc.lang + "\x00" + sc.kind + "\x00" + sc.file },
+		func(it item) string {
+			if it.node == nil {
+				return "\x00none"
+			}
+			return it.language + "\x00" + it.entity + "\x00" + it.node.File
+		},
+	)
+	if err := apply(renames); err != nil {
+		return nil, err
+	}
+	return adopted, nil
+}
+
+// adoptOne re-keys a stale concept to the new item and renames its file to
+// match the new title (same concept id, so the shortid suffix is unchanged).
+func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, placed map[string]placement) error {
+	rec := sc.rec
+	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
+	newDir := filepath.Dir(oldAbs)
+	newName := bundle.NoteFilename(newDir, it.title, rec.ConceptID)
+	if newName != filepath.Base(oldAbs) {
+		if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
+			return fmt.Errorf("renaming %s: %w", rec.RelPath, err)
+		}
+		rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
+	}
+	if err := s.PutExport(it.key, rec); err != nil {
+		return err
+	}
+	if err := s.DeleteExport(sc.key); err != nil {
+		return err
+	}
+	placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+	return nil
+}
+
+// parseNodeID decomposes "<lang>:<kind>:<file>#<qual>" node ids; ok=false for
+// community/synthetic ids that don't follow the shape.
+func parseNodeID(id string) (lang, kind, file, qual string, ok bool) {
+	parts := strings.SplitN(id, ":", 3)
+	if len(parts) != 3 {
+		return "", "", "", "", false
+	}
+	rest := parts[2]
+	i := strings.LastIndex(rest, "#")
+	if i < 0 {
+		return "", "", "", "", false
+	}
+	return parts[0], parts[1], rest[:i], rest[i+1:], true
 }
 
 // scanExisting rebuilds rid → placement from the concepts already in the

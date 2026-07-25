@@ -58,6 +58,10 @@ stamps exported concepts with `type: code-<entity>`, `resource:` (source
 location, commit-pinned permalink with `--repo-url`), and the optional
 `graphy:` frontmatter extension block (node_id/language/entity/commit/generator
 — declared in concept-schema.cue alongside okfw's other OKF extensions).
+No-op re-exports write nothing (content compared with previous
+timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
+renamed/moved entities keep their concept id: unique same-name-different-file
+or 1:1 same-file-same-kind pairings adopt the old concept and rename its file.
 
 ## Data Model
 
