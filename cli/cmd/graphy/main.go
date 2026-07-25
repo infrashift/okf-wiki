@@ -236,7 +236,7 @@ func exportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Export the graph to another format",
 	}
-	export.AddCommand(exportJSONCmd(), exportOkfwCmd())
+	export.AddCommand(exportJSONCmd(), exportGraphMLCmd(), exportJGFCmd(), exportCypherCmd(), exportOkfwCmd())
 	return export
 }
 
@@ -321,63 +321,144 @@ func exportJSONCmd() *cobra.Command {
 		Use:   "json",
 		Short: "Write the portable graph.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			w, s, err := openStore()
-			if err != nil {
-				return err
-			}
-			defer s.Close()
-			path := out
-			if path == "" {
-				path = w.JSONPath()
-			}
-			if err := writeGraphJSON(w, s, path); err != nil {
-				return err
-			}
-			fmt.Printf("Wrote %s\n", path)
-			return nil
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JSONPath() },
+				func(f *os.File, g *export.Graph) error {
+					st := g.Stats()
+					return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+				})
 		},
 	}
 	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.json)")
 	return cmd
 }
 
-// writeGraphJSON dumps the store into a deterministic graph.json file.
-func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
-	var nodes []model.Node
-	if err := s.EachNode(func(n model.Node) error {
-		nodes = append(nodes, n)
-		return nil
-	}); err != nil {
-		return err
+func exportGraphMLCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "graphml",
+		Short: "Write the graph as GraphML",
+		Long: `Writes a GraphML document readable by Gephi, yEd, Cytoscape and networkx.
+Node and edge attributes (kind, language, source location, community,
+relation, confidence) are declared as GraphML keys. The output carries no
+timestamp, so an unchanged graph re-exports byte for byte identically.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.GraphMLPath() },
+				func(f *os.File, g *export.Graph) error {
+					return export.WriteGraphML(f, g, "graphy "+version)
+				})
+		},
 	}
-	var edges []model.Edge
-	if err := s.EachEdge(func(e model.Edge) error {
-		edges = append(edges, e)
-		return nil
-	}); err != nil {
-		return err
-	}
-	communities := 0
-	if err := s.EachCommunity(func(store.Community) error {
-		communities++
-		return nil
-	}); err != nil {
-		return err
-	}
-	files := 0
-	if err := s.EachFile(func(store.FileRecord) error {
-		files++
-		return nil
-	}); err != nil {
-		return err
-	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.graphml)")
+	return cmd
+}
 
+func exportJGFCmd() *cobra.Command {
+	var out string
+	cmd := &cobra.Command{
+		Use:   "jgf",
+		Short: "Write the graph as JSON Graph Format",
+		Long: `Writes a JSON Graph Format v2 document (https://jsongraphformat.info):
+nodes keyed by graphy node id, edges carrying source/target/relation, and
+everything graphy-specific under "metadata". The output carries no timestamp,
+so an unchanged graph re-exports byte for byte identically.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JGFPath() },
+				func(f *os.File, g *export.Graph) error {
+					return export.WriteJGF(f, g, "graphy "+version)
+				})
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.jgf.json)")
+	return cmd
+}
+
+func exportCypherCmd() *cobra.Command {
+	var out, graphName string
+	var batchSize int
+	var noTruncate bool
+	cmd := &cobra.Command{
+		Use:   "cypher",
+		Short: "Write a Cypher load script for Apache AGE (PostgreSQL)",
+		Long: `Writes a psql script that loads the graph into Apache AGE. AGE consumes
+Cypher only inside SQL cypher() calls, so the output is .sql rather than
+.cypher; run it with:
+
+  psql -d <database> -f .graphy/graph.age.sql
+
+Vertices carry one label — the entity kind, since AGE allows a single label
+per vertex — and edges are labelled with the relation. The script creates the
+graph if it is missing, and by default clears it first so that re-exporting
+after a rebuild cannot leave behind vertices for code that no longer exists.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runGraphExport(out, func(w *workspace.Workspace) string { return w.CypherPath() },
+				func(f *os.File, g *export.Graph) error {
+					name := graphName
+					if name == "" {
+						name = filepath.Base(g.Root)
+					}
+					return export.WriteCypher(f, g, export.CypherOptions{
+						Generator:  "graphy " + version,
+						GraphName:  name,
+						BatchSize:  batchSize,
+						NoTruncate: noTruncate,
+					})
+				})
+		},
+	}
+	cmd.Flags().StringVar(&out, "out", "", "output path (default .graphy/graph.age.sql)")
+	cmd.Flags().StringVar(&graphName, "graph-name", "", "AGE graph name (default: repo directory name)")
+	cmd.Flags().IntVar(&batchSize, "batch-size", export.DefaultCypherBatch, "elements per cypher() statement")
+	cmd.Flags().BoolVar(&noTruncate, "no-truncate", false, "append into the existing graph instead of clearing it first")
+	return cmd
+}
+
+// writeGraphJSON dumps the store into a deterministic graph.json file. Builds
+// refresh it directly, without going through the export command.
+func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
+	g, err := export.Load(w.Root, s)
+	if err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	return model.EncodeGraphJSON(f, w.Root, nodes, edges, communities, files)
+	st := g.Stats()
+	return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+}
+
+// runGraphExport loads the store into a snapshot and hands it to a writer.
+// The output file is created only once the snapshot has succeeded, so a failed
+// export cannot truncate the previous one.
+func runGraphExport(out string, def func(*workspace.Workspace) string, write func(*os.File, *export.Graph) error) error {
+	w, s, err := openStore()
+	if err != nil {
+		return err
+	}
+	defer s.Close()
+	g, err := export.Load(w.Root, s)
+	if err != nil {
+		return err
+	}
+	path := out
+	if path == "" {
+		path = def(w)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	if err := write(f, g); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	st := g.Stats()
+	fmt.Printf("Wrote %s (%d nodes, %d edges)\n", path, st.Nodes, st.Edges)
+	return nil
 }
 
 func installCmd() *cobra.Command {

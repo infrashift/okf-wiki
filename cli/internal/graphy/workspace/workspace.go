@@ -30,6 +30,19 @@ func (w *Workspace) DBPath() string { return filepath.Join(w.Dir(), "graph.db") 
 // JSONPath returns the portable graph.json path.
 func (w *Workspace) JSONPath() string { return filepath.Join(w.Dir(), "graph.json") }
 
+// GraphMLPath returns the GraphML export path.
+func (w *Workspace) GraphMLPath() string { return filepath.Join(w.Dir(), "graph.graphml") }
+
+// JGFPath returns the JSON Graph Format export path. The double extension
+// keeps it obviously JSON to editors while distinguishing it from graph.json,
+// which is graphy's own schema rather than JGF.
+func (w *Workspace) JGFPath() string { return filepath.Join(w.Dir(), "graph.jgf.json") }
+
+// CypherPath returns the Apache AGE load-script path. It is .sql, not
+// .cypher: AGE consumes Cypher only inside SQL cypher() calls, so the file is
+// a psql script.
+func (w *Workspace) CypherPath() string { return filepath.Join(w.Dir(), "graph.age.sql") }
+
 // ReportPath returns the GRAPH_REPORT.md path.
 func (w *Workspace) ReportPath() string { return filepath.Join(w.Dir(), "GRAPH_REPORT.md") }
 

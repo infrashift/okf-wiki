@@ -29,7 +29,8 @@ cli/internal/gitctx/         — Git project-context helper
 cli/internal/graphy/         — graphy packages: model, store (own bbolt schema with
                                typed+confidence edges), detect, extract (tree-sitter,
                                CGo), build, cluster (Leiden + Louvain), analyze, report, query,
-                               llm (Claude/Gemini/OpenAI REST), export (okfw bundle),
+                               llm (Claude/Gemini/OpenAI REST),
+                               export (okfw bundle + GraphML/JGF/Cypher-for-AGE),
                                skills, workspace (.graphy/ discovery)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
 plugin/okfw.lua              — Neovim plugin auto-load
@@ -85,6 +86,39 @@ records already holding it are skipped, keeping a no-op export write-free; the
 rest go out in one `PutExports` transaction. Records predating the digest decode
 with an empty one (the JSON key changed with the type) and are backfilled on the
 next export.
+
+Besides the bundle, the whole graph exports to four **interchange formats**
+(`graphy export json|graphml|jgf|cypher`), all fed by one sorted snapshot
+(`export.Load`) so they cannot disagree or churn: none stamps a timestamp, so
+an unchanged graph re-exports byte for byte and the file can be committed and
+diffed. Community membership in these comes from the communities bucket, never
+from `Node.Community` — ids start at 0 and so does the field's zero value, so
+the field alone cannot tell "in the first community" from "never clustered",
+and the attribute is omitted rather than defaulted. GraphML declares its
+attribute vocabulary as `<key>` elements (a `<data>` with an undeclared key, or
+one declared `int` carrying an empty string, is what makes Gephi and networkx
+reject a file). JGF is v2 (jsongraphformat.info): nodes keyed by node id, edges
+with source/target/relation, everything graphy-specific under `metadata`, and
+HTML escaping off so signatures stay readable.
+
+`graphy export cypher` targets **Apache AGE**, which consumes Cypher only
+inside SQL `cypher('<graph>', $tag$ … $tag$) AS (v agtype)` calls — so the
+output is a `.sql` psql script, not `.cypher`, and it was verified end to end
+against AGE 1.7. Three AGE constraints shape it: a vertex takes exactly one
+label (so the label is the entity kind, CamelCased, with the kind repeated as a
+property), a pattern's label must be a literal (so edges are grouped by
+relation *and* by which site properties they carry, which also keeps every
+UNWIND row the same shape — no null padding), and endpoint lookup by id is a
+sequential scan until indexed (so per-label `id` btree indexes go in between
+the vertex and edge statements, each guarded by an exception handler because
+the property-index syntax is version-sensitive and a lost index is not a lost
+load). The script is a full snapshot: it creates the graph if missing and
+clears it first, so a reload after a rebuild cannot strand vertices for deleted
+code (`--no-truncate` appends instead). Two escaping layers have to hold at
+once — Cypher literals are backslash-escaped (`\'`, `\\`, `\n`; other control
+characters are dropped) while the SQL dollar-quote tag is chosen to appear in
+no statement body, since a doc comment containing `$graphy$` would otherwise
+close the block and spill the rest of the query into psql.
 
 Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
 via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`
