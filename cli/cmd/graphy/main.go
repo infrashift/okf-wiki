@@ -7,11 +7,14 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
 	"okfw/cli/internal/graphy/build"
+	"okfw/cli/internal/graphy/export"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
@@ -154,8 +157,66 @@ func exportCmd() *cobra.Command {
 		Use:   "export",
 		Short: "Export the graph to another format",
 	}
-	export.AddCommand(exportJSONCmd())
+	export.AddCommand(exportJSONCmd(), exportOkfwCmd())
 	return export
+}
+
+func exportOkfwCmd() *cobra.Command {
+	var bundlePath, project string
+	var minDegree int
+	var communitiesOnly, keepStale bool
+	cmd := &cobra.Command{
+		Use:   "okfw",
+		Short: "Export the graph as concepts into an OKF Wiki bundle",
+		Long: `Writes communities as parent concepts and significant nodes as child
+concepts (vanilla OKF frontmatter + markdown links) into an .okfw bundle,
+keeping the bundle's search index and graph database in sync. Re-exports are
+idempotent: concept ids and filenames stay stable across runs.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w, s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			var cfg *config.Config
+			if bundlePath != "" {
+				wikiDir := bundlePath
+				if filepath.Base(wikiDir) != config.WikiDirName {
+					wikiDir = filepath.Join(wikiDir, config.WikiDirName)
+				}
+				if fi, err := os.Stat(wikiDir); err != nil || !fi.IsDir() {
+					return fmt.Errorf("no %s bundle at %s", config.WikiDirName, bundlePath)
+				}
+				cfg = config.ConfigFor(wikiDir)
+			} else {
+				cfg, err = config.Discover("")
+				if err != nil {
+					return err
+				}
+			}
+
+			res, err := export.ToOkfw(w.Root, s, export.OkfwOptions{
+				Bundle:          cfg,
+				Project:         project,
+				MinDegree:       minDegree,
+				CommunitiesOnly: communitiesOnly,
+				KeepStale:       keepStale,
+			})
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Exported to %s/%s: %d created, %d updated, %d deleted\n",
+				cfg.RootPath, res.Dir, res.Created, res.Updated, res.Deleted)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&bundlePath, "bundle", "", "bundle location (default: discover .okfw from cwd)")
+	cmd.Flags().StringVar(&project, "project", "", "project folder under graphy/ (default: repo dir name)")
+	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept")
+	cmd.Flags().BoolVar(&communitiesOnly, "communities-only", false, "export only community concepts")
+	cmd.Flags().BoolVar(&keepStale, "keep-stale", false, "keep concepts whose graph nodes vanished")
+	return cmd
 }
 
 func exportJSONCmd() *cobra.Command {
