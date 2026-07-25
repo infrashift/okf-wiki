@@ -38,7 +38,7 @@ deterministic AST extraction (tree-sitter), detects communities, and answers
 graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		SilenceUsage: true,
 	}
-	root.AddCommand(initCmd(), buildCmd(), updateCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), versionCmd())
+	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), versionCmd())
 	return root
 }
 
