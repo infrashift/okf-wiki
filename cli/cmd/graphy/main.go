@@ -35,7 +35,7 @@ deterministic AST extraction (tree-sitter), detects communities, and answers
 graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		SilenceUsage: true,
 	}
-	root.AddCommand(initCmd(), buildCmd(), updateCmd(), exportCmd(), versionCmd())
+	root.AddCommand(initCmd(), buildCmd(), updateCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), versionCmd())
 	return root
 }
 
@@ -87,8 +87,8 @@ func runBuild(opts build.Options) error {
 	}
 	fmt.Printf("Scanned %d files (%d extracted, %d purged)\n",
 		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged)
-	fmt.Printf("Graph: %d nodes, %d edges (%d refs resolved, %d ambiguous, %d dropped)\n",
-		stats.Nodes, stats.Edges, stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
+	fmt.Printf("Graph: %d nodes, %d edges, %d communities (%d refs resolved, %d ambiguous, %d dropped)\n",
+		stats.Nodes, stats.Edges, stats.Communities, stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
 	fmt.Printf("Wrote %s\n", w.JSONPath())
 	return nil
 }

@@ -13,9 +13,12 @@ import (
 	"sort"
 	"strings"
 
+	"okfw/cli/internal/graphy/analyze"
+	"okfw/cli/internal/graphy/cluster"
 	"okfw/cli/internal/graphy/detect"
 	"okfw/cli/internal/graphy/extract"
 	"okfw/cli/internal/graphy/model"
+	"okfw/cli/internal/graphy/report"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
 )
@@ -42,6 +45,7 @@ type Stats struct {
 	FilesPurged    int
 	Nodes          int
 	Edges          int
+	Communities    int
 	RefsResolved   int
 	RefsAmbiguous  int
 	RefsDropped    int
@@ -121,10 +125,62 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 	if err := s.RecomputeDegrees(); err != nil {
 		return nil, err
 	}
+	if err := clusterAndReport(w, s, stats); err != nil {
+		return nil, err
+	}
 
 	stats.Nodes, stats.Edges, err = s.Counts()
 	return stats, err
 }
+
+// clusterAndReport detects communities (deterministic Louvain), labels them,
+// and renders GRAPH_REPORT.md.
+func clusterAndReport(w *workspace.Workspace, s *store.Store, stats *Stats) error {
+	var nodes []model.Node
+	var nodeIDs []string
+	if err := s.EachNode(func(n model.Node) error {
+		nodes = append(nodes, n)
+		nodeIDs = append(nodeIDs, n.ID)
+		return nil
+	}); err != nil {
+		return err
+	}
+	var pairs [][2]string
+	if err := s.EachEdge(func(e model.Edge) error {
+		pairs = append(pairs, [2]string{e.Source, e.Target})
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	detector := cluster.Louvain{Seed: louvainSeed}
+	assign, err := detector.Detect(nodeIDs, pairs)
+	if err != nil {
+		return err
+	}
+	if err := s.SetCommunities(assign, analyze.CommunityLabels(nodes, assign)); err != nil {
+		return err
+	}
+	if err := s.PutMeta("louvain_seed", fmt.Sprint(louvainSeed)); err != nil {
+		return err
+	}
+
+	rep, err := analyze.Build(s, w.Root)
+	if err != nil {
+		return err
+	}
+	stats.Communities = rep.Stats.Communities
+	f, err := os.Create(w.ReportPath())
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return report.Render(f, rep)
+}
+
+// louvainSeed pins community detection for reproducible assignments; it is
+// recorded in the store's meta bucket for auditability.
+const louvainSeed = 1
 
 func extractFile(session *extract.Session, s *store.Store, f detect.File) error {
 	src, err := os.ReadFile(f.AbsPath)

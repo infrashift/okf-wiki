@@ -1,0 +1,50 @@
+# Graph Report
+
+Repository: `{{ .Root }}`
+
+## Stats
+
+| | |
+|---|---|
+| Files | {{ .Stats.Files }} |
+| Nodes | {{ .Stats.Nodes }} |
+| Edges | {{ .Stats.Edges }} |
+| Communities | {{ .Stats.Communities }} |
+| Orphan nodes | {{ .Orphans }} |
+{{- range $lang, $count := .Languages }}
+| {{ $lang }} nodes | {{ $count }} |
+{{- end }}
+
+Edge confidence: {{ conf .Confidence "EXTRACTED" }} extracted, {{ conf .Confidence "INFERRED" }} inferred, {{ conf .Confidence "AMBIGUOUS" }} ambiguous.
+
+## God nodes
+
+The most-connected entities — the graph's flow hubs.
+
+| Entity | Kind | Degree | Location |
+|---|---|---:|---|
+{{- range .GodNodes }}
+| {{ .Label }} | {{ .Kind }} | {{ .Degree }} | {{ loc . }} |
+{{- end }}
+
+## Communities
+
+Subsystems detected by modularity clustering (Louvain, deterministic seed).
+
+{{ range .Communities -}}
+### {{ .Label }} ({{ .Size }} nodes)
+
+{{ range .Top -}}
+- {{ .Label }} ({{ .Kind }}, degree {{ .Degree }}){{ with loc . }} — {{ . }}{{ end }}
+{{ end }}
+{{ end -}}
+
+## Suggested queries
+
+```
+{{- range .Suggested }}
+{{ . }}
+{{- end }}
+```
+
+_Regenerate with `graphy build`. Query with `graphy query / path / explain`._
