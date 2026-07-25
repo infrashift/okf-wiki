@@ -1,11 +1,10 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
 	"okfw/cli/internal/graph"
@@ -19,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -1720,12 +1718,7 @@ func runInit(target string) error {
 // skipWalkDir reports whether a directory met during a bundle walk should be
 // skipped: hidden directories (.index, .git, ...) and the ephemeral/ export
 // dir — but never the walk root itself, which is the hidden .okfw directory.
-func skipWalkDir(root, p, name string) bool {
-	if p == root {
-		return false
-	}
-	return strings.HasPrefix(name, ".") || name == "ephemeral"
-}
+func skipWalkDir(root, p, name string) bool { return bundle.SkipWalkDir(root, p, name) }
 
 // queryGraph runs FindConnected or FindAllConnected based on startID.
 func queryGraph(g *graph.Graph, startID string, limit, depth int) ([]*graph.Node, error) {
@@ -1853,148 +1846,23 @@ func ensureGitignore(basePath string, graphPath string) error {
 }
 
 // indexFile indexes a single markdown file
-func indexFile(idx interface {
-	Index(string, interface{}) error
-}, filePath string) error {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
+func indexFile(idx bundle.Indexer, filePath string) error { return bundle.IndexFile(idx, filePath) }
 
-	z, err := config.ParseFrontmatter(content)
-	if err != nil {
-		return err
-	}
+func slugify(s string) string { return bundle.Slugify(s) }
 
-	body := config.ExtractBody(content)
+func shortID(id string, n int) string { return bundle.ShortID(id, n) }
 
-	docKind := z.GetKind()
-	docType := z.Type
-	if docType == "" {
-		docType = docKind // legacy notes: fall back to the structured kind
-	}
+func noteFilename(dir, title, id string) string { return bundle.NoteFilename(dir, title, id) }
 
-	doc := &index.ConceptDoc{
-		ID:          z.ID,
-		Title:       z.Title,
-		Type:        docType,
-		Kind:        docKind,
-		Description: z.Description,
-		Project:     z.Project,
-		Tags:        z.Tags,
-		Body:        body,
-		FilePath:    filePath,
-		Created:     z.Created.Format("2006-01-02T15:04:05Z07:00"),
-		Timestamp:   z.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-		Status:      z.Status,
-		Due:         z.Due,
-		Completed:   z.Completed,
-		Priority:    z.Priority,
-	}
+func sanitizeSubdir(p string) string { return bundle.SanitizeSubdir(p) }
 
-	return idx.Index(z.ID, doc)
-}
-
-// slugify converts a title into a lowercase, ASCII, hyphen-separated slug
-// suitable for a filename. Reserved OKF basenames are guarded.
-func slugify(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	prevHyphen := false
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			prevHyphen = false
-		case r == ' ' || r == '-' || r == '_' || r == '/' || r == '.':
-			if !prevHyphen && b.Len() > 0 {
-				b.WriteByte('-')
-				prevHyphen = true
-			}
-		}
-	}
-	slug := strings.Trim(b.String(), "-")
-	if slug == "" {
-		slug = "note"
-	}
-	if slug == "index" || slug == "log" {
-		slug += "-note" // never collide with reserved OKF filenames
-	}
-	return slug
-}
-
-// shortID returns the leading hex of a UUID/legacy id for filename disambiguation.
-func shortID(id string, n int) string {
-	hex := strings.ReplaceAll(id, "-", "")
-	if n > len(hex) {
-		n = len(hex)
-	}
-	return hex[:n]
-}
-
-// noteFilename builds a hybrid "slug--shortid.md" filename for title/id, unique
-// within dir. The short id defaults to the first 12 hex chars of the id — the full
-// UUIDv7 millisecond timestamp — so filenames match the frontmatter id's first two
-// groups and sort chronologically; on collision it is extended into the random bits.
-// Returns the base name only.
-func noteFilename(dir, title, id string) string {
-	slug := slugify(title)
-	for n := 12; n <= 32; n += 2 {
-		name := slug + "--" + shortID(id, n) + ".md"
-		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
-			return name
-		}
-	}
-	// Fallback: full compact id (effectively always unique).
-	return slug + "--" + strings.ReplaceAll(id, "-", "") + ".md"
-}
-
-// sanitizeSubdir cleans a user/agent-requested bundle subdirectory and rejects
-// any path that would escape the bundle root. Returns "" if invalid.
-func sanitizeSubdir(p string) string {
-	p = strings.TrimSpace(filepath.ToSlash(p))
-	p = strings.TrimPrefix(p, "/")
-	cleaned := filepath.ToSlash(filepath.Clean(p))
-	if cleaned == "." || cleaned == "" {
-		return ""
-	}
-	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
-		return ""
-	}
-	return cleaned
-}
-
-// conceptDir resolves where a new concept should be written: an explicit --path
-// (sanitized, in-bundle) takes precedence; otherwise the project name is used as
-// a top-level folder; otherwise the bundle root.
 func conceptDir(cfg *config.Config, pathFlag, project string) (string, error) {
-	if pathFlag != "" {
-		sub := sanitizeSubdir(pathFlag)
-		if sub == "" {
-			return "", fmt.Errorf("invalid --path %q: must be a subdirectory within the bundle", pathFlag)
-		}
-		return filepath.Join(cfg.RootPath, filepath.FromSlash(sub)), nil
-	}
-	if project != "" {
-		if sub := sanitizeSubdir(project); sub != "" {
-			return filepath.Join(cfg.RootPath, filepath.FromSlash(sub)), nil
-		}
-	}
-	return cfg.RootPath, nil
+	return bundle.ConceptDir(cfg, pathFlag, project)
 }
 
-// isReservedBase reports whether name is an OKF reserved filename (index.md/log.md).
-func isReservedBase(name string) bool {
-	return name == "index.md" || name == "log.md"
-}
+func isReservedBase(name string) bool { return bundle.IsReservedBase(name) }
 
-// relDir returns the directory portion of a slash-separated bundle-relative path.
-func relDir(rel string) string {
-	if i := strings.LastIndex(rel, "/"); i >= 0 {
-		return rel[:i]
-	}
-	return ""
-}
+func relDir(rel string) string { return bundle.RelDir(rel) }
 
 // runValidateOKF checks a bundle for OKF conformance: every non-reserved .md has
 // parseable frontmatter with a non-empty `type`. Unresolved links are reported as
@@ -2093,105 +1961,7 @@ func runIndexMd(cfg *config.Config, root string) error {
 // frontmatter. index.md files are owned by okfw and overwritten. Returns the
 // number of files written.
 func writeIndexFiles(cfg *config.Config, root string) (int, error) {
-	type entry struct{ title, desc, href string }
-	concepts := map[string][]entry{}
-	dirs := map[string]bool{"": true}
-
-	addDirChain := func(d string) {
-		for {
-			dirs[d] = true
-			if d == "" {
-				break
-			}
-			d = relDir(d)
-		}
-	}
-
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if fi.IsDir() {
-			if skipWalkDir(root, p, fi.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(p, ".md") || isReservedBase(fi.Name()) {
-			return nil
-		}
-		content, err := os.ReadFile(p)
-		if err != nil {
-			return nil
-		}
-		z, err := config.ParseFrontmatter(content)
-		if err != nil || z.ID == "" {
-			return nil
-		}
-		rel, _ := filepath.Rel(root, p)
-		rel = filepath.ToSlash(rel)
-		d := relDir(rel)
-		title := z.Title
-		if title == "" {
-			title = fi.Name()
-		}
-		concepts[d] = append(concepts[d], entry{title, z.Description, fi.Name()})
-		addDirChain(d)
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	// Immediate subdirectories per directory.
-	subdirs := map[string][]string{}
-	for d := range dirs {
-		if d == "" {
-			continue
-		}
-		parent := relDir(d)
-		name := strings.TrimPrefix(d[len(parent):], "/")
-		subdirs[parent] = append(subdirs[parent], name)
-	}
-
-	count := 0
-	for d := range dirs {
-		var b strings.Builder
-		if d == "" {
-			b.WriteString("---\nokf_version: \"0.1\"\n---\n\n")
-		}
-		heading := d
-		if heading == "" {
-			heading = "/"
-		}
-		b.WriteString("# " + heading + "\n\n")
-		if subs := subdirs[d]; len(subs) > 0 {
-			sort.Strings(subs)
-			b.WriteString("## Subdirectories\n\n")
-			for _, s := range subs {
-				b.WriteString("* [" + s + "/](" + s + "/)\n")
-			}
-			b.WriteString("\n")
-		}
-		if cs := concepts[d]; len(cs) > 0 {
-			sort.Slice(cs, func(i, j int) bool { return cs[i].title < cs[j].title })
-			b.WriteString("## Concepts\n\n")
-			for _, c := range cs {
-				line := "* [" + c.title + "](" + c.href + ")"
-				if c.desc != "" {
-					line += " - " + c.desc
-				}
-				b.WriteString(line + "\n")
-			}
-			b.WriteString("\n")
-		}
-		out := filepath.Join(root, filepath.FromSlash(d), "index.md")
-		if err := os.WriteFile(out, []byte(b.String()), 0644); err != nil {
-			return count, err
-		}
-		count++
-	}
-	return count, nil
+	return bundle.WriteIndexFiles(cfg, root)
 }
 
 // runLog renders an OKF log.md at the bundle root from git history (date-grouped,
@@ -2276,70 +2046,12 @@ func runLog(cfg *config.Config, root string) error {
 // touchTimestamp ensures the updates map bumps the OKF `timestamp` field to now
 // (last meaningful change), unless the caller already set it explicitly.
 func touchTimestamp(updates map[string]string) map[string]string {
-	if updates == nil {
-		updates = map[string]string{}
-	}
-	if _, ok := updates["timestamp"]; !ok {
-		updates["timestamp"] = time.Now().Format(time.RFC3339)
-	}
-	return updates
+	return bundle.TouchTimestamp(updates)
 }
 
 // updateFrontmatter updates specific fields in YAML frontmatter
 func updateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-	updates = touchTimestamp(updates)
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	updatedFields := make(map[string]bool)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		updated := false
-
-		for field, value := range updates {
-			if strings.HasPrefix(line, field+":") {
-				newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-				updatedFields[field] = true
-				updated = true
-				break
-			}
-		}
-
-		if !updated {
-			newFrontmatter.WriteString(line + "\n")
-		}
-	}
-
-	for field, value := range updates {
-		if !updatedFields[field] {
-			newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-		}
-	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return bundle.UpdateFrontmatter(content, updates)
 }
 
 // backlinksToJSON converts backlinks slice to JSON
@@ -2522,129 +2234,25 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 }
 
 // autoIndex indexes a single file silently (for auto-indexing on create/update)
-func autoIndex(cfg *config.Config, filePath string) error {
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
-
-	return indexFile(idx, filePath)
-}
+func autoIndex(cfg *config.Config, filePath string) error { return bundle.AutoIndex(cfg, filePath) }
 
 // autoSync updates the search index and, when a graph database exists, the
 // persistent graph for a single created or updated file (best-effort).
-func autoSync(cfg *config.Config, filePath string) error {
-	if err := autoIndex(cfg, filePath); err != nil {
-		return err
-	}
-
-	// Keep OKF index.md listings fresh — including an index.md for any
-	// directory the note just created.
-	if _, err := writeIndexFiles(cfg, cfg.RootPath); err != nil {
-		return fmt.Errorf("failed to refresh index.md files: %w", err)
-	}
-
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil // no graph database — nothing to keep in sync
-	}
-	store, err := graphdb.Open(dbPath)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	return store.SyncFile(filePath, cfg.RootPath)
-}
+func autoSync(cfg *config.Config, filePath string) error { return bundle.AutoSync(cfg, filePath) }
 
 // conceptSpec describes a concept to create.
-type conceptSpec struct {
-	Title       string
-	Project     string
-	Dir         string // bundle subdirectory (--path)
-	Tags        []string
-	Description string
-	Template    string
-	Body        string // markdown appended after the generated content
-}
+type conceptSpec = bundle.Spec
 
 // createConcept writes a new concept (optionally from a template) and returns
 // its absolute path and id. The caller is responsible for autoSync.
 func createConcept(cfg *config.Config, spec conceptSpec) (string, string, error) {
-	id := uuid.Must(uuid.NewV7()).String()
-
-	var content string
-	if spec.Template != "" {
-		tmpl, err := templates.Get(spec.Template)
-		if err != nil {
-			return "", "", fmt.Errorf("template error: %w", err)
-		}
-		content, err = tmpl.GenerateNote(id, spec.Title, spec.Project, spec.Tags)
-		if err != nil {
-			return "", "", fmt.Errorf("failed to generate note from template: %w", err)
-		}
-	} else {
-		content = generateBasicNote(id, spec.Title, spec.Project, spec.Tags)
-	}
-
-	outputDir, err := conceptDir(cfg, spec.Dir, spec.Project)
-	if err != nil {
-		return "", "", err
-	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	if spec.Description != "" {
-		updated, derr := updateFrontmatter([]byte(content), map[string]string{"description": spec.Description})
-		if derr != nil {
-			return "", "", fmt.Errorf("failed to set description: %w", derr)
-		}
-		content = string(updated)
-	}
-
-	if spec.Body != "" {
-		content = strings.TrimRight(content, "\n") + "\n\n" + strings.TrimRight(spec.Body, "\n") + "\n"
-	}
-
-	filePath := filepath.Join(outputDir, noteFilename(outputDir, spec.Title, id))
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write file: %w", err)
-	}
-	return filePath, id, nil
+	return bundle.CreateConcept(cfg, spec)
 }
 
 // createTodo writes a new todo concept and returns its absolute path and id.
 // The caller is responsible for autoSync.
 func createTodo(cfg *config.Config, title, project, dir, due, priority string, tags []string) (string, string, error) {
-	id := uuid.Must(uuid.NewV7()).String()
-
-	tmpl, err := templates.Get("todo")
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get todo template: %w", err)
-	}
-	content, err := tmpl.GenerateNoteWithOptions(id, title, project, tags, &templates.TodoOptions{
-		Status:   "open",
-		Due:      due,
-		Priority: priority,
-	})
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate todo: %w", err)
-	}
-
-	outputDir, err := conceptDir(cfg, dir, project)
-	if err != nil {
-		return "", "", err
-	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	filePath := filepath.Join(outputDir, noteFilename(outputDir, title, id))
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write file: %w", err)
-	}
-	return filePath, id, nil
+	return bundle.CreateTodo(cfg, title, project, dir, due, priority, tags)
 }
 
 // applyTodoStatus rewrites a todo's frontmatter for the given status
@@ -2687,246 +2295,22 @@ func applyTodoStatus(content []byte, status string) (newContent []byte, changed 
 
 // generateBasicNote creates a basic note without a template
 func generateBasicNote(id, title, project string, tags []string) string {
-	now := time.Now()
-
-	var buf bytes.Buffer
-	buf.WriteString("---\n")
-	buf.WriteString(fmt.Sprintf("id: %q\n", id))
-	buf.WriteString(fmt.Sprintf("title: %q\n", title))
-	buf.WriteString("type: \"note\"\n")
-
-	if project != "" {
-		buf.WriteString(fmt.Sprintf("project: %q\n", project))
-	}
-
-	buf.WriteString("tags:")
-	if len(tags) > 0 {
-		buf.WriteString("\n")
-		for _, tag := range tags {
-			buf.WriteString(fmt.Sprintf("  - %q\n", tag))
-		}
-	} else {
-		buf.WriteString(" []\n")
-	}
-
-	stamp := now.Format(time.RFC3339)
-	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
-	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
-	buf.WriteString("---\n\n")
-	buf.WriteString(fmt.Sprintf("# %s\n\n", title))
-
-	return buf.String()
+	return bundle.GenerateBasicNote(id, title, project, tags)
 }
 
 // resolveConceptPath resolves a concept ID or file path to an absolute file path
 func resolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
-	// If it looks like a file path, use it directly
-	if strings.HasSuffix(idOrPath, ".md") || strings.Contains(idOrPath, "/") {
-		if _, err := os.Stat(idOrPath); err != nil {
-			return "", fmt.Errorf("file not found: %s", idOrPath)
-		}
-		return filepath.Abs(idOrPath)
-	}
-
-	// Otherwise it is an ID: search the whole bundle for a concept whose
-	// frontmatter id matches. Concepts may live in any directory, and
-	// filenames are slug--shortid.md rather than <id>.md.
-	var found string
-	err := filepath.Walk(cfg.RootPath, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info.IsDir() {
-			if skipWalkDir(cfg.RootPath, path, info.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(path, ".md") || isReservedBase(info.Name()) {
-			return nil
-		}
-		// Fast path: a legacy <id>.md filename.
-		if info.Name() == idOrPath+".md" {
-			found = path
-			return filepath.SkipAll
-		}
-		if config.ReadConceptID(path) == idOrPath {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil && err != filepath.SkipAll {
-		return "", fmt.Errorf("error searching for concept: %w", err)
-	}
-
-	if found != "" {
-		return filepath.Abs(found)
-	}
-
-	return "", fmt.Errorf("concept not found: %s", idOrPath)
+	return bundle.ResolveConceptPath(cfg, idOrPath)
 }
 
 // updateFrontmatterRemove updates fields and removes specified fields from frontmatter
 func updateFrontmatterRemove(content []byte, updates map[string]string, remove []string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-	updates = touchTimestamp(updates)
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	// Convert remove slice to set for easy lookup
-	removeSet := make(map[string]bool)
-	for _, field := range remove {
-		removeSet[field] = true
-	}
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	updatedFields := make(map[string]bool)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		skip := false
-
-		// Check if this line should be removed
-		for field := range removeSet {
-			if strings.HasPrefix(line, field+":") {
-				skip = true
-				break
-			}
-		}
-
-		if skip {
-			continue
-		}
-
-		updated := false
-		for field, value := range updates {
-			if strings.HasPrefix(line, field+":") {
-				newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-				updatedFields[field] = true
-				updated = true
-				break
-			}
-		}
-
-		if !updated {
-			newFrontmatter.WriteString(line + "\n")
-		}
-	}
-
-	// Add any fields that weren't already present
-	for field, value := range updates {
-		if !updatedFields[field] {
-			newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-		}
-	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return bundle.UpdateFrontmatterRemove(content, updates, remove)
 }
 
 // addFrontmatterTags appends new tags to the tags: YAML list in frontmatter
 func addFrontmatterTags(content []byte, tags []string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	foundTags := false
-	inTagsList := false
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "tags:") {
-			foundTags = true
-			// Check for inline empty array: "tags: []"
-			trimmed := strings.TrimSpace(strings.TrimPrefix(line, "tags:"))
-			if trimmed == "[]" {
-				// Replace inline empty array with multiline list header
-				newFrontmatter.WriteString("tags:\n")
-				for _, tag := range tags {
-					newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-				}
-				// Don't enter inTagsList mode — tags are already written
-				continue
-			}
-			newFrontmatter.WriteString(line + "\n")
-			inTagsList = true
-			continue
-		}
-
-		// If we're in the tags list, look for list items (lines starting with "  - ")
-		if inTagsList {
-			if strings.HasPrefix(strings.TrimSpace(line), "- ") {
-				newFrontmatter.WriteString(line + "\n")
-				continue
-			}
-			// End of tags list - append new tags before this line
-			for _, tag := range tags {
-				newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-			}
-			inTagsList = false
-		}
-
-		newFrontmatter.WriteString(line + "\n")
-	}
-
-	// If tags list was the last section in frontmatter
-	if inTagsList {
-		for _, tag := range tags {
-			newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-		}
-	}
-
-	// If no tags: field existed, add one
-	if !foundTags {
-		newFrontmatter.WriteString("tags:\n")
-		for _, tag := range tags {
-			newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-		}
-	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return bundle.AddFrontmatterTags(content, tags)
 }
 
 // generateTodoListMarkdown generates a markdown todo list from search results
@@ -3004,37 +2388,9 @@ func generateTodoListMarkdown(results []index.SearchResult, project string, toda
 }
 
 // newV7WithTime constructs a UUIDv7 with a specific timestamp instead of time.Now().
-func newV7WithTime(t time.Time) string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(fmt.Sprintf("crypto/rand failed: %v", err))
-	}
-	ms := t.UnixMilli()
-	b[0] = byte(ms >> 40)
-	b[1] = byte(ms >> 32)
-	b[2] = byte(ms >> 24)
-	b[3] = byte(ms >> 16)
-	b[4] = byte(ms >> 8)
-	b[5] = byte(ms)
-	b[6] = (b[6] & 0x0F) | 0x70 // version 7
-	b[8] = (b[8] & 0x3F) | 0x80 // variant 10
-	return uuid.UUID(b).String()
-}
+func newV7WithTime(t time.Time) string { return bundle.NewV7WithTime(t) }
 
 // timeFromID extracts creation time from either ID format:
 //   - Legacy: "YYYYMMDDHHmmss-UUID" → parse 14-char prefix
 //   - UUIDv7: parse first 48 bits as Unix milliseconds
-func timeFromID(id string) (time.Time, error) {
-	if len(id) > 36 && id[14] == '-' {
-		t, err := time.Parse("20060102150405", id[:14])
-		if err == nil {
-			return t, nil
-		}
-	}
-	u, err := uuid.Parse(id)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid ID: %s", id)
-	}
-	ms := int64(u[0])<<40 | int64(u[1])<<32 | int64(u[2])<<24 | int64(u[3])<<16 | int64(u[4])<<8 | int64(u[5])
-	return time.UnixMilli(ms), nil
-}
+func timeFromID(id string) (time.Time, error) { return bundle.TimeFromID(id) }
