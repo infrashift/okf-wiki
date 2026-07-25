@@ -15,7 +15,15 @@ type Anthropic struct {
 }
 
 // DefaultAnthropicModel is the current recommended Claude model alias.
-const DefaultAnthropicModel = "claude-opus-4-8"
+const DefaultAnthropicModel = "claude-opus-5"
+
+// anthropicMaxTokens bounds one plan response.
+//
+// It is not just the reply budget: Claude Opus 5 thinks by default (Opus 4.8,
+// the previous default here, did not), and max_tokens caps thinking plus
+// response text together. The old 2048 was sized for reply-only and would
+// truncate the plan JSON mid-object once thinking started consuming it.
+const anthropicMaxTokens = 4096
 
 func (a *Anthropic) Name() string { return "anthropic" }
 
@@ -30,11 +38,16 @@ func (a *Anthropic) Complete(ctx context.Context, system, user string) (string, 
 	}
 	payload := map[string]any{
 		"model":      model,
-		"max_tokens": 2048,
+		"max_tokens": anthropicMaxTokens,
 		"system":     system,
 		"messages": []map[string]any{
 			{"role": "user", "content": user},
 		},
+		// Picking seed nodes out of a supplied index is retrieval, not
+		// reasoning, so the cheapest effort level is the right one — and it
+		// keeps the thinking that Opus 5 does by default from dominating the
+		// token budget above.
+		"output_config": map[string]any{"effort": "low"},
 	}
 	headers := map[string]string{
 		"x-api-key":         a.Key,
