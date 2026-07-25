@@ -1,0 +1,98 @@
+{
+  "Nodes": [
+    {
+      "id": "cue:file:testdata/cue/sample.cue#",
+      "label": "testdata/cue/sample.cue",
+      "kind": "file",
+      "language": "cue",
+      "source_file": "testdata/cue/sample.cue",
+      "source_location": {
+        "start_line": 1
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "cue:type:testdata/cue/sample.cue##Base",
+      "label": "#Base",
+      "kind": "type",
+      "language": "cue",
+      "source_file": "testdata/cue/sample.cue",
+      "source_location": {
+        "start_line": 9
+      },
+      "signature": "#Base: {",
+      "doc": "#Base is the shared shape.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "cue:type:testdata/cue/sample.cue##Concept",
+      "label": "#Concept",
+      "kind": "type",
+      "language": "cue",
+      "source_file": "testdata/cue/sample.cue",
+      "source_location": {
+        "start_line": 15
+      },
+      "signature": "#Concept: {",
+      "doc": "#Concept extends #Base with metadata.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "cue:config:testdata/cue/sample.cue#defaults",
+      "label": "defaults",
+      "kind": "config",
+      "language": "cue",
+      "source_file": "testdata/cue/sample.cue",
+      "source_location": {
+        "start_line": 23
+      },
+      "signature": "defaults: {",
+      "doc": "defaults are plain values, not a definition.",
+      "community": 0,
+      "degree": 0
+    }
+  ],
+  "Edges": [
+    {
+      "source": "cue:file:testdata/cue/sample.cue#",
+      "target": "cue:type:testdata/cue/sample.cue##Base",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/cue/sample.cue",
+      "site_line": 9
+    },
+    {
+      "source": "cue:file:testdata/cue/sample.cue#",
+      "target": "cue:type:testdata/cue/sample.cue##Concept",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/cue/sample.cue",
+      "site_line": 15
+    },
+    {
+      "source": "cue:file:testdata/cue/sample.cue#",
+      "target": "cue:config:testdata/cue/sample.cue#defaults",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/cue/sample.cue",
+      "site_line": 23
+    }
+  ],
+  "Refs": [
+    {
+      "from": "cue:file:testdata/cue/sample.cue#",
+      "name": "strings",
+      "relation": "imports",
+      "line": 5
+    },
+    {
+      "from": "cue:type:testdata/cue/sample.cue##Concept",
+      "name": "#Base",
+      "relation": "references",
+      "line": 16
+    }
+  ]
+}

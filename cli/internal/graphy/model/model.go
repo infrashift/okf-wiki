@@ -28,7 +28,8 @@ const (
 	KindDoc       Kind = "doc"
 	KindHeading   Kind = "heading"
 	KindVariable  Kind = "variable"
-	KindConfig    Kind = "config" // a config-file entry (yaml/json key, manifest)
+	KindConfig    Kind = "config"   // a config-file entry (yaml/json key, manifest)
+	KindResource  Kind = "resource" // an infrastructure resource (terraform resource/data)
 	KindExternal  Kind = "external"
 )
 

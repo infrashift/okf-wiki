@@ -68,8 +68,148 @@ func TestMarkdownGolden(t *testing.T)   { golden(t, "markdown", "sample.md") }
 func TestPythonGolden(t *testing.T)     { golden(t, "python", "sample.py") }
 func TestTypescriptGolden(t *testing.T) { golden(t, "typescript", "sample.ts") }
 func TestJavascriptGolden(t *testing.T) { golden(t, "javascript", "sample.js") }
-func TestYAMLGolden(t *testing.T)       { golden(t, "yaml", "sample.yaml") }
-func TestJSONGolden(t *testing.T)       { golden(t, "json", "sample.json") }
+func TestYAMLGolden(t *testing.T)      { golden(t, "yaml", "sample.yaml") }
+func TestJSONGolden(t *testing.T)      { golden(t, "json", "sample.json") }
+func TestCUEGolden(t *testing.T)       { golden(t, "cue", "sample.cue") }
+func TestTerraformGolden(t *testing.T) { golden(t, "terraform", "sample.tf") }
+
+func TestCUEExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"cue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "cue", "sample.cue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "schema/sample.cue", Language: "cue"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	if n := byLabel["#Base"]; n.Kind != model.KindType || n.Doc != "#Base is the shared shape." {
+		t.Errorf("#Base = %+v", n)
+	}
+	if n := byLabel["#Concept"]; n.Kind != model.KindType {
+		t.Errorf("#Concept = %+v", n)
+	}
+	if n := byLabel["defaults"]; n.Kind != model.KindConfig {
+		t.Errorf("defaults should be a config entry, got %+v", n)
+	}
+
+	type ref struct {
+		name string
+		rel  model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.Name, r.Relation}] = true
+	}
+	if !refs[ref{"strings", model.RelImports}] {
+		t.Errorf("import ref missing: %v", refs)
+	}
+	// #Concept embeds #Base.
+	if !refs[ref{"#Base", model.RelReferences}] {
+		t.Errorf("#Concept -> #Base reference missing: %v", refs)
+	}
+}
+
+func TestTerraformExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"terraform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "terraform", "sample.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "infra/sample.tf", Language: "terraform"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	checks := []struct {
+		label string
+		kind  model.Kind
+	}{
+		{"var.region", model.KindVariable},
+		{"var.instance_type", model.KindVariable},
+		{"local.name_prefix", model.KindVariable},
+		{"provider.aws", model.KindConfig},
+		{"data.aws_ami.ubuntu", model.KindResource},
+		{"aws_instance.web", model.KindResource},
+		{"module.vpc", model.KindModule},
+		{"output.instance_ip", model.KindVariable},
+	}
+	for _, c := range checks {
+		n, ok := byLabel[c.label]
+		if !ok || n.Kind != c.kind {
+			t.Errorf("%s = %+v, want kind %s (have %v)", c.label, n, c.kind, labelsOf(res.Nodes[1:]))
+		}
+	}
+
+	type ref struct {
+		from, name string
+		rel        model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name, r.Relation}] = true
+	}
+	web := byLabel["aws_instance.web"].ID
+	if !refs[ref{web, "data.aws_ami.ubuntu", model.RelReferences}] {
+		t.Errorf("resource->data ref missing: %v", refs)
+	}
+	if !refs[ref{web, "var.instance_type", model.RelReferences}] {
+		t.Errorf("resource->var ref missing: %v", refs)
+	}
+	if !refs[ref{web, "local.name_prefix", model.RelReferences}] {
+		t.Errorf("resource->local ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["module.vpc"].ID, "./modules/vpc", model.RelImports}] {
+		t.Errorf("module source import ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["output.instance_ip"].ID, "aws_instance.web", model.RelReferences}] {
+		t.Errorf("output->resource ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["local.name_prefix"].ID, "var.region", model.RelReferences}] {
+		t.Errorf("local->var ref missing: %v", refs)
+	}
+}
+
+func TestTfvarsReferencesVariables(t *testing.T) {
+	session, err := NewSession([]string{"terraform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte("region = \"eu-west-1\"\ninstance_type = \"t3.micro\"\n")
+	res, err := session.Extract(detect.File{Path: "envs/prod.tfvars", Language: "terraform"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Nodes) != 1 {
+		t.Errorf("tfvars should only have a file node: %v", labelsOf(res.Nodes))
+	}
+	names := map[string]bool{}
+	for _, r := range res.Refs {
+		names[r.Name] = true
+	}
+	if !names["var.region"] || !names["var.instance_type"] {
+		t.Errorf("tfvars refs = %v", names)
+	}
+}
 
 func TestYAMLExtractShape(t *testing.T) {
 	session, err := NewSession([]string{"yaml"})

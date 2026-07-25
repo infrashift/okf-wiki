@@ -43,6 +43,9 @@ var langByExt = map[string]string{
 	".yaml": "yaml",
 	".yml":  "yaml",
 	".json": "json",
+	".cue":  "cue",
+	".tf":   "terraform",
+	".tfvars": "terraform",
 }
 
 // walkSkipDirs are pruned in the non-git fallback walk.

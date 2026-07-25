@@ -265,7 +265,10 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 		for _, ref := range rec.Refs {
 			switch ref.Relation {
 			case model.RelReferences:
-				// Path-shaped ref (markdown links): target any extracted file.
+				// Path-shaped ref (markdown links, config values): target any
+				// extracted file. Otherwise fall back to the symbol index —
+				// terraform addresses (var.x, aws_instance.web) and CUE
+				// definitions (#Concept) resolve like code symbols.
 				if target, ok := fileFirstNode[ref.Name]; ok {
 					addEdge(model.Edge{
 						Source: ref.FromID, Target: target,
@@ -274,7 +277,8 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 					})
 					stats.RefsResolved++
 				} else {
-					stats.RefsDropped++
+					candidates := lookupSymbol(symbols, lang, ref.Name)
+					resolveCandidates(ref, rec.Path, candidates, nodes, addEdge, stats)
 				}
 
 			case model.RelImports:
@@ -433,6 +437,22 @@ func resolveImport(lang, goModule, importPath, sitePath string, dirHasFiles map[
 		base := strings.ReplaceAll(importPath, ".", "/")
 		for _, cand := range []string{base + ".py", base + "/__init__.py"} {
 			if id, ok := fileFirstNode[cand]; ok {
+				return id
+			}
+		}
+	case "terraform":
+		// Local module sources ("./modules/vpc") become internal module
+		// nodes when the directory holds extracted files; registry sources
+		// fall through to external nodes.
+		if strings.HasPrefix(importPath, "./") || strings.HasPrefix(importPath, "../") {
+			dir := joinRel(dirOf(sitePath), importPath)
+			if dirHasFiles[dir] {
+				id := model.NodeID("terraform", model.KindModule, dir, dir)
+				if _, ok := synthetic[id]; !ok {
+					synthetic[id] = model.Node{
+						ID: id, Label: dir, Kind: model.KindModule, Language: "terraform",
+					}
+				}
 				return id
 			}
 		}

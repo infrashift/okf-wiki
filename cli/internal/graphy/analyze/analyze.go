@@ -34,6 +34,7 @@ var labelPriority = map[model.Kind]int{
 	model.KindClass:     5,
 	model.KindStruct:    5,
 	model.KindInterface: 5,
+	model.KindResource:  5,
 	model.KindFunction:  4,
 	model.KindMethod:    3,
 	model.KindType:      3,
