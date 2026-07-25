@@ -172,7 +172,7 @@ func symbolKeys(n model.Node) [][]byte {
 
 func indexableSymbol(n model.Node) bool {
 	switch n.Kind {
-	case model.KindFile, model.KindDoc, model.KindHeading, model.KindExternal:
+	case model.KindFile, model.KindDoc, model.KindHeading, model.KindConfig, model.KindExternal:
 		return false
 	}
 	return !n.External && n.Label != ""

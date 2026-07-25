@@ -1,0 +1,128 @@
+{
+  "Nodes": [
+    {
+      "id": "sql:file:testdata/sql/sample.sql#",
+      "label": "testdata/sql/sample.sql",
+      "kind": "file",
+      "language": "sql",
+      "source_file": "testdata/sql/sample.sql",
+      "source_location": {
+        "start_line": 1
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "sql:struct:testdata/sql/sample.sql#users",
+      "label": "users",
+      "kind": "struct",
+      "language": "sql",
+      "source_file": "testdata/sql/sample.sql",
+      "source_location": {
+        "start_line": 3
+      },
+      "signature": "CREATE TABLE users",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "sql:struct:testdata/sql/sample.sql#orders",
+      "label": "orders",
+      "kind": "struct",
+      "language": "sql",
+      "source_file": "testdata/sql/sample.sql",
+      "source_location": {
+        "start_line": 9
+      },
+      "signature": "CREATE TABLE IF NOT EXISTS orders",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "sql:type:testdata/sql/sample.sql#order_summary",
+      "label": "order_summary",
+      "kind": "type",
+      "language": "sql",
+      "source_file": "testdata/sql/sample.sql",
+      "source_location": {
+        "start_line": 18
+      },
+      "signature": "CREATE OR REPLACE VIEW order_summary AS",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "sql:function:testdata/sql/sample.sql#touch_updated_at",
+      "label": "touch_updated_at",
+      "kind": "function",
+      "language": "sql",
+      "source_file": "testdata/sql/sample.sql",
+      "source_location": {
+        "start_line": 24
+      },
+      "signature": "CREATE FUNCTION touch_updated_at() RETURNS trigger AS $$",
+      "community": 0,
+      "degree": 0
+    }
+  ],
+  "Edges": [
+    {
+      "source": "sql:file:testdata/sql/sample.sql#",
+      "target": "sql:struct:testdata/sql/sample.sql#users",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/sql/sample.sql",
+      "site_line": 3
+    },
+    {
+      "source": "sql:file:testdata/sql/sample.sql#",
+      "target": "sql:struct:testdata/sql/sample.sql#orders",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/sql/sample.sql",
+      "site_line": 9
+    },
+    {
+      "source": "sql:file:testdata/sql/sample.sql#",
+      "target": "sql:type:testdata/sql/sample.sql#order_summary",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/sql/sample.sql",
+      "site_line": 18
+    },
+    {
+      "source": "sql:file:testdata/sql/sample.sql#",
+      "target": "sql:function:testdata/sql/sample.sql#touch_updated_at",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/sql/sample.sql",
+      "site_line": 24
+    }
+  ],
+  "Refs": [
+    {
+      "from": "sql:struct:testdata/sql/sample.sql#orders",
+      "name": "users",
+      "relation": "references",
+      "line": 11
+    },
+    {
+      "from": "sql:struct:testdata/sql/sample.sql#orders",
+      "name": "orders",
+      "relation": "references",
+      "line": 12
+    },
+    {
+      "from": "sql:type:testdata/sql/sample.sql#order_summary",
+      "name": "users",
+      "relation": "references",
+      "line": 20
+    },
+    {
+      "from": "sql:type:testdata/sql/sample.sql#order_summary",
+      "name": "orders",
+      "relation": "references",
+      "line": 21
+    }
+  ]
+}

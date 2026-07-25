@@ -3,8 +3,10 @@ package extract
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"okfw/cli/internal/graphy/detect"
@@ -66,6 +68,442 @@ func TestMarkdownGolden(t *testing.T)   { golden(t, "markdown", "sample.md") }
 func TestPythonGolden(t *testing.T)     { golden(t, "python", "sample.py") }
 func TestTypescriptGolden(t *testing.T) { golden(t, "typescript", "sample.ts") }
 func TestJavascriptGolden(t *testing.T) { golden(t, "javascript", "sample.js") }
+func TestYAMLGolden(t *testing.T)      { golden(t, "yaml", "sample.yaml") }
+func TestJSONGolden(t *testing.T)      { golden(t, "json", "sample.json") }
+func TestCUEGolden(t *testing.T)       { golden(t, "cue", "sample.cue") }
+func TestTerraformGolden(t *testing.T) { golden(t, "terraform", "sample.tf") }
+func TestSQLGolden(t *testing.T)       { golden(t, "sql", "sample.sql") }
+func TestAnsibleGolden(t *testing.T)   { golden(t, "yaml", "playbook.yml") }
+
+func TestAnsibleExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "yaml", "playbook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "site.yml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	named, ok := byLabel["play: Provision web servers"]
+	if !ok || named.Kind != model.KindConfig {
+		t.Errorf("named play node missing: %v", labelsOf(res.Nodes[1:]))
+	}
+	if _, ok := byLabel["play: dbservers"]; !ok {
+		t.Errorf("unnamed play should be labeled by hosts: %v", labelsOf(res.Nodes[1:]))
+	}
+
+	type ref struct {
+		from, name string
+		rel        model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name, r.Relation}] = true
+	}
+	// Role references from the play: bare, mapping-form, and include_role.
+	for _, role := range []string{"role:common", "role:nginx", "role:app"} {
+		if !refs[ref{named.ID, role, model.RelImports}] {
+			t.Errorf("%s ref missing: %v", role, refs)
+		}
+	}
+	// Path values inside the play attribute to the play node.
+	if !refs[ref{named.ID, "vars/common.yml", model.RelReferences}] {
+		t.Errorf("vars_files path ref missing: %v", refs)
+	}
+	if !refs[ref{named.ID, "tasks/harden.yml", model.RelReferences}] {
+		t.Errorf("include_tasks path ref missing: %v", refs)
+	}
+}
+
+func TestAnsibleTaskListRoleRefs(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte(`- name: Reuse the base role
+  include_role:
+    name: base
+- name: Copy a file
+  copy:
+    src: files/app.conf
+    dest: /etc/app.conf
+`)
+	res, err := session.Extract(detect.File{Path: "roles/web/tasks/main.yml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Nodes) != 1 {
+		t.Errorf("task lists should not produce entry nodes: %v", labelsOf(res.Nodes))
+	}
+	found := false
+	for _, r := range res.Refs {
+		if r.Name == "role:base" && r.Relation == model.RelImports {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("include_role in task list missing: %+v", res.Refs)
+	}
+}
+
+func TestSQLExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"sql"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "sql", "sample.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "db/schema.sql", Language: "sql"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	checks := []struct {
+		label string
+		kind  model.Kind
+	}{
+		{"users", model.KindStruct},
+		{"orders", model.KindStruct},
+		{"order_summary", model.KindType},
+		{"touch_updated_at", model.KindFunction},
+	}
+	for _, c := range checks {
+		n, ok := byLabel[c.label]
+		if !ok || n.Kind != c.kind {
+			t.Errorf("%s = %+v, want kind %s (have %v)", c.label, n, c.kind, labelsOf(res.Nodes[1:]))
+		}
+	}
+	if len(res.Nodes) != 5 {
+		t.Errorf("commented-out CREATE leaked or node missing: %v", labelsOf(res.Nodes[1:]))
+	}
+
+	type ref struct{ from, name string }
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name}] = true
+	}
+	if !refs[ref{byLabel["orders"].ID, "users"}] {
+		t.Errorf("orders FK -> users missing: %v", refs)
+	}
+	// Self-referencing FK is emitted as a ref; resolution drops self-edges.
+	if !refs[ref{byLabel["orders"].ID, "orders"}] {
+		t.Errorf("self FK ref missing: %v", refs)
+	}
+	view := byLabel["order_summary"].ID
+	if !refs[ref{view, "users"}] || !refs[ref{view, "orders"}] {
+		t.Errorf("view FROM/JOIN refs missing: %v", refs)
+	}
+	// Tables must not emit FROM refs (their bodies have none), and string
+	// literals must not leak keywords.
+	if refs[ref{byLabel["users"].ID, "nothing"}] {
+		t.Errorf("string literal leaked a REFERENCES match")
+	}
+}
+
+func TestCUEExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"cue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "cue", "sample.cue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "schema/sample.cue", Language: "cue"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	if n := byLabel["#Base"]; n.Kind != model.KindType || n.Doc != "#Base is the shared shape." {
+		t.Errorf("#Base = %+v", n)
+	}
+	if n := byLabel["#Concept"]; n.Kind != model.KindType {
+		t.Errorf("#Concept = %+v", n)
+	}
+	if n := byLabel["defaults"]; n.Kind != model.KindConfig {
+		t.Errorf("defaults should be a config entry, got %+v", n)
+	}
+
+	type ref struct {
+		name string
+		rel  model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.Name, r.Relation}] = true
+	}
+	if !refs[ref{"strings", model.RelImports}] {
+		t.Errorf("import ref missing: %v", refs)
+	}
+	// #Concept embeds #Base.
+	if !refs[ref{"#Base", model.RelReferences}] {
+		t.Errorf("#Concept -> #Base reference missing: %v", refs)
+	}
+}
+
+func TestTerraformExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"terraform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "terraform", "sample.tf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "infra/sample.tf", Language: "terraform"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	checks := []struct {
+		label string
+		kind  model.Kind
+	}{
+		{"var.region", model.KindVariable},
+		{"var.instance_type", model.KindVariable},
+		{"local.name_prefix", model.KindVariable},
+		{"provider.aws", model.KindConfig},
+		{"data.aws_ami.ubuntu", model.KindResource},
+		{"aws_instance.web", model.KindResource},
+		{"module.vpc", model.KindModule},
+		{"output.instance_ip", model.KindVariable},
+	}
+	for _, c := range checks {
+		n, ok := byLabel[c.label]
+		if !ok || n.Kind != c.kind {
+			t.Errorf("%s = %+v, want kind %s (have %v)", c.label, n, c.kind, labelsOf(res.Nodes[1:]))
+		}
+	}
+
+	type ref struct {
+		from, name string
+		rel        model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name, r.Relation}] = true
+	}
+	web := byLabel["aws_instance.web"].ID
+	if !refs[ref{web, "data.aws_ami.ubuntu", model.RelReferences}] {
+		t.Errorf("resource->data ref missing: %v", refs)
+	}
+	if !refs[ref{web, "var.instance_type", model.RelReferences}] {
+		t.Errorf("resource->var ref missing: %v", refs)
+	}
+	if !refs[ref{web, "local.name_prefix", model.RelReferences}] {
+		t.Errorf("resource->local ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["module.vpc"].ID, "./modules/vpc", model.RelImports}] {
+		t.Errorf("module source import ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["output.instance_ip"].ID, "aws_instance.web", model.RelReferences}] {
+		t.Errorf("output->resource ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["local.name_prefix"].ID, "var.region", model.RelReferences}] {
+		t.Errorf("local->var ref missing: %v", refs)
+	}
+}
+
+func TestTfvarsReferencesVariables(t *testing.T) {
+	session, err := NewSession([]string{"terraform"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte("region = \"eu-west-1\"\ninstance_type = \"t3.micro\"\n")
+	res, err := session.Extract(detect.File{Path: "envs/prod.tfvars", Language: "terraform"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Nodes) != 1 {
+		t.Errorf("tfvars should only have a file node: %v", labelsOf(res.Nodes))
+	}
+	names := map[string]bool{}
+	for _, r := range res.Refs {
+		names[r.Name] = true
+	}
+	if !names["var.region"] || !names["var.instance_type"] {
+		t.Errorf("tfvars refs = %v", names)
+	}
+}
+
+func TestYAMLExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "yaml", "sample.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "deploy/compose.yaml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.Nodes[0].Kind != model.KindFile {
+		t.Errorf("Nodes[0] = %+v", res.Nodes[0])
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		if n.Kind != model.KindConfig {
+			t.Errorf("non-config entry node: %+v", n)
+		}
+		byLabel[n.Label] = n
+	}
+	// Top-level keys + second-level children from doc 0.
+	for _, want := range []string{"version", "services", "services.web", "services.db", "x-scripts"} {
+		if _, ok := byLabel[want]; !ok {
+			t.Errorf("missing entry %q (have %v)", want, labelsOf(res.Nodes[1:]))
+		}
+	}
+	// Doc 1 is a k8s manifest: one resource node, not key soup.
+	if _, ok := byLabel["Deployment/web"]; !ok {
+		t.Errorf("missing k8s manifest node (have %v)", labelsOf(res.Nodes[1:]))
+	}
+	if _, ok := byLabel["apiVersion"]; ok {
+		t.Errorf("k8s manifest leaked top-level keys")
+	}
+
+	// Path refs: attributed to their entry, both root- and file-relative
+	// readings emitted.
+	type ref struct{ from, name string }
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		if r.Relation != model.RelReferences {
+			t.Errorf("unexpected relation %s", r.Relation)
+		}
+		refs[ref{r.FromID, r.Name}] = true
+	}
+	servicesID := byLabel["services"].ID
+	if !refs[ref{servicesID, "scripts/start.sh"}] {
+		t.Errorf("root-relative ref missing: %v", refs)
+	}
+	if !refs[ref{servicesID, "deploy/scripts/start.sh"}] {
+		t.Errorf("file-relative ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["x-scripts"].ID, "tools/deploy.sh"}] {
+		t.Errorf("../ ref not normalized: %v", refs)
+	}
+}
+
+func TestJSONExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "json", "sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "package.json", Language: "json"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	for _, want := range []string{"name", "scripts", "scripts.build", "dependencies.left-pad"} {
+		if _, ok := byLabel[want]; !ok {
+			t.Errorf("missing entry %q (have %v)", want, labelsOf(res.Nodes[1:]))
+		}
+	}
+	found := false
+	for _, r := range res.Refs {
+		if r.Name == "src/index.js" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("src/index.js ref missing: %+v", res.Refs)
+	}
+}
+
+func TestConfigParseFailureDegradesToFileNode(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte("key: {{ .Values.name }}\n  broken: [unclosed\n")
+	res, err := session.Extract(detect.File{Path: "chart/tpl.yaml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatalf("template YAML must not error: %v", err)
+	}
+	if len(res.Nodes) != 1 || res.Nodes[0].Kind != model.KindFile {
+		t.Errorf("expected bare file node, got %+v", res.Nodes)
+	}
+}
+
+func TestConfigEntryCap(t *testing.T) {
+	session, err := NewSession([]string{"json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	var b strings.Builder
+	b.WriteString(`{"packages": {`)
+	for i := 0; i < 500; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"node_modules/dep%d": {}`, i)
+	}
+	b.WriteString("}}")
+	res, err := session.Extract(detect.File{Path: "package-lock.json", Language: "json"}, []byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// file node + capped entries
+	if len(res.Nodes) > maxConfigEntries+1 {
+		t.Errorf("entry cap not applied: %d nodes", len(res.Nodes))
+	}
+}
+
+func labelsOf(nodes []model.Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Label
+	}
+	return out
+}
 
 func TestPythonExtractShape(t *testing.T) {
 	session, err := NewSession([]string{"python"})

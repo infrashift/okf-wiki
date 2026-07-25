@@ -52,6 +52,10 @@ func run() string {
 
 See [the entry point](../main.go).
 `)
+	write(t, root, "ci.yaml", `jobs:
+  test:
+    script: main.go
+`)
 	w, err := workspace.Init(root)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +86,8 @@ func TestBuildResolvesAcrossFilesAndConfidences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if stats.FilesExtracted != 3 {
-		t.Errorf("FilesExtracted = %d, want 3", stats.FilesExtracted)
+	if stats.FilesExtracted != 4 {
+		t.Errorf("FilesExtracted = %d, want 4", stats.FilesExtracted)
 	}
 
 	edges := edgeSet(t, s)
@@ -106,6 +110,10 @@ func TestBuildResolvesAcrossFilesAndConfidences(t *testing.T) {
 	// Doc link to a code file: EXTRACTED reference onto main.go's file node.
 	if c := edges["markdown:doc:docs/guide.md# -references-> go:file:main.go#"]; c != model.ConfExtracted {
 		t.Errorf("doc->code reference missing: %v", edges)
+	}
+	// Config path value resolves to the code file it names.
+	if c := edges["yaml:config:ci.yaml#jobs -references-> go:file:main.go#"]; c != model.ConfExtracted {
+		t.Errorf("config->code reference missing: %v", edges)
 	}
 
 	// External node exists and is marked external.
@@ -195,5 +203,48 @@ func TestBuildFullRebuildMatchesIncremental(t *testing.T) {
 		if after[k] != v {
 			t.Errorf("edge %q: %q != %q", k, after[k], v)
 		}
+	}
+}
+
+func TestBuildResolvesAnsibleRolesAndSQLForeignKeys(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "site.yml", `---
+- name: Deploy
+  hosts: web
+  roles:
+    - web
+    - ghost
+`)
+	write(t, root, "roles/web/tasks/main.yml", `- name: Install
+  package:
+    name: nginx
+`)
+	write(t, root, "db/users.sql", "CREATE TABLE users (id BIGINT PRIMARY KEY);\n")
+	write(t, root, "db/orders.sql", "CREATE TABLE orders (\n  user_id BIGINT REFERENCES users (id)\n);\n")
+
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	edges := edgeSet(t, s)
+	// Extracted role resolves to its entry file; unknown role goes external.
+	if c := edges["yaml:config:site.yml#Deploy -imports-> yaml:file:roles/web/tasks/main.yml#"]; c != model.ConfInferred {
+		t.Errorf("play->role edge missing: %v", edges)
+	}
+	if c := edges["yaml:config:site.yml#Deploy -imports-> yaml:external:#role:ghost"]; c != model.ConfInferred {
+		t.Errorf("unknown role should be external: %v", edges)
+	}
+	// Cross-file FK resolves through the symbol index.
+	if c := edges["sql:struct:db/orders.sql#orders -references-> sql:struct:db/users.sql#users"]; c != model.ConfInferred {
+		t.Errorf("orders->users FK missing: %v", edges)
 	}
 }
