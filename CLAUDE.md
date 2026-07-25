@@ -50,9 +50,19 @@ go test ./cli/... -count=1   # Run all tests
 graphy conventions: node ids are deterministic strings
 (`<lang>:<kind>:<relfile>#<qualified-name>`); edges carry
 EXTRACTED/INFERRED/AMBIGUOUS confidence; extraction is incremental
-(sha256-diffed) while resolution/clustering rerun globally each build; extractor
-golden fixtures (`cli/internal/graphy/extract/testdata/`, regenerate with
-`go test -update`) double as tree-sitter grammar-upgrade canaries;
+(sha256-diffed) while resolution/clustering rerun globally each build; a file
+that fails extraction is recorded in `Stats.Failures` and skipped rather than
+aborting the run (a `--full` build purges the cache before extracting, so
+aborting midway used to leave the store gutted); extractor golden fixtures
+(`cli/internal/graphy/extract/testdata/`, regenerate with `go test -update`)
+are regression tests for all ten languages and **tree-sitter grammar-upgrade
+canaries for the four that use tree-sitter** — go, python, javascript,
+typescript (incl. a separate `.tsx` grammar, hence its own golden); the other
+six are pure-Go parsers (markdown/sql via regex, yaml/json via yaml.v3, cue via
+cuelang, terraform via hcl) that a grammar bump cannot break;
+`detect` never lists dot-directories — the walk and `git ls-files` share one
+ignore filter, so graphy cannot re-ingest its own `.okfw/` export as heading
+nodes;
 `graphy export okfw` is idempotent via the store's exports bucket, recoverable
 from the `<!-- graphy:node … -->` body markers if `.graphy/` is lost, and
 stamps exported concepts with `type: code-<entity>`, `resource:` (source
@@ -126,8 +136,15 @@ on both `build` and `update`). Leiden guarantees internally-connected
 communities, which Louvain does not, and that matters because communities
 become subsystem concepts in the bundle. Both are deterministic given a seed
 and number communities by their lexicographically-smallest member. The
-algorithm/resolution/seed are recorded in the store's meta bucket and rendered
-into GRAPH_REPORT.md. Two mutations silently degrade Leiden into Louvain —
+algorithm/resolution/seed are recorded in the store's meta bucket, rendered
+into GRAPH_REPORT.md, **and read back as the defaults for the next run**: an
+unpassed flag inherits what the graph was last built with (`cmd.Flags().Changed`
+decides, so an explicit value always wins, including one that names the
+default). Binding the flags to `update` is not enough on its own — they default
+to graphy's defaults, so a bare `graphy update` re-clustered a louvain graph
+with Leiden, and community renumbering rewrites `parent:` on every exported
+concept. The MCP `graphy_update` tool takes no flags and so always inherits.
+Two mutations silently degrade Leiden into Louvain —
 skipping refinement, or aggregating the coarse partition instead of the
 refined one — so both are pinned by tests (`TestRefineSplitsDisconnectedCommunity`,
 `TestLevelAggregatesTheRefinedPartition`); keep them passing.
@@ -151,6 +168,14 @@ partition rewrites `parent:` on every exported concept), and any change to
 extraction output must bump `build.extractorVersion` — the per-file cache keys
 on content sha256 alone, so new extraction capability would otherwise apply
 only to files that happen to change next.
+
+`--langs` scopes which files are *extracted*, never which nodes survive: it
+once drove the delete diff too, so `graphy build --langs go` purged every
+non-Go node and an unknown name silently wiped the whole graph (names are now
+validated against the registry). It also feeds `extractFingerprint`, so
+widening the set back re-extracts. `--full` purges are counted as
+`Stats.CacheCleared`, kept apart from `FilesPurged` so "purged" keeps meaning
+"gone from disk".
 
 ## Data Model
 
