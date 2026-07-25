@@ -1,6 +1,12 @@
 package model
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"slices"
+	"strings"
+	"testing"
+)
 
 func TestRationaleQualRoundTrips(t *testing.T) {
 	for _, tc := range []struct {
@@ -68,5 +74,91 @@ func TestIndexableExcludesProseAndScaffolding(t *testing.T) {
 	}
 	if Indexable(Node{Kind: KindFunction, Label: "x", External: true}) {
 		t.Error("external nodes must not be indexable")
+	}
+}
+
+// TestEncodeGraphJSON covers the graph.json serializer. It had no test despite
+// being the production path for `graphy build` and `graphy export json`.
+func TestEncodeGraphJSON(t *testing.T) {
+	nodes := []Node{
+		{ID: "z", Label: "Zed", Kind: KindFunction, Language: "go"},
+		{ID: "a", Label: "Ay", Kind: KindFunction, Language: "go"},
+		{ID: "m", Label: "Em", Kind: KindRationale, Language: "go"},
+	}
+	edges := []Edge{
+		{Source: "z", Target: "a", Relation: RelCalls, Confidence: ConfExtracted},
+		{Source: "a", Target: "z", Relation: RelCalls, Confidence: ConfInferred},
+		{Source: "a", Target: "m", Relation: RelExplains, Confidence: ConfExtracted},
+	}
+
+	var buf bytes.Buffer
+	if err := EncodeGraphJSON(&buf, "/repo", nodes, edges, 2, 4); err != nil {
+		t.Fatal(err)
+	}
+
+	var doc GraphJSON
+	if err := json.Unmarshal(buf.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, buf.String())
+	}
+	if doc.SchemaVersion != SchemaVersion {
+		t.Errorf("SchemaVersion = %d, want %d", doc.SchemaVersion, SchemaVersion)
+	}
+	if doc.Root != "/repo" {
+		t.Errorf("Root = %q", doc.Root)
+	}
+	if doc.GeneratedAt == "" {
+		t.Error("GeneratedAt is empty")
+	}
+	// Stats are derived from the slices, not from the caller's counts.
+	if doc.Stats.Nodes != 3 || doc.Stats.Edges != 3 {
+		t.Errorf("Stats = %+v, want 3 nodes / 3 edges", doc.Stats)
+	}
+	if doc.Stats.Communities != 2 || doc.Stats.Files != 4 {
+		t.Errorf("Stats = %+v, want 2 communities / 4 files", doc.Stats)
+	}
+
+	// Sorting is the contract that lets the document be committed and diffed.
+	gotNodes := []string{doc.Nodes[0].ID, doc.Nodes[1].ID, doc.Nodes[2].ID}
+	if !slices.IsSorted(gotNodes) {
+		t.Errorf("nodes are not sorted by id: %v", gotNodes)
+	}
+	for i := 1; i < len(doc.Edges); i++ {
+		prev, cur := doc.Edges[i-1], doc.Edges[i]
+		if prev.Source > cur.Source ||
+			(prev.Source == cur.Source && prev.Relation > cur.Relation) ||
+			(prev.Source == cur.Source && prev.Relation == cur.Relation && prev.Target > cur.Target) {
+			t.Errorf("edges are not sorted by (source, relation, target): %+v then %+v", prev, cur)
+		}
+	}
+}
+
+// TestEncodeGraphJSONIsOrderIndependent pins the property the sort exists for:
+// the same graph supplied in a different order produces identical bytes, apart
+// from the timestamp.
+func TestEncodeGraphJSONIsOrderIndependent(t *testing.T) {
+	a := []Node{{ID: "a"}, {ID: "b"}, {ID: "c"}}
+	b := []Node{{ID: "c"}, {ID: "a"}, {ID: "b"}}
+	e1 := []Edge{{Source: "a", Target: "b", Relation: RelCalls}, {Source: "b", Target: "c", Relation: RelCalls}}
+	e2 := []Edge{{Source: "b", Target: "c", Relation: RelCalls}, {Source: "a", Target: "b", Relation: RelCalls}}
+
+	var first, second bytes.Buffer
+	if err := EncodeGraphJSON(&first, "/repo", a, e1, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := EncodeGraphJSON(&second, "/repo", b, e2, 1, 1); err != nil {
+		t.Fatal(err)
+	}
+
+	strip := func(s string) []string {
+		var out []string
+		for _, line := range strings.Split(s, "\n") {
+			if !strings.Contains(line, `"generated_at"`) {
+				out = append(out, line)
+			}
+		}
+		return out
+	}
+	if got, want := strip(second.String()), strip(first.String()); !slices.Equal(got, want) {
+		t.Errorf("input order changed the output:\n%s\n---\n%s", first.String(), second.String())
 	}
 }

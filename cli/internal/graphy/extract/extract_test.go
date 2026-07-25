@@ -68,6 +68,11 @@ func TestMarkdownGolden(t *testing.T)   { golden(t, "markdown", "sample.md") }
 func TestPythonGolden(t *testing.T)     { golden(t, "python", "sample.py") }
 func TestTypescriptGolden(t *testing.T) { golden(t, "typescript", "sample.ts") }
 func TestJavascriptGolden(t *testing.T) { golden(t, "javascript", "sample.js") }
+
+// TestTSXGolden covers the one place a tree-sitter upgrade is most likely to
+// drift silently: .tsx is parsed by a separately compiled grammar
+// (tstsx.LanguageTSX), and it was the only registered grammar with no golden.
+func TestTSXGolden(t *testing.T)       { golden(t, "typescript", "sample.tsx") }
 func TestYAMLGolden(t *testing.T)      { golden(t, "yaml", "sample.yaml") }
 func TestJSONGolden(t *testing.T)      { golden(t, "json", "sample.json") }
 func TestCUEGolden(t *testing.T)       { golden(t, "cue", "sample.cue") }

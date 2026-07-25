@@ -246,3 +246,125 @@ func TestLegacyMembersRecordDecodes(t *testing.T) {
 		t.Errorf("MemberDigest = %v, want empty", rec.MemberDigest)
 	}
 }
+
+// TestCountsEachFileAndMeta covers four exported methods that no test called:
+// Counts (run on every build), EachFile (drives the delete diff and the report
+// file tally), DeleteMeta, and the ClusterMeta pair.
+func TestCountsEachFileAndMeta(t *testing.T) {
+	s := openTemp(t)
+
+	nodes := []model.Node{
+		{ID: "go:function:a.go#A", Label: "A", Kind: model.KindFunction, Language: "go", File: "a.go"},
+		{ID: "go:function:a.go#B", Label: "B", Kind: model.KindFunction, Language: "go", File: "a.go"},
+	}
+	if err := s.PutFile(FileRecord{Path: "a.go", SHA256: "sha-a", NodeIDs: idsOf(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	other := []model.Node{{ID: "go:function:b.go#C", Label: "C", Kind: model.KindFunction, Language: "go", File: "b.go"}}
+	if err := s.PutFile(FileRecord{Path: "b.go", SHA256: "sha-b", NodeIDs: idsOf(other)}, other); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges([]model.Edge{
+		{Source: nodes[0].ID, Target: nodes[1].ID, Relation: model.RelCalls, Confidence: model.ConfExtracted},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	gotNodes, gotEdges, err := s.Counts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotNodes != 3 || gotEdges != 1 {
+		t.Errorf("Counts() = %d nodes, %d edges; want 3, 1", gotNodes, gotEdges)
+	}
+
+	seen := map[string]string{}
+	if err := s.EachFile(func(rec FileRecord) error {
+		seen[rec.Path] = rec.SHA256
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen["a.go"] != "sha-a" || seen["b.go"] != "sha-b" {
+		t.Errorf("EachFile saw %v, want a.go/b.go with their hashes", seen)
+	}
+
+	// PurgeFile cascades: the record, its nodes, and its symbol entries.
+	if err := s.PurgeFile("a.go"); err != nil {
+		t.Fatal(err)
+	}
+	if gotNodes, _, err = s.Counts(); err != nil {
+		t.Fatal(err)
+	} else if gotNodes != 1 {
+		t.Errorf("after PurgeFile, Counts() = %d nodes, want 1", gotNodes)
+	}
+	if n, err := s.GetNode(nodes[0].ID); err != nil || n != nil {
+		t.Errorf("purged node still present: %+v (%v)", n, err)
+	}
+	if hits, err := s.LookupSymbol("go", "A"); err != nil || len(hits) != 0 {
+		t.Errorf("purged symbol still indexed: %v (%v)", hits, err)
+	}
+
+	// Meta round-trip, including the delete the louvain_seed migration needs.
+	if err := s.PutMeta("k", "v"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetMeta("k"); err != nil || got != "v" {
+		t.Errorf("GetMeta = %q, %v", got, err)
+	}
+	if err := s.DeleteMeta("k"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.GetMeta("k"); err != nil || got != "" {
+		t.Errorf("after DeleteMeta, GetMeta = %q, %v; want empty", got, err)
+	}
+	// Deleting an absent key is not an error — the migration runs every build.
+	if err := s.DeleteMeta("never-existed"); err != nil {
+		t.Errorf("DeleteMeta on a missing key: %v", err)
+	}
+	// An unset fingerprint reads as "" — the branch that makes the first build full.
+	if got, err := s.GetMeta("extract_fingerprint"); err != nil || got != "" {
+		t.Errorf("unset meta key = %q, %v; want empty", got, err)
+	}
+}
+
+func TestClusterMetaRoundTrip(t *testing.T) {
+	s := openTemp(t)
+
+	// A store that has never been clustered reads back the zero value, which
+	// is what makes the CLI fall back to graphy's defaults.
+	got, err := s.GetClusterMeta()
+	if err != nil {
+		t.Fatalf("GetClusterMeta on a fresh store: %v", err)
+	}
+	if got != (ClusterMeta{}) {
+		t.Errorf("fresh store = %+v, want the zero value", got)
+	}
+
+	want := ClusterMeta{Algorithm: "louvain", Resolution: 1.5, Seed: 7}
+	if err := s.PutClusterMeta(want); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetClusterMeta(); err != nil || got != want {
+		t.Errorf("GetClusterMeta = %+v, %v; want %+v", got, err, want)
+	}
+
+	// An unreadable legacy value degrades to the zero value rather than
+	// failing the build.
+	if err := s.PutMeta(MetaClusterKey, "not json"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err = s.GetClusterMeta(); err != nil {
+		t.Errorf("a corrupt cluster meta value must not error, got %v", err)
+	} else if got != (ClusterMeta{}) {
+		t.Errorf("corrupt value = %+v, want the zero value", got)
+	}
+}
+
+func idsOf(nodes []model.Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.ID
+	}
+	return out
+}

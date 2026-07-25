@@ -1424,3 +1424,120 @@ func TestExportSkipsRedundantMembershipWrites(t *testing.T) {
 		t.Errorf("digest = %d bytes, want 5 packed hashes", len(grown.MemberDigest))
 	}
 }
+
+// TestExportKeepStalePreservesVanishedConcepts covers OkfwOptions.KeepStale,
+// which had no test at all — the escape hatch for the stale sweep was
+// unverified while the sweep itself was covered.
+func TestExportKeepStalePreservesVanishedConcepts(t *testing.T) {
+	s, cfg := fixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := len(conceptFiles(t, cfg, res.Dir))
+
+	// Drop every node; without KeepStale the sweep would delete the concepts.
+	if err := s.PurgeFile("all.go"); err != nil {
+		t.Fatal(err)
+	}
+	res, err = ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3, KeepStale: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted != 0 {
+		t.Errorf("KeepStale must not delete anything, got Deleted = %d", res.Deleted)
+	}
+	if after := len(conceptFiles(t, cfg, res.Dir)); after != before {
+		t.Errorf("KeepStale changed the concept count from %d to %d", before, after)
+	}
+
+	// Without it, the same export sweeps them.
+	res, err = ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted == 0 {
+		t.Error("without KeepStale the stale sweep should have deleted concepts")
+	}
+}
+
+// TestExportNoRationaleSkipsRationaleConcepts covers OkfwOptions.NoRationale.
+func TestExportNoRationaleSkipsRationaleConcepts(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasRationaleConcept(t, cfg, res.Dir) {
+		t.Fatal("fixture should export a rationale concept by default")
+	}
+
+	s2, cfg2 := rationaleFixture(t)
+	res, err = ToOkfw("/repo/myproj", s2, OkfwOptions{Bundle: cfg2, MinDegree: 3, NoRationale: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasRationaleConcept(t, cfg2, res.Dir) {
+		t.Error("NoRationale must skip rationale concepts entirely")
+	}
+}
+
+// TestExportGeneratorReachesFrontmatter covers OkfwOptions.Generator, which was
+// only exercised by the Cypher writer.
+func TestExportGeneratorReachesFrontmatter(t *testing.T) {
+	s, cfg := fixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{
+		Bundle: cfg, MinDegree: 3, Generator: "graphy 9.9.9-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for name, content := range conceptFiles(t, cfg, res.Dir) {
+		if strings.Contains(string(content), "graphy 9.9.9-test") {
+			found = true
+		} else if strings.Contains(string(content), "node_id:") {
+			t.Errorf("%s has a graphy block but no generator stamp", name)
+		}
+	}
+	if !found {
+		t.Error("Generator never reached the frontmatter")
+	}
+}
+
+// TestExportCommunitiesOnlyRemovesNodeConcepts documents a footgun rather than
+// a bug: narrowing what is exported makes the previously-exported node
+// concepts stale, and the sweep then deletes them. --keep-stale is the escape
+// hatch. Pinning it here means a future change to the sweep cannot silently
+// turn a narrowing flag into a destructive one, or vice versa.
+func TestExportCommunitiesOnlyRemovesNodeConcepts(t *testing.T) {
+	s, cfg := fixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conceptFiles(t, cfg, res.Dir)) != 3 {
+		t.Fatalf("expected 3 concepts before narrowing, got %d", len(conceptFiles(t, cfg, res.Dir)))
+	}
+
+	res, err = ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3, CommunitiesOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Deleted != 2 {
+		t.Errorf("CommunitiesOnly should sweep the 2 node concepts, got Deleted = %d", res.Deleted)
+	}
+	if n := len(conceptFiles(t, cfg, res.Dir)); n != 1 {
+		t.Errorf("concepts remaining = %d, want 1 (the community)", n)
+	}
+}
+
+// hasRationaleConcept matches on the frontmatter node id, not on body text:
+// a rationale's prose also appears in its owner's edge list, so a substring
+// search would find the wrong file.
+func hasRationaleConcept(t *testing.T, cfg *config.Config, dir string) bool {
+	t.Helper()
+	name, _, _ := findByNodeID(t, conceptFiles(t, cfg, dir), whyNodeID)
+	return name != ""
+}

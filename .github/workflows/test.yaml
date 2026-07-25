@@ -1,0 +1,54 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # CGO stays on: graphy's extractors bind tree-sitter grammars, and the
+      # extract package does not build without a C toolchain. okfw itself is
+      # pure Go and is built separately below to keep that guarantee honest.
+      - name: Test
+        env:
+          CGO_ENABLED: 1
+        run: go test ./cli/... -count=1
+
+      - name: Vet
+        env:
+          CGO_ENABLED: 1
+        run: go vet ./cli/...
+
+      - name: Build okfw without CGo
+        env:
+          CGO_ENABLED: 0
+        run: go build -o /dev/null ./cli/cmd/okfw
+
+      - name: Build graphy
+        env:
+          CGO_ENABLED: 1
+        run: go build -o /dev/null ./cli/cmd/graphy
+
+      - name: Install CUE
+        run: go install cuelang.org/go/cmd/cue@latest
+
+      - name: Validate CUE schemas
+        run: cue vet ./cli/internal/config/concept-schema.cue
