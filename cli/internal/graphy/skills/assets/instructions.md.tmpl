@@ -1,0 +1,13 @@
+## Code knowledge graph (graphy)
+
+This repository has a pre-built code knowledge graph in `.graphy/`. For
+architecture and impact questions, query the graph instead of scanning files:
+
+- `graphy query "<question>"` — relevant entities + relationships for a
+  natural-language question (works offline without an API key)
+- `graphy path <a> <b>` — how two entities connect
+- `graphy explain <entity>` — location, signature, community, all edges
+- `graphy report` — stats, god nodes, and subsystem communities
+
+After editing code, run `graphy update` (incremental, sub-second) to keep the
+graph fresh. `graphy mcp` serves these as MCP stdio tools.

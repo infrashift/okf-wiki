@@ -16,6 +16,7 @@ import (
 	"okfw/cli/internal/graphy/build"
 	"okfw/cli/internal/graphy/export"
 	"okfw/cli/internal/graphy/model"
+	"okfw/cli/internal/graphy/skills"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
 )
@@ -38,7 +39,7 @@ deterministic AST extraction (tree-sitter), detects communities, and answers
 graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		SilenceUsage: true,
 	}
-	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), versionCmd())
+	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), installCmd(), mcpCmd(), versionCmd())
 	return root
 }
 
@@ -282,6 +283,45 @@ func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
 	}
 	defer f.Close()
 	return model.EncodeGraphJSON(f, w.Root, nodes, edges, communities, files)
+}
+
+func installCmd() *cobra.Command {
+	var platform string
+	var hooks, force bool
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install the graphy skill for an AI coding assistant",
+		Long: `Registers graphy with an agent platform so it queries the graph instead of
+scanning files. Supported platforms: claude (Claude Code: skill + CLAUDE.md
+block, optional PostToolUse hook), gemini (GEMINI.md block), codex
+(AGENTS.md block). Managed marker blocks keep re-installs idempotent.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			w, err := openWorkspace()
+			if err != nil {
+				return err
+			}
+			res, err := skills.Install(skills.Options{
+				Root:     w.Root,
+				Platform: platform,
+				Hooks:    hooks,
+				Force:    force,
+			})
+			if err != nil {
+				return err
+			}
+			for _, f := range res.Written {
+				fmt.Println("Wrote", f)
+			}
+			for _, n := range res.Notes {
+				fmt.Println("Note:", n)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&platform, "platform", "claude", "target platform: claude, gemini, or codex")
+	cmd.Flags().BoolVar(&hooks, "hooks", false, "also install an after-edit hook running `graphy update`")
+	cmd.Flags().BoolVar(&force, "force", false, "rewrite the skill file even if it exists")
+	return cmd
 }
 
 func versionCmd() *cobra.Command {
