@@ -163,7 +163,7 @@ func exportCmd() *cobra.Command {
 }
 
 func exportOkfwCmd() *cobra.Command {
-	var bundlePath, project string
+	var bundlePath, project, repoURL string
 	var minDegree int
 	var communitiesOnly, keepStale bool
 	cmd := &cobra.Command{
@@ -203,12 +203,18 @@ idempotent: concept ids and filenames stay stable across runs.`,
 				MinDegree:       minDegree,
 				CommunitiesOnly: communitiesOnly,
 				KeepStale:       keepStale,
+				RepoURL:         repoURL,
+				Generator:       "graphy " + version,
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Exported to %s/%s: %d created, %d updated, %d deleted\n",
-				cfg.RootPath, res.Dir, res.Created, res.Updated, res.Deleted)
+			recovered := ""
+			if res.Recovered > 0 {
+				recovered = fmt.Sprintf(", %d recovered", res.Recovered)
+			}
+			fmt.Printf("Exported to %s/%s: %d created, %d updated%s, %d deleted\n",
+				cfg.RootPath, res.Dir, res.Created, res.Updated, recovered, res.Deleted)
 			return nil
 		},
 	}
@@ -217,6 +223,7 @@ idempotent: concept ids and filenames stay stable across runs.`,
 	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept")
 	cmd.Flags().BoolVar(&communitiesOnly, "communities-only", false, "export only community concepts")
 	cmd.Flags().BoolVar(&keepStale, "keep-stale", false, "keep concepts whose graph nodes vanished")
+	cmd.Flags().StringVar(&repoURL, "repo-url", "", "web base URL (e.g. https://github.com/org/repo) — turns resource into a commit-pinned permalink")
 	return cmd
 }
 

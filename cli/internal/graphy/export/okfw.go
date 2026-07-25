@@ -13,9 +13,12 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
@@ -32,14 +35,17 @@ type OkfwOptions struct {
 	MinDegree       int    // node significance threshold (default 3)
 	CommunitiesOnly bool   // skip per-node concepts
 	KeepStale       bool   // keep concepts whose graph nodes vanished
+	RepoURL         string // optional web base (e.g. https://github.com/org/repo) for clickable resource permalinks
+	Generator       string // stamped into the graphy frontmatter block (e.g. "graphy 0.1.0")
 }
 
 // OkfwResult summarizes an export.
 type OkfwResult struct {
-	Created int
-	Updated int
-	Deleted int
-	Dir     string // bundle-relative concept directory
+	Created   int
+	Updated   int
+	Recovered int // adopted from markers after a lost exports mapping
+	Deleted   int
+	Dir       string // bundle-relative concept directory
 }
 
 // communityKeyPrefix namespaces community entries in the exports bucket so
@@ -49,12 +55,21 @@ const communityKeyPrefix = "\x00community:"
 // item is one concept to emit (a community or a node).
 type item struct {
 	key         string // exports-bucket key
+	rid         string // recovery id written to frontmatter/marker (node id or "community:<n>")
 	title       string
+	conceptType string // OKF free-form type: "code-<entity>" / "code-community"
 	description string
+	resource    string // OKF resource: source location (or permalink)
+	language    string
+	entity      string // node kind or "community"
 	tags        []string
 	node        *model.Node      // nil for communities
 	community   *store.Community // nil for nodes
 }
+
+// markerRe matches the machine-readable node marker embedded in concept
+// bodies; it rebuilds the exports mapping when .graphy/graph.db is lost.
+var markerRe = regexp.MustCompile(`<!-- graphy:node (\S+) -->`)
 
 // ToOkfw exports the graph into the bundle.
 func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) {
@@ -76,17 +91,18 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		return nil, err
 	}
 
-	items, nodeCommunity, err := selectItems(s, nodes, opts)
+	commit := gitCommit(root)
+	items, nodeCommunity, err := selectItems(s, nodes, opts, commit)
 	if err != nil {
 		return nil, err
 	}
 
 	// Pass 1: ensure every item has a concept file; collect key → placement.
-	type placement struct {
-		conceptID string
-		relPath   string
-	}
+	// When the exports mapping is missing (e.g. .graphy/ was deleted), adopt
+	// existing concepts by their embedded node identity instead of
+	// duplicating them.
 	placed := map[string]placement{}
+	var recovered map[string]placement // rid → placement; scanned lazily
 	var createdPaths []string
 	for _, it := range items {
 		rec, err := s.GetExport(it.key)
@@ -98,6 +114,17 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
 				continue
 			}
+		}
+		if recovered == nil {
+			recovered = scanExisting(cfg, dir)
+		}
+		if p, ok := recovered[it.rid]; ok {
+			if err := s.PutExport(it.key, store.ExportRecord{ConceptID: p.conceptID, RelPath: p.relPath}); err != nil {
+				return nil, err
+			}
+			placed[it.key] = p
+			res.Recovered++
+			continue
 		}
 		absPath, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 			Title:       it.title,
@@ -126,8 +153,8 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		created[p] = true
 	}
 
-	// Pass 2: regenerate every concept's frontmatter fields and body, with
-	// links now that all placements are known.
+	// Pass 2: rewrite every concept in full — frontmatter (preserving id and
+	// created) and body — with links now that all placements are known.
 	linkTo := func(key string) string {
 		if p, ok := placed[key]; ok {
 			return "./" + p.relPath[strings.LastIndex(p.relPath, "/")+1:]
@@ -138,24 +165,21 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	for _, it := range items {
 		p := placed[it.key]
 		abs := filepath.Join(cfg.RootPath, filepath.FromSlash(p.relPath))
-		content, err := os.ReadFile(abs)
+		existing, err := os.ReadFile(abs)
 		if err != nil {
 			return nil, err
 		}
-		updates := map[string]string{
-			"title":       it.title,
-			"description": it.description,
+		prev, err := config.ParseFrontmatter(existing)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", p.relPath, err)
 		}
+		parentID := ""
 		if it.node != nil {
 			if c, ok := nodeCommunity[it.node.ID]; ok {
 				if cp, ok := placed[communityKey(c)]; ok {
-					updates["parent"] = cp.conceptID
+					parentID = cp.conceptID
 				}
 			}
-		}
-		content, err = bundle.UpdateFrontmatter(content, updates)
-		if err != nil {
-			return nil, fmt.Errorf("updating %s: %w", p.relPath, err)
 		}
 		var body string
 		if it.community != nil {
@@ -163,10 +187,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		} else {
 			body = nodeBody(s, it, nodes, linkTo)
 		}
-		content, err = spliceBody(content, "# "+it.title+"\n\n"+body)
-		if err != nil {
-			return nil, fmt.Errorf("splicing %s: %w", p.relPath, err)
-		}
+		content := renderConcept(prev, it, opts, parentID, commit, body)
 		if err := os.WriteFile(abs, content, 0644); err != nil {
 			return nil, err
 		}
@@ -214,7 +235,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 // selectItems picks the communities and significant nodes to export, ordered
 // deterministically (communities first).
-func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]int, error) {
+func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions, commit string) ([]item, map[string]int, error) {
 	var items []item
 	nodeCommunity := map[string]int{}
 
@@ -235,8 +256,11 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		c := comms[i]
 		items = append(items, item{
 			key:         communityKey(c.ID),
+			rid:         fmt.Sprintf("community:%d", c.ID),
 			title:       "Community: " + c.Label,
+			conceptType: "code-community",
 			description: fmt.Sprintf("graphy community of %d code entities", len(c.NodeIDs)),
+			entity:      "community",
 			tags:        []string{"graphy", "graphy/community"},
 			community:   &c,
 		})
@@ -262,8 +286,13 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 			}
 			items = append(items, item{
 				key:         n.ID,
+				rid:         n.ID,
 				title:       n.Label,
+				conceptType: "code-" + string(n.Kind),
 				description: desc,
+				resource:    resourceFor(n, opts.RepoURL, commit),
+				language:    n.Language,
+				entity:      string(n.Kind),
 				tags:        []string{"graphy", "graphy/" + n.Language, "graphy/" + string(n.Kind)},
 				node:        &n,
 			})
@@ -273,6 +302,130 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 }
 
 func communityKey(id int) string { return fmt.Sprintf("%s%d", communityKeyPrefix, id) }
+
+// placement locates an exported concept inside the bundle.
+type placement struct {
+	conceptID string
+	relPath   string
+}
+
+// resourceFor renders the OKF resource URI for a node: a web permalink pinned
+// to the exported commit when a repo URL is configured, else the repo-relative
+// source location.
+func resourceFor(n model.Node, repoURL, commit string) string {
+	if n.File == "" {
+		return ""
+	}
+	line := n.Span.StartLine
+	if line < 1 {
+		line = 1
+	}
+	if repoURL != "" && commit != "" {
+		return fmt.Sprintf("%s/blob/%s/%s#L%d", strings.TrimSuffix(repoURL, "/"), commit, n.File, line)
+	}
+	return fmt.Sprintf("%s#L%d", n.File, line)
+}
+
+// gitCommit returns the repo's HEAD commit hash ("" outside git).
+func gitCommit(root string) string {
+	cmd := exec.Command("git", "rev-parse", "HEAD")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// renderConcept produces the concept file in full: frontmatter in okfw's
+// quoted house style (preserving the existing id and created stamp) plus the
+// body and the machine-readable node marker.
+func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, commit, body string) []byte {
+	created := prev.Created
+	if created.IsZero() {
+		created = time.Now()
+	}
+	var b bytes.Buffer
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "id: %q\n", prev.ID)
+	fmt.Fprintf(&b, "title: %q\n", it.title)
+	fmt.Fprintf(&b, "type: %q\n", it.conceptType)
+	if it.description != "" {
+		fmt.Fprintf(&b, "description: %q\n", it.description)
+	}
+	if it.resource != "" {
+		fmt.Fprintf(&b, "resource: %q\n", it.resource)
+	}
+	if opts.Project != "" {
+		fmt.Fprintf(&b, "project: %q\n", opts.Project)
+	}
+	b.WriteString("tags:\n")
+	for _, tag := range it.tags {
+		fmt.Fprintf(&b, "  - %q\n", tag)
+	}
+	fmt.Fprintf(&b, "created: %q\n", created.Format(time.RFC3339))
+	fmt.Fprintf(&b, "timestamp: %q\n", time.Now().Format(time.RFC3339))
+	if parentID != "" {
+		fmt.Fprintf(&b, "parent: %q\n", parentID)
+	}
+	b.WriteString("graphy:\n")
+	fmt.Fprintf(&b, "  node_id: %q\n", it.rid)
+	if it.language != "" {
+		fmt.Fprintf(&b, "  language: %q\n", it.language)
+	}
+	fmt.Fprintf(&b, "  entity: %q\n", it.entity)
+	if commit != "" {
+		fmt.Fprintf(&b, "  commit: %q\n", commit)
+	}
+	if opts.Generator != "" {
+		fmt.Fprintf(&b, "  generator: %q\n", opts.Generator)
+	}
+	b.WriteString("---\n\n")
+	fmt.Fprintf(&b, "# %s\n\n", it.title)
+	b.WriteString(strings.TrimRight(body, "\n"))
+	fmt.Fprintf(&b, "\n\n<!-- graphy:node %s -->\n", it.rid)
+	return b.Bytes()
+}
+
+// scanExisting rebuilds rid → placement from the concepts already in the
+// export directory, using the frontmatter graphy block (marker comment as
+// fallback). This is the recovery path for a lost .graphy/graph.db.
+func scanExisting(cfg *config.Config, dir string) map[string]placement {
+	out := map[string]placement{}
+	root := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return out
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || name == "index.md" {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			continue
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil || z.ID == "" {
+			continue
+		}
+		rid := ""
+		if z.Graphy != nil {
+			rid = z.Graphy.NodeID
+		}
+		if rid == "" {
+			if m := markerRe.FindSubmatch(content); m != nil {
+				rid = string(m[1])
+			}
+		}
+		if rid == "" {
+			continue
+		}
+		out[rid] = placement{conceptID: z.ID, relPath: dir + "/" + name}
+	}
+	return out
+}
 
 // nodeBody renders a node concept's entity card.
 func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(string) string) string {
@@ -359,25 +512,6 @@ func communityBody(it item, nodes map[string]model.Node, linkTo func(string) str
 		fmt.Fprintf(&b, "| %s | %s | %d | %s |\n", label, n.Kind, n.Degree, loc)
 	}
 	return b.String()
-}
-
-// spliceBody replaces everything after the frontmatter block with body.
-func spliceBody(content []byte, body string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-	rest := content[3:]
-	end := bytes.Index(rest, []byte("\n---"))
-	if end == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-	head := content[:3+end+4] // include closing ---
-	var out bytes.Buffer
-	out.Write(head)
-	out.WriteString("\n\n")
-	out.WriteString(strings.TrimRight(body, "\n"))
-	out.WriteString("\n")
-	return out.Bytes(), nil
 }
 
 // removeConcept deletes a stale concept file and evicts it from the bundle's

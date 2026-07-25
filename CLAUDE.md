@@ -52,7 +52,12 @@ EXTRACTED/INFERRED/AMBIGUOUS confidence; extraction is incremental
 (sha256-diffed) while resolution/clustering rerun globally each build; extractor
 golden fixtures (`cli/internal/graphy/extract/testdata/`, regenerate with
 `go test -update`) double as tree-sitter grammar-upgrade canaries;
-`graphy export okfw` is idempotent via the store's exports bucket.
+`graphy export okfw` is idempotent via the store's exports bucket, recoverable
+from the `<!-- graphy:node … -->` body markers if `.graphy/` is lost, and
+stamps exported concepts with `type: code-<entity>`, `resource:` (source
+location, commit-pinned permalink with `--repo-url`), and the optional
+`graphy:` frontmatter extension block (node_id/language/entity/commit/generator
+— declared in concept-schema.cue alongside okfw's other OKF extensions).
 
 ## Data Model
 

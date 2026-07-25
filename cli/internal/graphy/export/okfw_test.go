@@ -97,24 +97,47 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 	var sawAlpha, sawCommunity bool
 	for name, content := range files {
 		// Every produced file must be schema-valid OKF.
-		if _, err := config.ParseAndValidate(content); err != nil {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
 			t.Errorf("%s fails validation: %v", name, err)
+			continue
+		}
+		if z.Graphy == nil || z.Graphy.NodeID == "" {
+			t.Errorf("%s missing graphy extension block: %+v", name, z.Graphy)
 		}
 		text := string(content)
+		if !strings.Contains(text, "<!-- graphy:node ") {
+			t.Errorf("%s missing node marker:\n%s", name, text)
+		}
 		if strings.HasPrefix(name, "alpha--") {
 			sawAlpha = true
+			if z.Type != "code-function" {
+				t.Errorf("Alpha type = %q, want code-function", z.Type)
+			}
+			if z.Resource != "a.go#L3" {
+				t.Errorf("Alpha resource = %q, want a.go#L3", z.Resource)
+			}
+			if z.Graphy.NodeID != "go:function:a.go#Alpha" || z.Graphy.Entity != "function" || z.Graphy.Language != "go" {
+				t.Errorf("Alpha graphy block = %+v", z.Graphy)
+			}
 			if !strings.Contains(text, "calls [Beta](./beta--") {
 				t.Errorf("Alpha body lacks link to Beta:\n%s", text)
 			}
-			if !strings.Contains(text, `description: "Alpha does things."`) {
-				t.Errorf("Alpha description missing:\n%s", text)
+			if z.Description != "Alpha does things." {
+				t.Errorf("Alpha description = %q", z.Description)
 			}
-			if !strings.Contains(text, "parent:") {
+			if z.Parent == "" {
 				t.Errorf("Alpha has no parent community:\n%s", text)
 			}
 		}
 		if strings.HasPrefix(name, "community-core--") {
 			sawCommunity = true
+			if z.Type != "code-community" {
+				t.Errorf("community type = %q, want code-community", z.Type)
+			}
+			if z.Graphy.NodeID != "community:0" || z.Graphy.Entity != "community" {
+				t.Errorf("community graphy block = %+v", z.Graphy)
+			}
 			if !strings.Contains(text, "| [Alpha](./alpha--") {
 				t.Errorf("community table lacks Alpha link:\n%s", text)
 			}
@@ -201,6 +224,96 @@ func TestExportRemovesStaleConcepts(t *testing.T) {
 	for name := range conceptFiles(t, cfg, "graphy/myproj") {
 		if strings.HasPrefix(name, "beta--") {
 			t.Errorf("stale Beta concept survived: %s", name)
+		}
+	}
+}
+
+func TestExportRepoURLPermalink(t *testing.T) {
+	s, cfg := fixture(t)
+	// The store fixture lives outside any git repo, so commit is "" — pin one
+	// by exporting from this actual repo root where git resolves HEAD.
+	res, err := ToOkfw(mustGitRoot(t), s, OkfwOptions{
+		Bundle:    cfg,
+		MinDegree: 3,
+		Project:   "myproj",
+		RepoURL:   "https://github.com/example/myproj/",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range conceptFiles(t, cfg, res.Dir) {
+		if !strings.HasPrefix(name, "alpha--") {
+			continue
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.HasPrefix(z.Resource, "https://github.com/example/myproj/blob/") ||
+			!strings.HasSuffix(z.Resource, "/a.go#L3") {
+			t.Errorf("resource = %q, want commit-pinned permalink", z.Resource)
+		}
+		if z.Graphy == nil || len(z.Graphy.Commit) < 7 {
+			t.Errorf("graphy.commit missing: %+v", z.Graphy)
+		}
+	}
+}
+
+func mustGitRoot(t *testing.T) string {
+	t.Helper()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Walk up to the repo root (contains .git).
+	for dir := wd; ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		if filepath.Dir(dir) == dir {
+			t.Skip("not inside a git repo")
+		}
+	}
+}
+
+func TestExportRecoversLostMapping(t *testing.T) {
+	s, cfg := fixture(t)
+	if _, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3}); err != nil {
+		t.Fatal(err)
+	}
+	first := conceptFiles(t, cfg, "graphy/myproj")
+
+	// Simulate a wiped .graphy/graph.db: drop every export record.
+	var lost []string
+	if err := s.EachExport(func(key string, _ store.ExportRecord) error {
+		lost = append(lost, key)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range lost {
+		if err := s.DeleteExport(key); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Created != 0 {
+		t.Errorf("Created = %d, want 0 (concepts should be adopted, not duplicated)", res.Created)
+	}
+	if res.Recovered != len(lost) {
+		t.Errorf("Recovered = %d, want %d", res.Recovered, len(lost))
+	}
+	second := conceptFiles(t, cfg, "graphy/myproj")
+	if len(second) != len(first) {
+		t.Errorf("file count changed after recovery: %d → %d (%v)", len(first), len(second), keys(second))
+	}
+	for name := range second {
+		if _, ok := first[name]; !ok {
+			t.Errorf("recovery minted a new file: %s", name)
 		}
 	}
 }
