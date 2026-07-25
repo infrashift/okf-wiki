@@ -31,31 +31,63 @@ type File struct {
 
 // langByExt maps file extensions to graphy language names.
 var langByExt = map[string]string{
-	".go":  "go",
-	".py":  "python",
-	".js":  "javascript",
-	".jsx": "javascript",
-	".mjs": "javascript",
-	".cjs": "javascript",
-	".ts":   "typescript",
-	".tsx":  "typescript",
-	".md":   "markdown",
-	".yaml": "yaml",
-	".yml":  "yaml",
-	".json": "json",
-	".cue":     "cue",
-	".tf":      "terraform",
-	".tfvars":  "terraform",
-	".sql":     "sql",
+	".go":     "go",
+	".py":     "python",
+	".js":     "javascript",
+	".jsx":    "javascript",
+	".mjs":    "javascript",
+	".cjs":    "javascript",
+	".ts":     "typescript",
+	".tsx":    "typescript",
+	".md":     "markdown",
+	".yaml":   "yaml",
+	".yml":    "yaml",
+	".json":   "json",
+	".cue":    "cue",
+	".tf":     "terraform",
+	".tfvars": "terraform",
+	".sql":    "sql",
 }
 
-// walkSkipDirs are pruned in the non-git fallback walk.
-var walkSkipDirs = map[string]bool{
-	"node_modules": true,
-	"vendor":       true,
-	"dist":         true,
-	"build":        true,
-	"target":       true,
+// defaultIgnorePatterns are applied in both listing modes, ahead of any
+// .graphyignore entries. ".graphy/" and ".okfw/" are already covered by the
+// dot-directory rule below and are named here anyway, because "graphy must
+// never read its own output" is a rule worth stating where someone will look
+// for it.
+var defaultIgnorePatterns = []string{
+	".graphy/",
+	".okfw/",
+	"node_modules/",
+	"vendor/",
+	"dist/",
+	"build/",
+	"target/",
+}
+
+// hasDotDirSegment reports whether any *directory* component of a
+// slash-separated relative path begins with a dot.
+//
+// Dot-directories hold tooling and state, not the source a graph should
+// describe: .terraform/ vendored provider modules, .venv/, .next/, .tox/ — and
+// graphy's own .graphy/ and okfw's .okfw/. Both listing modes apply this,
+// which is the point. The walk always pruned them locally, but `git ls-files`
+// returns whatever the repo tracks, and an okfw bundle's concept markdown is
+// tracked by design (okfw init gitignores only .index/, .graph.db, .todos/ and
+// ephemeral/). That asymmetry meant every build following a
+// `graphy export okfw` re-ingested the bundle as markdown heading nodes, which
+// then collided with the very code entities those concepts describe and joined
+// the clustering input that exported `parent:` fields depend on.
+//
+// The trailing component is left alone: a dotfile such as .eslintrc.json is a
+// real config file, and either mode may legitimately surface it.
+func hasDotDirSegment(rel string) bool {
+	segs := strings.Split(rel, "/")
+	for _, seg := range segs[:max(len(segs)-1, 0)] {
+		if len(seg) > 1 && seg[0] == '.' {
+			return true
+		}
+	}
+	return false
 }
 
 // Language returns the graphy language for a path ("" when unsupported).
@@ -66,11 +98,11 @@ func Language(path string) string {
 // List discovers, filters, and hashes the extractable files under root.
 // Only files with a supported language are returned, sorted by git/walk order.
 func List(root string) ([]File, error) {
-	rels, err := listPaths(root)
+	ignore, err := loadIgnore(filepath.Join(root, workspace.IgnoreFileName))
 	if err != nil {
 		return nil, err
 	}
-	ignore, err := loadIgnore(filepath.Join(root, workspace.IgnoreFileName))
+	rels, err := listPaths(root, ignore)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +110,7 @@ func List(root string) ([]File, error) {
 	var files []File
 	for _, rel := range rels {
 		lang := Language(rel)
-		if lang == "" || ignore.Match(rel) {
+		if lang == "" || hasDotDirSegment(rel) || ignore.Match(rel) {
 			continue
 		}
 		abs := filepath.Join(root, filepath.FromSlash(rel))
@@ -106,14 +138,15 @@ func List(root string) ([]File, error) {
 }
 
 // listPaths returns candidate repo-relative paths via git when available,
-// else a pruned filesystem walk.
-func listPaths(root string) ([]string, error) {
+// else a pruned filesystem walk. Both modes are filtered by the same ignore
+// set, so the choice of mode never changes which files a build sees.
+func listPaths(root string, ignore *ignoreSet) ([]string, error) {
 	if _, err := os.Stat(filepath.Join(root, ".git")); err == nil {
 		if paths, err := gitListFiles(root); err == nil {
 			return paths, nil
 		}
 	}
-	return walkFiles(root)
+	return walkFiles(root, ignore)
 }
 
 func gitListFiles(root string) ([]string, error) {
@@ -133,21 +166,28 @@ func gitListFiles(root string) ([]string, error) {
 	return paths, sc.Err()
 }
 
-func walkFiles(root string) ([]string, error) {
+// walkFiles walks root, pruning ignored directories so large ignored trees are
+// never descended into. The pruning rules mirror the filter List applies to
+// both modes, so the walk is an optimization rather than a second policy.
+func walkFiles(root string, ignore *ignoreSet) ([]string, error) {
 	var paths []string
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		name := fi.Name()
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return relErr
+		}
+		slash := filepath.ToSlash(rel)
 		if fi.IsDir() {
-			if p != root && (strings.HasPrefix(name, ".") || walkSkipDirs[name]) {
+			name := fi.Name()
+			if p != root && (strings.HasPrefix(name, ".") || ignore.Match(slash)) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		rel, _ := filepath.Rel(root, p)
-		paths = append(paths, filepath.ToSlash(rel))
+		paths = append(paths, slash)
 		return nil
 	})
 	return paths, err
@@ -159,15 +199,20 @@ func walkFiles(root string) ([]string, error) {
 // filepath.Match globs.
 type ignoreSet struct{ patterns []string }
 
+// newIgnoreSet returns a set seeded with defaultIgnorePatterns.
+func newIgnoreSet() *ignoreSet {
+	return &ignoreSet{patterns: append([]string(nil), defaultIgnorePatterns...)}
+}
+
 func loadIgnore(path string) (*ignoreSet, error) {
 	content, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &ignoreSet{}, nil
+		return newIgnoreSet(), nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	set := &ignoreSet{}
+	set := newIgnoreSet()
 	for _, line := range strings.Split(string(content), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -184,8 +229,12 @@ func (s *ignoreSet) Match(rel string) bool {
 	for _, p := range s.patterns {
 		switch {
 		case strings.HasSuffix(p, "/"):
+			// Matches the directory itself at any depth, and anything under
+			// it. The trailing HasSuffix case is what lets walkFiles prune a
+			// nested "web/node_modules" before descending into it.
 			dir := strings.Trim(p, "/")
-			if rel == dir || strings.HasPrefix(rel, dir+"/") || strings.Contains(rel, "/"+dir+"/") {
+			if rel == dir || strings.HasPrefix(rel, dir+"/") ||
+				strings.Contains(rel, "/"+dir+"/") || strings.HasSuffix(rel, "/"+dir) {
 				return true
 			}
 		case strings.HasPrefix(p, "/"):

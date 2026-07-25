@@ -2,7 +2,9 @@ package detect
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -60,6 +62,75 @@ func TestListWalkFallback(t *testing.T) {
 	for _, f := range files {
 		if f.SHA256 == "" || f.Size == 0 {
 			t.Errorf("%s: missing hash/size", f.Path)
+		}
+	}
+}
+
+// TestListModesAgree pins the invariant behind graphy's self-ingestion bug:
+// whether a repo happens to be a git checkout must never change which files a
+// build sees. The walk always pruned dot-directories locally; `git ls-files`
+// returns whatever the repo tracks, and okfw deliberately tracks its bundle's
+// concept markdown. So before both modes shared one filter, the build after a
+// `graphy export okfw` re-ingested the bundle as heading nodes.
+func TestListModesAgree(t *testing.T) {
+	seed := func(root string) {
+		write(t, root, "main.go", "package main\n")
+		write(t, root, "lib/util.py", "def f():\n    pass\n")
+		write(t, root, "docs/guide.md", "# guide\n")
+		// graphy's and okfw's own output, tracked by git in a real repo.
+		write(t, root, ".okfw/graphy/demo/handle--0001.md", "# Handle\n")
+		write(t, root, ".okfw/index.md", "# index\n")
+		write(t, root, ".graphy/graph.json", "{}\n")
+		// Other dot-directories that are state, not source.
+		write(t, root, ".terraform/modules/vendored/main.tf", "resource \"x\" \"y\" {}\n")
+		write(t, root, ".github/workflows/ci.yaml", "on: push\n")
+	}
+
+	walkRoot := t.TempDir()
+	seed(walkRoot)
+	walked, err := List(walkRoot)
+	if err != nil {
+		t.Fatalf("List (walk): %v", err)
+	}
+
+	gitRoot := t.TempDir()
+	seed(gitRoot)
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"-c", "user.email=t@example.com", "-c", "user.name=t", "add", "-A"},
+		{"-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-qm", "seed"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = gitRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Skipf("git unavailable: %v (%s)", err, out)
+		}
+	}
+	fromGit, err := List(gitRoot)
+	if err != nil {
+		t.Fatalf("List (git): %v", err)
+	}
+
+	walkPaths, gitPaths := paths(walked), paths(fromGit)
+	if !reflect.DeepEqual(walkPaths, gitPaths) {
+		t.Errorf("listing modes disagree:\n walk: %v\n  git: %v", walkPaths, gitPaths)
+	}
+	want := map[string]string{
+		"main.go":       "go",
+		"lib/util.py":   "python",
+		"docs/guide.md": "markdown",
+	}
+	if !reflect.DeepEqual(gitPaths, want) {
+		t.Errorf("git mode = %v, want %v", gitPaths, want)
+	}
+	// Named explicitly: these are the paths that caused the feedback loop.
+	for _, banned := range []string{
+		".okfw/graphy/demo/handle--0001.md",
+		".okfw/index.md",
+		".terraform/modules/vendored/main.tf",
+	} {
+		if _, ok := gitPaths[banned]; ok {
+			t.Errorf("%s was ingested; graphy must not read its own output", banned)
 		}
 	}
 }
