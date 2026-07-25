@@ -67,7 +67,7 @@ const communityKeyPrefix = "\x00community:"
 // item is one concept to emit (a community or a node).
 type item struct {
 	key         string // exports-bucket key
-	rid         string // recovery id written to frontmatter/marker (node id or "community:<n>")
+	rid         string // recovery id written to frontmatter/marker (node id or "community:<slug>")
 	title       string
 	conceptType string // OKF free-form type: "code-<entity>" / "code-community"
 	description string
@@ -119,8 +119,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	//      refactors keep their concept id (and history)
 	//   3. create a fresh concept
 	placed := map[string]placement{}
-	var recovered map[string]placement // rid → placement; scanned lazily
-	var pending []int                  // item indices still needing a concept
+	var recovered map[string]placement    // rid → placement; scanned lazily
+	var legacy map[string][]legacyCommunity // concept title → old records; scanned lazily
+	var pending []int                     // item indices still needing a concept
 	for i, it := range items {
 		rec, err := s.GetExport(it.key)
 		if err != nil {
@@ -129,6 +130,31 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		if rec != nil {
 			if _, statErr := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))); statErr == nil {
 				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+				continue
+			}
+		}
+		// Communities exported before label-slug keying are still keyed by
+		// their integer id. Re-key them in place rather than letting the
+		// stale sweep delete and recreate every one of them.
+		if it.community != nil {
+			if legacy == nil {
+				if legacy, err = legacyCommunities(cfg, s); err != nil {
+					return nil, err
+				}
+			}
+			if queue := legacy[it.title]; len(queue) > 0 {
+				lc := queue[0]
+				legacy[it.title] = queue[1:] // consumed; same-titled siblings take the rest
+				if err := s.PutExport(it.key, lc.rec); err != nil {
+					return nil, err
+				}
+				if lc.key != it.key {
+					if err := s.DeleteExport(lc.key); err != nil {
+						return nil, err
+					}
+				}
+				placed[it.key] = placement{lc.rec.ConceptID, lc.rec.RelPath}
+				res.Recovered++
 				continue
 			}
 		}
@@ -224,8 +250,8 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			}
 		}
 		if parentID == "" && it.node != nil {
-			if c, ok := nodeCommunity[it.node.ID]; ok {
-				if cp, ok := placed[communityKey(c)]; ok {
+			if ck, ok := nodeCommunity[it.node.ID]; ok {
+				if cp, ok := placed[ck]; ok {
 					parentID = cp.conceptID
 				}
 			}
@@ -270,9 +296,17 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			key string
 			rec store.ExportRecord
 		}
+		// A file some live item now points at is never stale, whatever key it
+		// used to be filed under. Without this, any re-keying (community
+		// label-slug migration, say) would delete the very concept it just
+		// adopted.
+		claimed := map[string]bool{}
+		for _, p := range placed {
+			claimed[p.relPath] = true
+		}
 		var gone []stale
 		if err := s.EachExport(func(key string, rec store.ExportRecord) error {
-			if !want[key] {
+			if !want[key] && !claimed[rec.RelPath] {
 				gone = append(gone, stale{key, rec})
 			}
 			return nil
@@ -298,15 +332,12 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 // selectItems picks the communities and significant nodes to export, ordered
 // deterministically (communities first).
-func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]int, error) {
+func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]string, error) {
 	var items []item
-	nodeCommunity := map[string]int{}
+	nodeCommunity := map[string]string{}
 
 	var comms []store.Community
 	if err := s.EachCommunity(func(c store.Community) error {
-		for _, id := range c.NodeIDs {
-			nodeCommunity[id] = c.ID
-		}
 		if len(c.NodeIDs) >= 2 && c.Label != "" {
 			comms = append(comms, c)
 		}
@@ -315,11 +346,17 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		return nil, nil, err
 	}
 	sort.Slice(comms, func(i, j int) bool { return comms[i].ID < comms[j].ID })
+	usedSlugs := map[string]bool{}
 	for i := range comms {
 		c := comms[i]
+		slug := uniqueSlug(bundle.Slugify(c.Label), usedSlugs)
+		key := communityKey(slug)
+		for _, id := range c.NodeIDs {
+			nodeCommunity[id] = key
+		}
 		items = append(items, item{
-			key:         communityKey(c.ID),
-			rid:         fmt.Sprintf("community:%d", c.ID),
+			key:         key,
+			rid:         "community:" + slug,
 			title:       "Community: " + c.Label,
 			conceptType: "code-community",
 			description: fmt.Sprintf("graphy community of %d code entities", len(c.NodeIDs)),
@@ -449,7 +486,76 @@ func truncateTitle(s string) string {
 	return strings.TrimRight(cut, " ,.;:-")
 }
 
-func communityKey(id int) string { return fmt.Sprintf("%s%d", communityKeyPrefix, id) }
+// legacyCommunity is a community export record under an older key scheme.
+type legacyCommunity struct {
+	key string
+	rec store.ExportRecord
+}
+
+// legacyCommunities indexes existing community export records by the title of
+// the concept they point at, so a community whose key scheme changed can adopt
+// its own concept instead of creating a duplicate.
+//
+// Title is the join key because it is the one thing that survives a re-keying:
+// it is rendered from the community label, which is exactly what the new key
+// is derived from. Records whose file has vanished are skipped — the stale
+// sweep will clean them up.
+//
+// Titles are not unique — two communities can name themselves after same-named
+// members in different packages — so each title holds a queue, sorted by key
+// for determinism, and callers consume one entry per matching community.
+func legacyCommunities(cfg *config.Config, s *store.Store) (map[string][]legacyCommunity, error) {
+	out := map[string][]legacyCommunity{}
+	err := s.EachExport(func(key string, rec store.ExportRecord) error {
+		if !strings.HasPrefix(key, communityKeyPrefix) {
+			return nil
+		}
+		content, err := os.ReadFile(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath)))
+		if err != nil {
+			return nil
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil || z.Title == "" {
+			return nil
+		}
+		out[z.Title] = append(out[z.Title], legacyCommunity{key: key, rec: rec})
+		return nil
+	})
+	for _, list := range out {
+		sort.Slice(list, func(i, j int) bool { return list[i].key < list[j].key })
+	}
+	return out, err
+}
+
+// communityKey is the exports-bucket key for a community, namespaced by its
+// label slug.
+//
+// Keying on the label rather than the detection id is what keeps community
+// concepts stable. Community ids are assigned by ordering on each community's
+// lexicographically-smallest member, so adding or removing a single node can
+// renumber most of the graph — and every renumbering used to delete and
+// recreate the affected concepts, losing their ids and repointing `parent:` on
+// every child. A label only changes when the community's most prominent member
+// does, which is far rarer.
+func communityKey(slug string) string { return communityKeyPrefix + slug }
+
+// uniqueSlug disambiguates two communities that name themselves after
+// same-named members (say, a `Store` in two packages). Callers must pass
+// communities in ascending id order, which — because ids are ordered by
+// smallest member — makes the suffix assignment as stable as the ids are.
+func uniqueSlug(slug string, used map[string]bool) string {
+	if !used[slug] {
+		used[slug] = true
+		return slug
+	}
+	for n := 2; ; n++ {
+		cand := fmt.Sprintf("%s-%d", slug, n)
+		if !used[cand] {
+			used[cand] = true
+			return cand
+		}
+	}
+}
 
 // placement locates an exported concept inside the bundle.
 type placement struct {

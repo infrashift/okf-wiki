@@ -62,7 +62,13 @@ No-op re-exports write nothing (content compared with previous
 timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
 renamed/moved entities keep their concept id: unique same-name-different-file
 or 1:1 same-file-same-kind pairings adopt the old concept and rename its file
-(rationale is excluded from the same-file pairing — see below).
+(rationale is excluded from the same-file pairing — see below). Community
+concepts are keyed in the exports bucket by their **label slug**, not their
+detection id: ids are ordered by each community's smallest member, so one added
+node renumbers most of them, and integer keys silently *repurposed* concepts
+(a stable concept id whose subject quietly became a different subsystem).
+Bundles exported under the old integer keys are re-keyed in place on the next
+export — matched by concept title, one record per same-titled community.
 
 Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
 via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`

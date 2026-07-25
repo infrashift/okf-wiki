@@ -135,7 +135,9 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 			if z.Type != "code-community" {
 				t.Errorf("community type = %q, want code-community", z.Type)
 			}
-			if z.Graphy.NodeID != "community:0" || z.Graphy.Entity != "community" {
+			// Keyed by label slug, not by the detection id: ids renumber
+			// whenever the partition shifts.
+			if z.Graphy.NodeID != "community:core" || z.Graphy.Entity != "community" {
 				t.Errorf("community graphy block = %+v", z.Graphy)
 			}
 			if !strings.Contains(text, "| [Alpha](./alpha--") {
@@ -791,5 +793,246 @@ func TestAdoptRenamesSkipsRationaleInFile(t *testing.T) {
 	}
 	if todoRec.ConceptID == whyRec.ConceptID {
 		t.Error("the TODO inherited the WHY's concept id")
+	}
+}
+
+// conceptIDsByTitle maps each exported concept's title to its OKF id.
+func conceptIDsByTitle(t *testing.T, files map[string][]byte) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	for name, content := range files {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		out[z.Title] = z.ID
+	}
+	return out
+}
+
+// TestExportCommunitySurvivesRenumbering is the point of keying communities by
+// label slug. Community ids are ordered by each community's smallest member, so
+// adding or removing one node renumbers most of the graph. Under integer keys
+// that deleted and recreated every affected concept, losing its id and
+// repointing `parent:` on all of its children.
+func TestExportCommunitySurvivesRenumbering(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, MinDegree: 3}
+
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := conceptIDsByTitle(t, conceptFiles(t, cfg, first.Dir))
+	communityID := before["Community: core"]
+	alphaID := before["Alpha"]
+	if communityID == "" || alphaID == "" {
+		t.Fatalf("expected a community and Alpha concept, got %v", before)
+	}
+
+	// Renumber: same members, same label, different detection id.
+	if err := s.SetCommunities(map[string]int{
+		"go:function:a.go#Alpha": 7,
+		"go:function:b.go#Beta":  7,
+		"go:function:c.go#Tiny":  7,
+	}, map[int]string{7: "core"}); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Deleted != 0 {
+		t.Errorf("renumbering churned the bundle: %+v", second)
+	}
+	after := conceptIDsByTitle(t, conceptFiles(t, cfg, second.Dir))
+	if after["Community: core"] != communityID {
+		t.Errorf("community concept id changed on renumbering: %q → %q",
+			communityID, after["Community: core"])
+	}
+	if after["Alpha"] != alphaID {
+		t.Errorf("child concept id changed: %q → %q", alphaID, after["Alpha"])
+	}
+}
+
+// TestExportMigratesLegacyCommunityKeys covers bundles exported before
+// label-slug keying, whose records are still filed under the integer id.
+func TestExportMigratesLegacyCommunityKeys(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, MinDegree: 3}
+
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, first.Dir)
+	before := conceptIDsByTitle(t, files)
+	communityID := before["Community: core"]
+
+	// Rewrite the export record under the old integer-keyed scheme.
+	newKey := communityKey("core")
+	rec, err := s.GetExport(newKey)
+	if err != nil || rec == nil {
+		t.Fatalf("community export record missing: %v", err)
+	}
+	if err := s.DeleteExport(newKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutExport(communityKeyPrefix+"0", *rec); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Deleted != 0 {
+		t.Errorf("legacy key was not migrated in place: %+v", second)
+	}
+	if second.Recovered != 1 {
+		t.Errorf("Recovered = %d, want 1 (the re-keyed community)", second.Recovered)
+	}
+	after := conceptIDsByTitle(t, conceptFiles(t, cfg, second.Dir))
+	if after["Community: core"] != communityID {
+		t.Errorf("community id changed during migration: %q → %q",
+			communityID, after["Community: core"])
+	}
+	// The old record must be gone, or the next stale sweep would delete the
+	// concept it points at.
+	if old, err := s.GetExport(communityKeyPrefix + "0"); err != nil || old != nil {
+		t.Errorf("legacy export record survived migration: %+v", old)
+	}
+	if got, err := s.GetExport(newKey); err != nil || got == nil {
+		t.Errorf("new key not written: %v", err)
+	}
+}
+
+func TestUniqueSlugDisambiguatesCollidingLabels(t *testing.T) {
+	used := map[string]bool{}
+	got := []string{
+		uniqueSlug("store", used),
+		uniqueSlug("store", used),
+		uniqueSlug("store", used),
+		uniqueSlug("other", used),
+	}
+	want := []string{"store", "store-2", "store-3", "other"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("uniqueSlug sequence = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestExportCollidingCommunityLabels: two communities can name themselves after
+// same-named members in different packages, and both must still get a concept.
+func TestExportCollidingCommunityLabels(t *testing.T) {
+	s, cfg := fixture(t)
+	// Split the three nodes into two communities that share a label.
+	if err := s.SetCommunities(map[string]int{
+		"go:function:a.go#Alpha": 0,
+		"go:function:b.go#Beta":  0,
+		"go:function:c.go#Tiny":  1,
+	}, map[int]string{0: "store", 1: "store"}); err != nil {
+		t.Fatal(err)
+	}
+	// A second member for community 1, so it clears the two-member threshold.
+	extra := model.Node{ID: "go:function:d.go#Delta", Label: "Delta", Kind: model.KindFunction,
+		Language: "go", File: "d.go", Span: model.Span{StartLine: 1}, Degree: 3}
+	if err := s.PutFile(store.FileRecord{Path: "d.go", NodeIDs: []string{extra.ID}}, []model.Node{extra}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCommunities(map[string]int{
+		"go:function:a.go#Alpha": 0,
+		"go:function:b.go#Beta":  0,
+		"go:function:c.go#Tiny":  1,
+		extra.ID:                 1,
+	}, map[int]string{0: "store", 1: "store"}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+	rids := map[string]bool{}
+	for name, content := range files {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		if z.Type == "code-community" {
+			rids[z.Graphy.NodeID] = true
+		}
+	}
+	if !rids["community:store"] || !rids["community:store-2"] {
+		t.Errorf("colliding labels did not get distinct keys: %v", rids)
+	}
+}
+
+// TestExportMigratesCollidingLegacyCommunities: community titles are not
+// unique, so the legacy index must hand out one record per same-titled
+// community rather than letting the first claim it and the rest create
+// duplicates (which would also strand the unclaimed records for the stale
+// sweep to delete).
+func TestExportMigratesCollidingLegacyCommunities(t *testing.T) {
+	s, cfg := fixture(t)
+	extra := model.Node{ID: "go:function:d.go#Delta", Label: "Delta", Kind: model.KindFunction,
+		Language: "go", File: "d.go", Span: model.Span{StartLine: 1}, Degree: 3}
+	if err := s.PutFile(store.FileRecord{Path: "d.go", NodeIDs: []string{extra.ID}}, []model.Node{extra}); err != nil {
+		t.Fatal(err)
+	}
+	// Two communities, same label.
+	assign := map[string]int{
+		"go:function:a.go#Alpha": 0, "go:function:b.go#Beta": 0,
+		"go:function:c.go#Tiny": 1, extra.ID: 1,
+	}
+	if err := s.SetCommunities(assign, map[int]string{0: "store", 1: "store"}); err != nil {
+		t.Fatal(err)
+	}
+	opts := OkfwOptions{Bundle: cfg, MinDegree: 3}
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := conceptFiles(t, cfg, first.Dir)
+
+	// Re-file both under the old integer-keyed scheme.
+	for slug, oldID := range map[string]string{"store": "0", "store-2": "1"} {
+		rec, err := s.GetExport(communityKey(slug))
+		if err != nil || rec == nil {
+			t.Fatalf("missing record for %s: %v", slug, err)
+		}
+		if err := s.DeleteExport(communityKey(slug)); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutExport(communityKeyPrefix+oldID, *rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Deleted != 0 {
+		t.Errorf("colliding legacy communities churned: %+v", second)
+	}
+	if second.Recovered != 2 {
+		t.Errorf("Recovered = %d, want 2 (both same-titled communities)", second.Recovered)
+	}
+	if after := conceptFiles(t, cfg, second.Dir); len(after) != len(before) {
+		t.Errorf("file count changed: %d → %d", len(before), len(after))
+	}
+	for _, slug := range []string{"store", "store-2"} {
+		if rec, err := s.GetExport(communityKey(slug)); err != nil || rec == nil {
+			t.Errorf("no record under new key %q", slug)
+		}
+	}
+	for _, oldID := range []string{"0", "1"} {
+		if rec, err := s.GetExport(communityKeyPrefix + oldID); err != nil || rec != nil {
+			t.Errorf("legacy record %q survived migration", oldID)
+		}
 	}
 }
