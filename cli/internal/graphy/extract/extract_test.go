@@ -3,8 +3,10 @@ package extract
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"okfw/cli/internal/graphy/detect"
@@ -66,6 +68,156 @@ func TestMarkdownGolden(t *testing.T)   { golden(t, "markdown", "sample.md") }
 func TestPythonGolden(t *testing.T)     { golden(t, "python", "sample.py") }
 func TestTypescriptGolden(t *testing.T) { golden(t, "typescript", "sample.ts") }
 func TestJavascriptGolden(t *testing.T) { golden(t, "javascript", "sample.js") }
+func TestYAMLGolden(t *testing.T)       { golden(t, "yaml", "sample.yaml") }
+func TestJSONGolden(t *testing.T)       { golden(t, "json", "sample.json") }
+
+func TestYAMLExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "yaml", "sample.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "deploy/compose.yaml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if res.Nodes[0].Kind != model.KindFile {
+		t.Errorf("Nodes[0] = %+v", res.Nodes[0])
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		if n.Kind != model.KindConfig {
+			t.Errorf("non-config entry node: %+v", n)
+		}
+		byLabel[n.Label] = n
+	}
+	// Top-level keys + second-level children from doc 0.
+	for _, want := range []string{"version", "services", "services.web", "services.db", "x-scripts"} {
+		if _, ok := byLabel[want]; !ok {
+			t.Errorf("missing entry %q (have %v)", want, labelsOf(res.Nodes[1:]))
+		}
+	}
+	// Doc 1 is a k8s manifest: one resource node, not key soup.
+	if _, ok := byLabel["Deployment/web"]; !ok {
+		t.Errorf("missing k8s manifest node (have %v)", labelsOf(res.Nodes[1:]))
+	}
+	if _, ok := byLabel["apiVersion"]; ok {
+		t.Errorf("k8s manifest leaked top-level keys")
+	}
+
+	// Path refs: attributed to their entry, both root- and file-relative
+	// readings emitted.
+	type ref struct{ from, name string }
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		if r.Relation != model.RelReferences {
+			t.Errorf("unexpected relation %s", r.Relation)
+		}
+		refs[ref{r.FromID, r.Name}] = true
+	}
+	servicesID := byLabel["services"].ID
+	if !refs[ref{servicesID, "scripts/start.sh"}] {
+		t.Errorf("root-relative ref missing: %v", refs)
+	}
+	if !refs[ref{servicesID, "deploy/scripts/start.sh"}] {
+		t.Errorf("file-relative ref missing: %v", refs)
+	}
+	if !refs[ref{byLabel["x-scripts"].ID, "tools/deploy.sh"}] {
+		t.Errorf("../ ref not normalized: %v", refs)
+	}
+}
+
+func TestJSONExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "json", "sample.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "package.json", Language: "json"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	for _, want := range []string{"name", "scripts", "scripts.build", "dependencies.left-pad"} {
+		if _, ok := byLabel[want]; !ok {
+			t.Errorf("missing entry %q (have %v)", want, labelsOf(res.Nodes[1:]))
+		}
+	}
+	found := false
+	for _, r := range res.Refs {
+		if r.Name == "src/index.js" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("src/index.js ref missing: %+v", res.Refs)
+	}
+}
+
+func TestConfigParseFailureDegradesToFileNode(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte("key: {{ .Values.name }}\n  broken: [unclosed\n")
+	res, err := session.Extract(detect.File{Path: "chart/tpl.yaml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatalf("template YAML must not error: %v", err)
+	}
+	if len(res.Nodes) != 1 || res.Nodes[0].Kind != model.KindFile {
+		t.Errorf("expected bare file node, got %+v", res.Nodes)
+	}
+}
+
+func TestConfigEntryCap(t *testing.T) {
+	session, err := NewSession([]string{"json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	var b strings.Builder
+	b.WriteString(`{"packages": {`)
+	for i := 0; i < 500; i++ {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `"node_modules/dep%d": {}`, i)
+	}
+	b.WriteString("}}")
+	res, err := session.Extract(detect.File{Path: "package-lock.json", Language: "json"}, []byte(b.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// file node + capped entries
+	if len(res.Nodes) > maxConfigEntries+1 {
+		t.Errorf("entry cap not applied: %d nodes", len(res.Nodes))
+	}
+}
+
+func labelsOf(nodes []model.Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Label
+	}
+	return out
+}
 
 func TestPythonExtractShape(t *testing.T) {
 	session, err := NewSession([]string{"python"})

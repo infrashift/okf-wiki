@@ -489,7 +489,7 @@ func joinRel(dir, href string) string {
 // symbolMemKeys mirrors the store's symbol indexing for the in-memory pass.
 func symbolMemKeys(n model.Node) []string {
 	switch n.Kind {
-	case model.KindFile, model.KindDoc, model.KindHeading, model.KindExternal:
+	case model.KindFile, model.KindDoc, model.KindHeading, model.KindConfig, model.KindExternal:
 		return nil
 	}
 	if n.External || n.Label == "" {

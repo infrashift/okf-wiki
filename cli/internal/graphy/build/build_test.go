@@ -52,6 +52,10 @@ func run() string {
 
 See [the entry point](../main.go).
 `)
+	write(t, root, "ci.yaml", `jobs:
+  test:
+    script: main.go
+`)
 	w, err := workspace.Init(root)
 	if err != nil {
 		t.Fatal(err)
@@ -82,8 +86,8 @@ func TestBuildResolvesAcrossFilesAndConfidences(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if stats.FilesExtracted != 3 {
-		t.Errorf("FilesExtracted = %d, want 3", stats.FilesExtracted)
+	if stats.FilesExtracted != 4 {
+		t.Errorf("FilesExtracted = %d, want 4", stats.FilesExtracted)
 	}
 
 	edges := edgeSet(t, s)
@@ -106,6 +110,10 @@ func TestBuildResolvesAcrossFilesAndConfidences(t *testing.T) {
 	// Doc link to a code file: EXTRACTED reference onto main.go's file node.
 	if c := edges["markdown:doc:docs/guide.md# -references-> go:file:main.go#"]; c != model.ConfExtracted {
 		t.Errorf("doc->code reference missing: %v", edges)
+	}
+	// Config path value resolves to the code file it names.
+	if c := edges["yaml:config:ci.yaml#jobs -references-> go:file:main.go#"]; c != model.ConfExtracted {
+		t.Errorf("config->code reference missing: %v", edges)
 	}
 
 	// External node exists and is marked external.

@@ -37,9 +37,12 @@ var langByExt = map[string]string{
 	".jsx": "javascript",
 	".mjs": "javascript",
 	".cjs": "javascript",
-	".ts":  "typescript",
-	".tsx": "typescript",
-	".md":  "markdown",
+	".ts":   "typescript",
+	".tsx":  "typescript",
+	".md":   "markdown",
+	".yaml": "yaml",
+	".yml":  "yaml",
+	".json": "json",
 }
 
 // walkSkipDirs are pruned in the non-git fallback walk.

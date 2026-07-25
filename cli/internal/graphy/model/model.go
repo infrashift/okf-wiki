@@ -28,6 +28,7 @@ const (
 	KindDoc       Kind = "doc"
 	KindHeading   Kind = "heading"
 	KindVariable  Kind = "variable"
+	KindConfig    Kind = "config" // a config-file entry (yaml/json key, manifest)
 	KindExternal  Kind = "external"
 )
 
