@@ -4,6 +4,7 @@ package analyze
 
 import (
 	"sort"
+	"strings"
 
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
@@ -26,6 +27,10 @@ type Report struct {
 	GodNodes    []model.Node
 	Communities []CommunitySummary
 	Orphans     int
+	// Rationale counts recorded intent by marker (WHY, DECISION, ADR, …).
+	Rationale map[string]int
+	// ADRs are the architecture decision records found in the repo.
+	ADRs []model.Node
 	// Cluster is how the communities were produced. Rendering it makes
 	// GRAPH_REPORT.md a visible regression signal if the flag plumbing breaks;
 	// it is the zero value for stores built before it was recorded.
@@ -44,6 +49,10 @@ var labelPriority = map[model.Kind]int{
 	model.KindType:      3,
 	model.KindDoc:       2,
 	model.KindFile:      1,
+	// Explicitly last. An absent kind already scores 0, but naming it stops a
+	// future contributor from "helpfully" ranking prose — a community called
+	// "WHY: don't hold the mutex here" would be a poor subsystem name.
+	model.KindRationale: 0,
 }
 
 // CommunityLabels names each community after its most prominent member:
@@ -84,6 +93,7 @@ func Build(s *store.Store, root string) (*Report, error) {
 		Root:       root,
 		Languages:  map[string]int{},
 		Confidence: map[model.Confidence]int{},
+		Rationale:  map[string]int{},
 	}
 
 	var nodes []model.Node
@@ -101,7 +111,17 @@ func Build(s *store.Store, root string) (*Report, error) {
 		if n.Degree == 0 {
 			r.Orphans++
 		}
+		if n.Kind != model.KindRationale {
+			continue
+		}
+		if _, marker, _, ok := model.ParseRationaleQual(qualOf(n.ID)); ok {
+			r.Rationale[marker]++
+			if marker == "ADR" {
+				r.ADRs = append(r.ADRs, n)
+			}
+		}
 	}
+	sort.Slice(r.ADRs, func(i, j int) bool { return r.ADRs[i].ID < r.ADRs[j].ID })
 
 	if err := s.EachEdge(func(e model.Edge) error {
 		r.Stats.Edges++
@@ -118,10 +138,12 @@ func Build(s *store.Store, root string) (*Report, error) {
 		return nil, err
 	}
 
-	// God nodes: highest-degree entities, skipping bare file scaffolding.
+	// God nodes: highest-degree entities, skipping bare file scaffolding and
+	// prose (a rationale's degree says nothing about a codebase's hot spots).
 	ranked := make([]model.Node, 0, len(nodes))
 	for _, n := range nodes {
-		if n.Kind == model.KindFile || n.Kind == model.KindHeading {
+		switch n.Kind {
+		case model.KindFile, model.KindHeading, model.KindRationale:
 			continue
 		}
 		ranked = append(ranked, n)
@@ -176,4 +198,13 @@ func Build(s *store.Store, root string) (*Report, error) {
 	}
 	r.Cluster = meta
 	return r, nil
+}
+
+// qualOf returns the qualified-name half of a node id
+// ("<lang>:<kind>:<file>#<qual>").
+func qualOf(nodeID string) string {
+	if i := strings.LastIndex(nodeID, "#"); i >= 0 {
+		return nodeID[i+1:]
+	}
+	return ""
 }

@@ -7,8 +7,13 @@ description: Query {{ .Repo }}'s code knowledge graph instead of scanning files.
 
 This repository has a pre-built knowledge graph (`.graphy/`) of its code:
 functions, methods, types, docs, and their typed relationships (calls,
-imports, inherits, implements, references, contains, defines), each tagged
-EXTRACTED, INFERRED, or AMBIGUOUS by resolution confidence.
+imports, inherits, implements, references, contains, defines, explains), each
+tagged EXTRACTED, INFERRED, or AMBIGUOUS by resolution confidence.
+
+It also records *why* the code is the way it is: `rationale` nodes, extracted
+from marked comments (WHY:, RATIONALE:, DECISION:, HACK:, FIXME:, TODO:) and
+from architecture decision records, linked to what they justify by `explains`
+edges. Check an entity's rationale before changing unfamiliar code.
 
 Prefer graph queries over file scanning for structural questions — one query
 replaces many file reads.
@@ -21,7 +26,11 @@ replaces many file reads.
 - `graphy explain <entity>` — entity card: location, signature, doc,
   community, and every in/out edge.
 - `graphy report` — GRAPH_REPORT.md: stats, god nodes (flow hubs),
-  detected communities. Read this first for architecture overviews.
+  detected communities, recorded rationale. Read this first for architecture
+  overviews.
+
+Asking "why does X work this way?" surfaces the rationale attached to X,
+offline, because rationale prose is keyword-searchable.
 
 Entities are matched by name (`CreateConcept`), qualified name
 (`Store.PutFile`), or id; ambiguous names list candidates.
@@ -34,4 +43,5 @@ queries reflect your changes.
 ## MCP alternative
 
 `graphy mcp` serves the same capabilities as MCP stdio tools
-(graphy_query, graphy_path, graphy_explain, graphy_report, graphy_update).
+(graphy_query, graphy_path, graphy_explain, graphy_rationale, graphy_report,
+graphy_update).

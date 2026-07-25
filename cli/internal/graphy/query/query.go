@@ -259,6 +259,10 @@ func KeywordSearch(s *store.Store, q string, limit int) ([]model.Node, error) {
 		label := strings.ToLower(n.Label)
 		file := strings.ToLower(n.File)
 		doc := strings.ToLower(n.Doc)
+		// Rationale prose lives in Body, and it is the whole point of a "why
+		// do we ..." question — searching it is what makes such questions work
+		// offline, without the LLM seed planner.
+		body := strings.ToLower(n.Body)
 		score := 0.0
 		for _, t := range terms {
 			switch {
@@ -268,7 +272,7 @@ func KeywordSearch(s *store.Store, q string, limit int) ([]model.Node, error) {
 				score += 5
 			case strings.Contains(file, t):
 				score += 2
-			case strings.Contains(doc, t):
+			case strings.Contains(doc, t), strings.Contains(body, t):
 				score += 1
 			}
 		}

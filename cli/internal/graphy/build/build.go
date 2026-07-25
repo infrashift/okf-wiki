@@ -7,6 +7,8 @@
 package build
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"math"
 	"os"
@@ -35,9 +37,36 @@ const ambiguousCap = 5
 
 // Options configures a build run.
 type Options struct {
-	Langs   []string // subset of languages ("" = all supported)
-	Full    bool     // wipe the extraction cache first
-	Cluster ClusterOptions
+	Langs     []string // subset of languages ("" = all supported)
+	Full      bool     // wipe the extraction cache first
+	Cluster   ClusterOptions
+	Rationale extract.RationaleOptions
+}
+
+// extractorVersion is bumped whenever extraction output changes shape. It
+// feeds the fingerprint below, so upgrading graphy re-extracts rather than
+// leaving pre-upgrade results in the per-file cache.
+const extractorVersion = 2
+
+// metaExtractFingerprintKey holds the fingerprint of the last build's
+// extraction configuration.
+const metaExtractFingerprintKey = "extract_fingerprint"
+
+// extractFingerprint hashes everything that affects extraction output.
+//
+// Extraction is cached per file by content sha256, which means new extraction
+// capability does NOT invalidate anything: without this, upgrading graphy and
+// running `graphy update` would produce a graph containing rationale only for
+// the files that happened to change since, silently and indefinitely.
+func (o Options) extractFingerprint() string {
+	markers := append([]string(nil), o.Rationale.Markers...)
+	dirs := append([]string(nil), o.Rationale.ADRDirs...)
+	sort.Strings(markers)
+	sort.Strings(dirs)
+	h := sha256.Sum256([]byte(fmt.Sprintf("v%d|rationale=%t|markers=%s|adrdirs=%s",
+		extractorVersion, o.Rationale.Enabled,
+		strings.Join(markers, ","), strings.Join(dirs, ","))))
+	return hex.EncodeToString(h[:])
 }
 
 // ClusterOptions selects the community detector. The zero value means Leiden
@@ -93,8 +122,26 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 		return nil, err
 	}
 	opts.Cluster = clusterOpts
+	if len(opts.Rationale.Markers) == 0 && len(opts.Rationale.ADRDirs) == 0 && !opts.Rationale.Enabled {
+		// A zero-valued Rationale means "unset", not "disabled" — several
+		// callers construct a bare Options and must get the same defaults as
+		// an explicit `graphy build`. Opting out goes through the CLI flag,
+		// which sets Enabled=false with the marker lists still populated.
+		opts.Rationale = extract.DefaultRationaleOptions()
+	}
 
-	session, err := extract.NewSession(opts.Langs)
+	// Force a full re-extract when the extraction configuration changed: the
+	// per-file cache keys on content alone and would otherwise hide it.
+	fingerprint := opts.extractFingerprint()
+	prevFingerprint, err := s.GetMeta(metaExtractFingerprintKey)
+	if err != nil {
+		return nil, err
+	}
+	if prevFingerprint != fingerprint {
+		opts.Full = true
+	}
+
+	session, err := extract.NewSessionWith(opts.Langs, extract.SessionOptions{Rationale: opts.Rationale})
 	if err != nil {
 		return nil, err
 	}
@@ -170,6 +217,10 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 		return nil, err
 	}
 
+	if err := s.PutMeta(metaExtractFingerprintKey, fingerprint); err != nil {
+		return nil, err
+	}
+
 	stats.Nodes, stats.Edges, err = s.Counts()
 	return stats, err
 }
@@ -177,17 +228,38 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 // clusterAndReport detects communities with the configured deterministic
 // detector, labels them, and renders GRAPH_REPORT.md.
 func clusterAndReport(w *workspace.Workspace, s *store.Store, opts ClusterOptions, stats *Stats) error {
+	// Rationale nodes are excluded from detection entirely. They are degree-2
+	// leaves that carry no modularity signal, but including them would perturb
+	// the partition — and every community id shift rewrites `parent:` on every
+	// concept in the exported bundle. Each one inherits its owner's community
+	// afterwards instead.
 	var nodes []model.Node
 	var nodeIDs []string
+	rationale := map[string]bool{}
 	if err := s.EachNode(func(n model.Node) error {
 		nodes = append(nodes, n)
+		if n.Kind == model.KindRationale {
+			rationale[n.ID] = true
+			return nil
+		}
 		nodeIDs = append(nodeIDs, n.ID)
 		return nil
 	}); err != nil {
 		return err
 	}
 	var pairs [][2]string
+	// owner maps a rationale to the entity it explains, for the inherit pass.
+	owner := map[string]string{}
 	if err := s.EachEdge(func(e model.Edge) error {
+		if rationale[e.Source] {
+			if e.Relation == model.RelExplains {
+				owner[e.Source] = e.Target
+			}
+			return nil
+		}
+		if rationale[e.Target] {
+			return nil
+		}
 		pairs = append(pairs, [2]string{e.Source, e.Target})
 		return nil
 	}); err != nil {
@@ -201,6 +273,11 @@ func clusterAndReport(w *workspace.Workspace, s *store.Store, opts ClusterOption
 	assign, err := detector.Detect(nodeIDs, pairs)
 	if err != nil {
 		return err
+	}
+	// Give each rationale its owner's community, so it sorts and exports
+	// alongside the code it explains. An orphan falls back to community 0.
+	for id := range rationale {
+		assign[id] = assign[owner[id]]
 	}
 	if err := s.SetCommunities(assign, analyze.CommunityLabels(nodes, assign)); err != nil {
 		return err
@@ -268,10 +345,22 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 	}); err != nil {
 		return err
 	}
+	// anyLang indexes the same symbols by bare name. Decision records name the
+	// entities they justify without knowing their implementation language —
+	// an ADR is markdown, so a language-keyed lookup would never match — so
+	// explains refs fall back to this. Sorted, because the map walk above is
+	// unordered and the choice between candidates must not vary run to run.
+	anyLang := map[string][]string{}
 	for _, n := range nodes {
 		for _, key := range symbolMemKeys(n) {
 			symbols[key] = append(symbols[key], n.ID)
+			if i := strings.IndexByte(key, 0); i >= 0 {
+				anyLang[key[i+1:]] = append(anyLang[key[i+1:]], n.ID)
+			}
 		}
+	}
+	for _, ids := range anyLang {
+		sort.Strings(ids)
 	}
 	var recs []store.FileRecord
 	fileFirstNode := map[string]string{} // rel path → file-level node id
@@ -314,20 +403,29 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 		lang := detect.Language(rec.Path)
 		for _, ref := range rec.Refs {
 			switch ref.Relation {
-			case model.RelReferences:
-				// Path-shaped ref (markdown links, config values): target any
-				// extracted file. Otherwise fall back to the symbol index —
-				// terraform addresses (var.x, aws_instance.web) and CUE
-				// definitions (#Concept) resolve like code symbols.
+			case model.RelReferences, model.RelExplains:
+				// Path-shaped ref (markdown links, config values, ADR links):
+				// target any extracted file. Otherwise fall back to the symbol
+				// index — terraform addresses (var.x, aws_instance.web), CUE
+				// definitions (#Concept) and the entities an ADR names all
+				// resolve like code symbols, inheriting the confidence ladder.
 				if target, ok := fileFirstNode[ref.Name]; ok {
 					addEdge(model.Edge{
 						Source: ref.FromID, Target: target,
-						Relation: model.RelReferences, Confidence: model.ConfExtracted,
+						Relation: ref.Relation, Confidence: model.ConfExtracted,
 						File: rec.Path, Line: ref.Line,
 					})
 					stats.RefsResolved++
 				} else {
 					candidates := lookupSymbol(symbols, lang, ref.Name)
+					if len(candidates) == 0 && ref.Relation == model.RelExplains {
+						candidates = anyLang[ref.Name]
+						if len(candidates) == 0 {
+							if i := strings.LastIndex(ref.Name, "."); i >= 0 && i+1 < len(ref.Name) {
+								candidates = anyLang[ref.Name[i+1:]]
+							}
+						}
+					}
 					resolveCandidates(ref, rec.Path, candidates, nodes, addEdge, stats)
 				}
 

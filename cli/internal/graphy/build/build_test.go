@@ -3,6 +3,7 @@ package build
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"okfw/cli/internal/graphy/cluster"
@@ -329,4 +330,174 @@ func TestBuildRejectsBadClusterOptions(t *testing.T) {
 			t.Errorf("%s: want an error", name)
 		}
 	}
+}
+
+// rationaleRepo is a repo with a marked comment and an ADR naming the function
+// that comment sits on.
+func rationaleRepo(t *testing.T) (*workspace.Workspace, *store.Store) {
+	t.Helper()
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/fixture\n\ngo 1.23\n")
+	write(t, root, "store.go", `package fixture
+
+// Save persists a record.
+// WHY: writes go through one transaction so a partial batch is never observed.
+func Save(key string) error { return nil }
+`)
+	write(t, root, "docs/adr/0001-use-one-txn.md", `# Use a single transaction
+
+## Decision
+
+All writes go through `+"`Save`"+`, which owns the transaction boundary.
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return w, s
+}
+
+func TestBuildLinksRationaleToCode(t *testing.T) {
+	w, s := rationaleRepo(t)
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var comment, adr string
+	if err := s.EachNode(func(n model.Node) error {
+		if n.Kind != model.KindRationale {
+			return nil
+		}
+		_, marker, _, ok := model.ParseRationaleQual(qualOfTest(n.ID))
+		if !ok {
+			t.Errorf("rationale id %q has no parseable qual", n.ID)
+			return nil
+		}
+		switch marker {
+		case "WHY":
+			comment = n.ID
+		case "ADR":
+			adr = n.ID
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if comment == "" || adr == "" {
+		t.Fatalf("missing rationale nodes: comment=%q adr=%q", comment, adr)
+	}
+
+	edges := edgeSet(t, s)
+	var fromComment, fromADR model.Confidence
+	var sawComment, sawADR bool
+	for key, conf := range edges {
+		if !strings.Contains(key, "-explains->") {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, comment+" "):
+			fromComment, sawComment = conf, true
+		case strings.HasPrefix(key, adr+" "):
+			fromADR, sawADR = conf, true
+		}
+	}
+	// A comment resolves in-file and unambiguously; an ADR's named symbol
+	// resolves through the global symbol index.
+	if !sawComment || fromComment != model.ConfExtracted {
+		t.Errorf("comment explains edge = %v (seen=%v), want EXTRACTED", fromComment, sawComment)
+	}
+	if !sawADR || fromADR != model.ConfInferred {
+		t.Errorf("ADR explains edge = %v (seen=%v), want INFERRED", fromADR, sawADR)
+	}
+}
+
+func TestBuildRationaleIsStableAcrossIncrementalRuns(t *testing.T) {
+	w, s := rationaleRepo(t)
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	first := edgeSet(t, s)
+	firstNodes := communityStamps(t, s)
+
+	if _, err := Run(w, s, Options{}); err != nil { // incremental, nothing changed
+		t.Fatal(err)
+	}
+	if got := len(communityStamps(t, s)); got != len(firstNodes) {
+		t.Errorf("node count changed on a no-op rebuild: %d then %d", len(firstNodes), got)
+	}
+	second := edgeSet(t, s)
+	if len(first) != len(second) {
+		t.Fatalf("edge count changed on a no-op rebuild: %d then %d", len(first), len(second))
+	}
+	for k, v := range first {
+		if second[k] != v {
+			t.Errorf("edge %s: %v then %v", k, v, second[k])
+		}
+	}
+}
+
+// TestBuildFingerprintForcesReExtract covers the hazard that makes rationale
+// silently absent: extraction is cached by file content, so new extraction
+// capability alone would never invalidate it.
+func TestBuildFingerprintForcesReExtract(t *testing.T) {
+	w, s := rationaleRepo(t)
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	// A second run changes nothing: everything is cached.
+	stats, err := Run(w, s, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesExtracted != 0 {
+		t.Fatalf("no-op rebuild extracted %d files, want 0", stats.FilesExtracted)
+	}
+
+	// Simulate an upgrade: the recorded fingerprint no longer matches.
+	if err := s.PutMeta(metaExtractFingerprintKey, "stale"); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = Run(w, s, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.FilesExtracted == 0 {
+		t.Error("a changed extraction fingerprint must force a full re-extract")
+	}
+}
+
+func TestBuildRationaleExcludedFromSymbolIndex(t *testing.T) {
+	w, s := rationaleRepo(t)
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.EachNode(func(n model.Node) error {
+		if n.Kind != model.KindRationale {
+			return nil
+		}
+		ids, err := s.LookupSymbol(n.Language, n.Label)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			if id == n.ID {
+				t.Errorf("rationale %q is in the symbol index; a code reference could resolve onto it", n.ID)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func qualOfTest(nodeID string) string {
+	if i := strings.LastIndex(nodeID, "#"); i >= 0 {
+		return nodeID[i+1:]
+	}
+	return ""
 }

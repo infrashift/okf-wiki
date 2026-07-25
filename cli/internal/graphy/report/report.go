@@ -5,6 +5,8 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 	"text/template"
 
 	"okfw/cli/internal/graphy/analyze"
@@ -22,6 +24,20 @@ type data struct {
 
 var funcs = template.FuncMap{
 	"conf": func(m map[model.Confidence]int, key string) int { return m[model.Confidence(key)] },
+	// markers renders the rationale tally in a stable order — map iteration
+	// would otherwise reshuffle the line on every build and churn the report.
+	"markers": func(m map[string]int) string {
+		keys := make([]string, 0, len(m))
+		for k := range m {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		parts := make([]string, 0, len(keys))
+		for _, k := range keys {
+			parts = append(parts, fmt.Sprintf("%d %s", m[k], k))
+		}
+		return strings.Join(parts, ", ")
+	},
 	"loc": func(n model.Node) string {
 		if n.File == "" {
 			return ""

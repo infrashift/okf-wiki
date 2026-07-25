@@ -43,6 +43,20 @@ Subsystems detected by modularity clustering.
 {{ end }}
 {{ end -}}
 
+{{ if .Rationale -}}
+## Rationale
+
+Recorded intent extracted from marked comments and decision records:
+{{ markers .Rationale }}.
+{{ if .ADRs }}
+| Decision record | Location |
+|---|---|
+{{- range .ADRs }}
+| {{ .Doc }} | {{ loc . }} |
+{{- end }}
+{{ end }}
+{{ end -}}
+
 ## Suggested queries
 
 ```

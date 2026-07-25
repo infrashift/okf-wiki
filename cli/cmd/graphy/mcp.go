@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -42,7 +43,8 @@ func mcpCmd() *cobra.Command {
 		Use:   "mcp",
 		Short: "Serve graph queries over MCP (stdio)",
 		Long: `Runs a Model Context Protocol stdio server exposing graphy_query,
-graphy_path, graphy_explain, graphy_report, and graphy_update. Register it in
+graphy_path, graphy_explain, graphy_rationale, graphy_report, and graphy_update.
+Register it in
 an agent's MCP config with command "graphy" and args ["mcp"].`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srv := &mcpServer{out: os.Stdout}
@@ -138,6 +140,13 @@ func mcpTools() []map[string]interface{} {
 		{
 			"name":        "graphy_explain",
 			"description": "Entity card: location, signature, doc, community, and all in/out edges with confidence.",
+			"inputSchema": obj(map[string]interface{}{
+				"entity": str("entity name or id"),
+			}, "entity"),
+		},
+		{
+			"name":        "graphy_rationale",
+			"description": "Why an entity is the way it is: the WHY/DECISION/HACK comments and architecture decision records attached to it. Read this before changing unfamiliar code.",
 			"inputSchema": obj(map[string]interface{}{
 				"entity": str("entity name or id"),
 			}, "entity"),
@@ -256,6 +265,8 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
 		return s.toolPath(args)
 	case "graphy_explain":
 		return s.toolExplain(args)
+	case "graphy_rationale":
+		return s.toolRationale(args)
 	case "graphy_report":
 		return s.toolReport()
 	case "graphy_update":
@@ -273,6 +284,7 @@ type mcpNode struct {
 	File   string `json:"file,omitempty"`
 	Line   int    `json:"line,omitempty"`
 	Doc    string `json:"doc,omitempty"`
+	Body   string `json:"body,omitempty"` // rationale prose
 	Degree int    `json:"degree,omitempty"`
 }
 
@@ -288,7 +300,7 @@ func compactNodes(nodes []queryNode) []mcpNode {
 	for i, n := range nodes {
 		out[i] = mcpNode{
 			ID: n.ID, Label: n.Label, Kind: string(n.Kind),
-			File: n.File, Line: n.Span.StartLine, Doc: n.Doc, Degree: n.Degree,
+			File: n.File, Line: n.Span.StartLine, Doc: n.Doc, Body: n.Body, Degree: n.Degree,
 		}
 	}
 	return out
@@ -389,6 +401,45 @@ func (s *mcpServer) toolExplain(args json.RawMessage) *toolResult {
 			"community": card.CommunityLabel,
 			"out":       edges(card.Out),
 			"in":        edges(card.In),
+		})
+	})
+}
+
+// toolRationale answers "why is this code like this" directly. It exists as a
+// first-class tool because that question is the whole point of rationale
+// nodes; without it an agent would have to infer the answer from an edge list.
+func (s *mcpServer) toolRationale(args json.RawMessage) *toolResult {
+	var p struct {
+		Entity string `json:"entity"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
+		return errResult(fmt.Errorf("entity is required"))
+	}
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		n, err := query.ResolveEntity(st, p.Entity)
+		if err != nil {
+			return errResult(err)
+		}
+		card, err := query.Explain(st, n.ID)
+		if err != nil {
+			return errResult(err)
+		}
+		// Rationale points AT the entity, so it arrives on the incoming side.
+		var out []mcpNode
+		for _, e := range card.In {
+			if e.Relation != model.RelExplains {
+				continue
+			}
+			src, err := st.GetNode(e.Source)
+			if err != nil || src == nil {
+				continue
+			}
+			out = append(out, compactNodes([]queryNode{*src})[0])
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return jsonResult(map[string]interface{}{
+			"entity":    n.Label,
+			"rationale": out,
 		})
 	})
 }
