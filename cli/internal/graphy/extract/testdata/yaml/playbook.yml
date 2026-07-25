@@ -1,0 +1,19 @@
+---
+- name: Provision web servers
+  hosts: webservers
+  vars_files:
+    - vars/common.yml
+  roles:
+    - common
+    - role: nginx
+      tags: [web]
+  tasks:
+    - name: Include hardening tasks
+      include_tasks: tasks/harden.yml
+    - name: Pull in the app role
+      include_role:
+        name: app
+
+- hosts: dbservers
+  roles:
+    - postgres

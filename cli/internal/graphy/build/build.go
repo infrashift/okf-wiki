@@ -440,6 +440,36 @@ func resolveImport(lang, goModule, importPath, sitePath string, dirHasFiles map[
 				return id
 			}
 		}
+	case "yaml":
+		// Ansible role references ("role:<name>") resolve by directory
+		// convention: the role's entry file if extracted, else a module node
+		// for the role directory, else external.
+		if name, ok := strings.CutPrefix(importPath, "role:"); ok {
+			bases := []string{"roles/" + name}
+			if d := dirOf(sitePath); d != "" {
+				bases = append([]string{joinRel(d, "roles/"+name)}, bases...)
+			}
+			for _, base := range bases {
+				for _, entry := range []string{"/tasks/main.yml", "/tasks/main.yaml", "/meta/main.yml", "/defaults/main.yml"} {
+					if id, ok := fileFirstNode[base+entry]; ok {
+						return id
+					}
+				}
+			}
+			for _, base := range bases {
+				for dir := range dirHasFiles {
+					if dir == base || strings.HasPrefix(dir, base+"/") {
+						id := model.NodeID("yaml", model.KindModule, base, base)
+						if _, ok := synthetic[id]; !ok {
+							synthetic[id] = model.Node{
+								ID: id, Label: "role:" + name, Kind: model.KindModule, Language: "yaml",
+							}
+						}
+						return id
+					}
+				}
+			}
+		}
 	case "terraform":
 		// Local module sources ("./modules/vpc") become internal module
 		// nodes when the directory holds extracted files; registry sources

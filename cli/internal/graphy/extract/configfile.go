@@ -69,6 +69,36 @@ func (c *configExtractor) Extract(file detect.File, src []byte) (*Result, error)
 	var attributions []docEntry
 
 	for i, doc := range docs {
+		// Ansible playbooks are sequences of plays — the semantic layer
+		// turns each play into a node and resolves its role references.
+		if plays := ansiblePlays(doc); c.lang == "yaml" && len(plays) > 0 {
+			for pi, p := range plays {
+				label, qual := playLabel(p, pi)
+				if i > 0 {
+					qual = fmt.Sprintf("doc%d.%s", i, qual)
+				}
+				id := addNode(model.Node{
+					ID:       model.NodeID(c.lang, model.KindConfig, file.Path, qual),
+					Label:    label,
+					Kind:     model.KindConfig,
+					Language: c.lang,
+					File:     file.Path,
+					Span:     model.Span{StartLine: p.node.Line},
+				}, fn.ID)
+				if id == "" {
+					continue
+				}
+				attributions = append(attributions, docEntry{value: p.node, id: id})
+				ansibleRoleRefs(p.node, id, &res.Refs)
+			}
+			continue
+		}
+		// Task-list files (roles/*/tasks/*.yml) are sequences too: no entry
+		// nodes, but include_role/import_role still resolve.
+		if c.lang == "yaml" && doc.Kind == yaml.SequenceNode {
+			ansibleRoleRefs(doc, fn.ID, &res.Refs)
+			continue
+		}
 		if kind, name, ok := k8sManifest(doc); ok {
 			label := kind
 			if name != "" {

@@ -72,6 +72,152 @@ func TestYAMLGolden(t *testing.T)      { golden(t, "yaml", "sample.yaml") }
 func TestJSONGolden(t *testing.T)      { golden(t, "json", "sample.json") }
 func TestCUEGolden(t *testing.T)       { golden(t, "cue", "sample.cue") }
 func TestTerraformGolden(t *testing.T) { golden(t, "terraform", "sample.tf") }
+func TestSQLGolden(t *testing.T)       { golden(t, "sql", "sample.sql") }
+func TestAnsibleGolden(t *testing.T)   { golden(t, "yaml", "playbook.yml") }
+
+func TestAnsibleExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "yaml", "playbook.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "site.yml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	named, ok := byLabel["play: Provision web servers"]
+	if !ok || named.Kind != model.KindConfig {
+		t.Errorf("named play node missing: %v", labelsOf(res.Nodes[1:]))
+	}
+	if _, ok := byLabel["play: dbservers"]; !ok {
+		t.Errorf("unnamed play should be labeled by hosts: %v", labelsOf(res.Nodes[1:]))
+	}
+
+	type ref struct {
+		from, name string
+		rel        model.Relation
+	}
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name, r.Relation}] = true
+	}
+	// Role references from the play: bare, mapping-form, and include_role.
+	for _, role := range []string{"role:common", "role:nginx", "role:app"} {
+		if !refs[ref{named.ID, role, model.RelImports}] {
+			t.Errorf("%s ref missing: %v", role, refs)
+		}
+	}
+	// Path values inside the play attribute to the play node.
+	if !refs[ref{named.ID, "vars/common.yml", model.RelReferences}] {
+		t.Errorf("vars_files path ref missing: %v", refs)
+	}
+	if !refs[ref{named.ID, "tasks/harden.yml", model.RelReferences}] {
+		t.Errorf("include_tasks path ref missing: %v", refs)
+	}
+}
+
+func TestAnsibleTaskListRoleRefs(t *testing.T) {
+	session, err := NewSession([]string{"yaml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src := []byte(`- name: Reuse the base role
+  include_role:
+    name: base
+- name: Copy a file
+  copy:
+    src: files/app.conf
+    dest: /etc/app.conf
+`)
+	res, err := session.Extract(detect.File{Path: "roles/web/tasks/main.yml", Language: "yaml"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Nodes) != 1 {
+		t.Errorf("task lists should not produce entry nodes: %v", labelsOf(res.Nodes))
+	}
+	found := false
+	for _, r := range res.Refs {
+		if r.Name == "role:base" && r.Relation == model.RelImports {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("include_role in task list missing: %+v", res.Refs)
+	}
+}
+
+func TestSQLExtractShape(t *testing.T) {
+	session, err := NewSession([]string{"sql"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	src, err := os.ReadFile(filepath.Join("testdata", "sql", "sample.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := session.Extract(detect.File{Path: "db/schema.sql", Language: "sql"}, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byLabel := map[string]model.Node{}
+	for _, n := range res.Nodes[1:] {
+		byLabel[n.Label] = n
+	}
+	checks := []struct {
+		label string
+		kind  model.Kind
+	}{
+		{"users", model.KindStruct},
+		{"orders", model.KindStruct},
+		{"order_summary", model.KindType},
+		{"touch_updated_at", model.KindFunction},
+	}
+	for _, c := range checks {
+		n, ok := byLabel[c.label]
+		if !ok || n.Kind != c.kind {
+			t.Errorf("%s = %+v, want kind %s (have %v)", c.label, n, c.kind, labelsOf(res.Nodes[1:]))
+		}
+	}
+	if len(res.Nodes) != 5 {
+		t.Errorf("commented-out CREATE leaked or node missing: %v", labelsOf(res.Nodes[1:]))
+	}
+
+	type ref struct{ from, name string }
+	refs := map[ref]bool{}
+	for _, r := range res.Refs {
+		refs[ref{r.FromID, r.Name}] = true
+	}
+	if !refs[ref{byLabel["orders"].ID, "users"}] {
+		t.Errorf("orders FK -> users missing: %v", refs)
+	}
+	// Self-referencing FK is emitted as a ref; resolution drops self-edges.
+	if !refs[ref{byLabel["orders"].ID, "orders"}] {
+		t.Errorf("self FK ref missing: %v", refs)
+	}
+	view := byLabel["order_summary"].ID
+	if !refs[ref{view, "users"}] || !refs[ref{view, "orders"}] {
+		t.Errorf("view FROM/JOIN refs missing: %v", refs)
+	}
+	// Tables must not emit FROM refs (their bodies have none), and string
+	// literals must not leak keywords.
+	if refs[ref{byLabel["users"].ID, "nothing"}] {
+		t.Errorf("string literal leaked a REFERENCES match")
+	}
+}
 
 func TestCUEExtractShape(t *testing.T) {
 	session, err := NewSession([]string{"cue"})
