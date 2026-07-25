@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -66,12 +67,17 @@ const MetaClusterKey = "cluster"
 type ExportRecord struct {
 	ConceptID string `json:"concept_id"`
 	RelPath   string `json:"rel_path"` // bundle-relative concept file path
-	// Members is a community's node membership as of the last export, and is
-	// empty for node records. It has to live here rather than be read from the
+	// MemberDigest is a community's node membership as of the last export,
+	// packed as sorted 64-bit hashes (see export.memberDigest); it is empty for
+	// node records. It has to live here rather than be read from the
 	// communities bucket because that bucket is rebuilt from scratch on every
 	// build — by export time the previous partition is gone, and comparing
 	// against it is the only way to recognize a community whose label changed.
-	Members []string `json:"members,omitempty"`
+	//
+	// The JSON key deliberately differs from the plain id list this replaced,
+	// so a record written by an older build decodes with an empty digest
+	// instead of failing: it simply gets refreshed on the next export.
+	MemberDigest []byte `json:"member_digest,omitempty"`
 }
 
 // Store is a graphy graph database handle.
@@ -564,6 +570,33 @@ func (s *Store) PutExport(nodeID string, rec ExportRecord) error {
 			return err
 		}
 		return tx.Bucket([]byte("exports")).Put([]byte(nodeID), data)
+	})
+}
+
+// PutExports writes several export records in a single transaction. An export
+// refreshes one record per community, and a separate commit (and fsync) for
+// each would dominate the cost of an otherwise no-op run.
+func (s *Store) PutExports(recs map[string]ExportRecord) error {
+	if len(recs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(recs))
+	for k := range recs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys) // deterministic write order
+	return s.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("exports"))
+		for _, k := range keys {
+			data, err := json.Marshal(recs[k])
+			if err != nil {
+				return err
+			}
+			if err := b.Put([]byte(k), data); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 

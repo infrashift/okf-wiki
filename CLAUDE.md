@@ -68,14 +68,23 @@ detection id: ids are ordered by each community's smallest member, so one added
 node renumbers most of them, and integer keys silently *repurposed* concepts
 (a stable concept id whose subject quietly became a different subsystem). When
 the label itself changes, the concept is adopted by **membership overlap**: the
-export record stores the community's members (the `communities` bucket is
-rebuilt every build, so the previous partition is gone by export time), and a
+export record stores the community's membership as sorted 64-bit hashes of its
+node ids (the `communities` bucket is rebuilt every build, so the previous
+partition is gone by export time — and hashing keeps exact set semantics, which
+the unambiguity proof below depends on, at a sixth of the size), and a
 successor sharing more than half the union inherits it. More-than-half is not a
 tuned threshold — successive partitions are disjoint, so at most one candidate
 on either side can exceed it, which makes the match unambiguous by
 construction; an even split or a merge therefore adopts nothing and starts
 fresh. Bundles exported under the old integer keys are re-keyed in place on the
 next export, matched by concept title, one record per same-titled community.
+The membership refresh has to run for *every* community, including those whose
+concept was already up to date (the live-record path skips the concept write, and
+a stale membership breaks the next relabelling) — so the digest is canonical and
+records already holding it are skipped, keeping a no-op export write-free; the
+rest go out in one `PutExports` transaction. Records predating the digest decode
+with an empty one (the JSON key changed with the type) and are backfilled on the
+next export.
 
 Community detection is **Leiden** by default (pure Go, in `cluster/`; Louvain
 via `--cluster-algorithm louvain`, plus `--cluster-resolution`/`--cluster-seed`

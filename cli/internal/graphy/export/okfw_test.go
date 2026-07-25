@@ -1,6 +1,7 @@
 package export
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1261,8 +1262,8 @@ func TestExportCommunityMembershipRefreshedOnEveryExport(t *testing.T) {
 	if err != nil || rec == nil {
 		t.Fatal("community record missing")
 	}
-	if len(rec.Members) != 6 {
-		t.Fatalf("stored membership = %d nodes, want the current 6: %v", len(rec.Members), rec.Members)
+	if got := len(digestSet(rec.MemberDigest)); got != 6 {
+		t.Fatalf("stored membership = %d nodes, want the current 6", got)
 	}
 
 	// Now relabel. Matching against the refreshed membership finds it; against
@@ -1280,30 +1281,146 @@ func TestExportCommunityMembershipRefreshedOnEveryExport(t *testing.T) {
 	}
 }
 
-func TestJaccard(t *testing.T) {
-	set := func(ids ...string) map[string]bool {
-		m := map[string]bool{}
-		for _, id := range ids {
-			m[id] = true
-		}
-		return m
-	}
+func TestJaccardDigest(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		a    []string
-		b    map[string]bool
+		a, b []string
 		want float64
 	}{
-		{"identical", []string{"a", "b"}, set("a", "b"), 1},
-		{"disjoint", []string{"a", "b"}, set("c", "d"), 0},
-		{"half", []string{"a", "b"}, set("b", "c"), 1.0 / 3},
-		{"subset", []string{"a", "b", "c"}, set("a", "b", "c", "d"), 0.75},
-		{"empty left", nil, set("a"), 0},
-		{"empty right", []string{"a"}, set(), 0},
-		{"repeated id counts once", []string{"a", "a", "b"}, set("a", "b"), 1},
+		{"identical", []string{"a", "b"}, []string{"a", "b"}, 1},
+		{"disjoint", []string{"a", "b"}, []string{"c", "d"}, 0},
+		{"one of three", []string{"a", "b"}, []string{"b", "c"}, 1.0 / 3},
+		{"subset", []string{"a", "b", "c"}, []string{"a", "b", "c", "d"}, 0.75},
+		{"empty left", nil, []string{"a"}, 0},
+		{"empty right", []string{"a"}, nil, 0},
+		{"repeated id counts once", []string{"a", "a", "b"}, []string{"a", "b"}, 1},
 	} {
-		if got := jaccard(tc.a, tc.b); got != tc.want {
-			t.Errorf("%s: jaccard = %v, want %v", tc.name, got, tc.want)
+		got := jaccardDigest(memberDigest(tc.a), digestSet(memberDigest(tc.b)))
+		if got != tc.want {
+			t.Errorf("%s: jaccardDigest = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+func TestMemberDigestIsCanonical(t *testing.T) {
+	// Order and duplicates must not change the blob: an unchanged membership
+	// has to compare equal byte for byte, or the write-skip never fires.
+	a := memberDigest([]string{"n3", "n1", "n2"})
+	b := memberDigest([]string{"n2", "n3", "n1", "n2"})
+	if !bytes.Equal(a, b) {
+		t.Errorf("digest depends on order or duplicates: %x vs %x", a, b)
+	}
+	if len(a) != 3*8 {
+		t.Errorf("digest = %d bytes, want 3 packed hashes", len(a))
+	}
+	if bytes.Equal(a, memberDigest([]string{"n1", "n2", "n4"})) {
+		t.Error("different memberships produced the same digest")
+	}
+	if len(memberDigest(nil)) != 0 {
+		t.Error("empty membership should produce an empty digest")
+	}
+	// Round-trips through the set decoder.
+	if got := len(digestSet(a)); got != 3 {
+		t.Errorf("digestSet = %d entries, want 3", got)
+	}
+}
+
+// TestExportBackfillsLegacyEmptyDigest: a community record written before
+// membership digests existed decodes with an empty one (see store.ExportRecord).
+// The next export must fill it in without touching the concept — an empty
+// digest that stayed empty would leave the community unable to survive its
+// next relabelling.
+func TestExportBackfillsLegacyEmptyDigest(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3}})
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := communityConcepts(t, cfg, first.Dir)["Community: alpha"]
+
+	// Strip the digest, leaving the record as an older build would have.
+	key := communityKey("alpha")
+	rec, err := s.GetExport(key)
+	if err != nil || rec == nil {
+		t.Fatalf("community record missing: %v", err)
+	}
+	rec.MemberDigest = nil
+	if err := s.PutExport(key, *rec); err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Deleted != 0 {
+		t.Errorf("legacy record churned the bundle: %+v", second)
+	}
+	back, err := s.GetExport(key)
+	if err != nil || back == nil {
+		t.Fatalf("record missing after backfill: %v", err)
+	}
+	if len(back.MemberDigest) != 4*8 {
+		t.Fatalf("digest = %d bytes, want 4 packed hashes", len(back.MemberDigest))
+	}
+
+	// And the backfilled digest is usable: the community survives a relabel.
+	partition(t, s, map[string][]int{"renamed": {0, 1, 2, 3}})
+	third, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Recovered != 1 {
+		t.Errorf("Recovered = %d, want 1 (adopted via the backfilled digest)", third.Recovered)
+	}
+	if got := communityConcepts(t, cfg, third.Dir)["Community: renamed"]; got != id {
+		t.Errorf("concept id changed after relabel: %q → %q", id, got)
+	}
+}
+
+// TestExportSkipsRedundantMembershipWrites: a no-op export must not rewrite
+// the community records. The refresh has to consider every community, so
+// without the digest comparison it would commit one write per community on
+// every run, forever.
+func TestExportSkipsRedundantMembershipWrites(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.GetExport(communityKey("alpha"))
+	if err != nil || before == nil {
+		t.Fatal("record missing")
+	}
+	if len(before.MemberDigest) != 3*8 {
+		t.Fatalf("digest = %d bytes, want 3 packed hashes", len(before.MemberDigest))
+	}
+
+	// Unchanged membership → nothing to write.
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetExport(communityKey("alpha"))
+	if err != nil || after == nil {
+		t.Fatal("record missing after re-export")
+	}
+	if !bytes.Equal(before.MemberDigest, after.MemberDigest) {
+		t.Error("digest changed across a no-op export")
+	}
+
+	// Changed membership → the record must follow.
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3, 4}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	grown, err := s.GetExport(communityKey("alpha"))
+	if err != nil || grown == nil {
+		t.Fatal("record missing after growth")
+	}
+	if len(grown.MemberDigest) != 5*8 {
+		t.Errorf("digest = %d bytes, want 5 packed hashes", len(grown.MemberDigest))
 	}
 }

@@ -11,11 +11,14 @@ package export
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -111,14 +114,25 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		return nil, err
 	}
 
+	// Membership digests feed both the adoption matching in pass 1 and the
+	// refresh that follows it.
+	digests := map[string][]byte{}
+	for _, it := range items {
+		if it.community != nil {
+			digests[it.key] = memberDigest(it.community.NodeIDs)
+		}
+	}
+
 	// Pass 1: ensure every item has a concept file; collect key → placement.
 	// Resolution order for an item with no live export record:
-	//   1. recovery scan — the mapping was lost (.graphy/ deleted) but the
+	//   1. community adoption — an older key scheme, or a changed label
+	//   2. recovery scan — the mapping was lost (.graphy/ deleted) but the
 	//      concept exists with the same embedded node identity
-	//   2. rename/move adoption — a vanished node's concept carries over so
+	//   3. rename/move adoption — a vanished node's concept carries over so
 	//      refactors keep their concept id (and history)
-	//   3. create a fresh concept
+	//   4. create a fresh concept
 	placed := map[string]placement{}
+	upToDate := map[string]bool{}      // community records already holding the current digest
 	var recovered map[string]placement // rid → placement; scanned lazily
 	var adopter *communityAdopter      // community re-key/relabel matching; loaded lazily
 	var pending []int                  // item indices still needing a concept
@@ -130,6 +144,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		if rec != nil {
 			if _, statErr := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))); statErr == nil {
 				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+				if it.community != nil && bytes.Equal(rec.MemberDigest, digests[it.key]) {
+					upToDate[it.key] = true
+				}
 				continue
 			}
 		}
@@ -142,7 +159,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 					return nil, err
 				}
 			}
-			if cr, ok := adopter.adopt(it); ok {
+			if cr, ok := adopter.adopt(it, digests[it.key]); ok {
 				rec, err := renameToTitle(cfg, cr.rec, it.title)
 				if err != nil {
 					return nil, err
@@ -213,23 +230,24 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		res.Created++
 	}
 
-	// Record each community's current membership. This runs for every
+	// Record each community's current membership. This has to consider every
 	// community, not just the ones written above, because the live-record path
 	// skips the write entirely — and a membership left stale would make the
-	// next relabelling unrecognizable. Members are sorted so the record does
-	// not depend on the store's map-iteration order.
+	// next relabelling unrecognizable. Records already holding the current
+	// digest are skipped, so an unchanged export writes nothing at all, and
+	// the rest go out in one transaction rather than one commit apiece.
+	updates := map[string]store.ExportRecord{}
 	for _, it := range items {
-		if it.community == nil {
+		if it.community == nil || upToDate[it.key] {
 			continue
 		}
 		p := placed[it.key]
-		members := append([]string(nil), it.community.NodeIDs...)
-		sort.Strings(members)
-		if err := s.PutExport(it.key, store.ExportRecord{
-			ConceptID: p.conceptID, RelPath: p.relPath, Members: members,
-		}); err != nil {
-			return nil, err
+		updates[it.key] = store.ExportRecord{
+			ConceptID: p.conceptID, RelPath: p.relPath, MemberDigest: digests[it.key],
 		}
+	}
+	if err := s.PutExports(updates); err != nil {
+		return nil, err
 	}
 
 	// Pass 2: render every concept in full — frontmatter (preserving id and
@@ -512,7 +530,7 @@ type communityRecord struct {
 	key     string
 	rec     store.ExportRecord
 	title   string
-	members map[string]bool
+	members map[uint64]bool // decoded from rec.MemberDigest
 }
 
 // communityAdopter matches communities to concepts they should inherit when
@@ -540,11 +558,9 @@ func newCommunityAdopter(cfg *config.Config, s *store.Store) (*communityAdopter,
 		if err != nil {
 			return nil
 		}
-		members := make(map[string]bool, len(rec.Members))
-		for _, id := range rec.Members {
-			members[id] = true
-		}
-		a.records = append(a.records, communityRecord{key: key, rec: rec, title: z.Title, members: members})
+		a.records = append(a.records, communityRecord{
+			key: key, rec: rec, title: z.Title, members: digestSet(rec.MemberDigest),
+		})
 		return nil
 	})
 	// bbolt iterates keys in byte order, but sorting explicitly keeps the
@@ -564,7 +580,7 @@ func newCommunityAdopter(cfg *config.Config, s *store.Store) (*communityAdopter,
 //  2. Membership overlap above communityOverlapThreshold — the label changed
 //     but it is the same subsystem, so the concept should follow the members
 //     rather than the name.
-func (a *communityAdopter) adopt(it item) (communityRecord, bool) {
+func (a *communityAdopter) adopt(it item, digest []byte) (communityRecord, bool) {
 	for i := range a.records {
 		r := &a.records[i]
 		if !a.consumed[r.key] && r.title == it.title {
@@ -581,7 +597,7 @@ func (a *communityAdopter) adopt(it item) (communityRecord, bool) {
 		if a.consumed[r.key] || len(r.members) == 0 {
 			continue
 		}
-		score := jaccard(it.community.NodeIDs, r.members)
+		score := jaccardDigest(digest, r.members)
 		// Strictly greater, and ties broken on key, so the choice never
 		// depends on iteration order.
 		if score > bestScore {
@@ -595,6 +611,70 @@ func (a *communityAdopter) adopt(it item) (communityRecord, bool) {
 	return a.records[best], true
 }
 
+// memberDigest packs a community's membership into sorted 64-bit FNV-1a hashes
+// of its node ids, big-endian.
+//
+// Hashing rather than storing the ids keeps the record roughly six times
+// smaller — node ids average ~60 bytes — without giving up exact set
+// semantics. At 64 bits, a collision anywhere in a 100k-node repo has
+// probability ~3e-10, and its worst effect would be to shift one similarity
+// score by a single member. That exactness is worth protecting: the
+// unambiguity argument below is a proof about real set overlap, and a
+// probabilistic sketch (MinHash and friends) would reduce it to an estimate
+// precisely where it is most sensitive — at the threshold. Matching a 1%
+// standard error would also cost ~78KB per community, far more than the exact
+// digest it replaces.
+//
+// Sorting makes the blob canonical, so an unchanged membership compares equal
+// byte for byte and its write can be skipped entirely.
+func memberDigest(ids []string) []byte {
+	seen := make(map[uint64]struct{}, len(ids))
+	for _, id := range ids {
+		h := fnv.New64a()
+		h.Write([]byte(id))
+		seen[h.Sum64()] = struct{}{}
+	}
+	hashes := make([]uint64, 0, len(seen))
+	for h := range seen {
+		hashes = append(hashes, h)
+	}
+	slices.Sort(hashes)
+	out := make([]byte, 8*len(hashes))
+	for i, h := range hashes {
+		binary.BigEndian.PutUint64(out[i*8:], h)
+	}
+	return out
+}
+
+// digestSet decodes a packed digest into a lookup set.
+func digestSet(b []byte) map[uint64]bool {
+	out := make(map[uint64]bool, len(b)/8)
+	for i := 0; i+8 <= len(b); i += 8 {
+		out[binary.BigEndian.Uint64(b[i:])] = true
+	}
+	return out
+}
+
+// jaccardDigest is |A∩B| / |A∪B| for a packed digest against a decoded set.
+// The digest is already deduplicated, so its length is |A|.
+func jaccardDigest(a []byte, b map[uint64]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter, n := 0, 0
+	for i := 0; i+8 <= len(a); i += 8 {
+		n++
+		if b[binary.BigEndian.Uint64(a[i:])] {
+			inter++
+		}
+	}
+	union := n + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
 // communityOverlapThreshold is the share of the union two membership sets must
 // have in common for one to count as the same subsystem as the other.
 //
@@ -606,29 +686,6 @@ func (a *communityAdopter) adopt(it item) (communityRecord, bool) {
 // or two that merge, therefore adopt nothing and start fresh — which is the
 // honest outcome, because no surviving concept is "the same subsystem".
 const communityOverlapThreshold = 0.5
-
-// jaccard is |A∩B| / |A∪B| for a slice and a set.
-func jaccard(a []string, b map[string]bool) float64 {
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	seen := make(map[string]bool, len(a))
-	inter := 0
-	for _, id := range a {
-		if seen[id] {
-			continue // membership is a set; tolerate a repeated id
-		}
-		seen[id] = true
-		if b[id] {
-			inter++
-		}
-	}
-	union := len(seen) + len(b) - inter
-	if union == 0 {
-		return 0
-	}
-	return float64(inter) / float64(union)
-}
 
 // communityKey is the exports-bucket key for a community, namespaced by its
 // label slug.
