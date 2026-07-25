@@ -17,6 +17,7 @@ import (
 	"okfw/cli/internal/graphy/build"
 	"okfw/cli/internal/graphy/cluster"
 	"okfw/cli/internal/graphy/export"
+	"okfw/cli/internal/graphy/extract"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/skills"
 	"okfw/cli/internal/graphy/store"
@@ -56,12 +57,13 @@ markdown links), resolve cross-file references into confidence-tagged edges,
 and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
 	}
 	cf := clusterFlags(cmd)
+	rf := rationaleFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		co, err := cf.options()
 		if err != nil {
 			return err
 		}
-		return runBuild(build.Options{Full: full, Langs: langs, Cluster: co})
+		return runBuild(build.Options{Full: full, Langs: langs, Cluster: co, Rationale: rf.options()})
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "wipe the extraction cache and re-extract everything")
 	cmd.Flags().StringSliceVar(&langs, "langs", nil, "restrict to these languages (default: all supported)")
@@ -77,14 +79,44 @@ func updateCmd() *cobra.Command {
 	// --cluster-algorithm louvain would be silently re-clustered with the
 	// default on the next `graphy update`.
 	cf := clusterFlags(cmd)
+	rf := rationaleFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		co, err := cf.options()
 		if err != nil {
 			return err
 		}
-		return runBuild(build.Options{Cluster: co})
+		return runBuild(build.Options{Cluster: co, Rationale: rf.options()})
 	}
 	return cmd
+}
+
+// rationaleFlagVals holds the raw rationale-extraction flag values.
+type rationaleFlagVals struct {
+	disabled bool
+	markers  []string
+	adrDirs  []string
+}
+
+// rationaleFlags binds the rationale-extraction flags shared by build and
+// update. All three feed the extraction fingerprint, so changing any of them
+// forces a full re-extract on the next build.
+func rationaleFlags(cmd *cobra.Command) *rationaleFlagVals {
+	v := &rationaleFlagVals{}
+	cmd.Flags().BoolVar(&v.disabled, "no-rationale", false,
+		"skip rationale extraction (WHY:/DECISION: comments and ADRs)")
+	cmd.Flags().StringSliceVar(&v.markers, "markers", extract.DefaultMarkers,
+		"comment markers that become rationale nodes")
+	cmd.Flags().StringSliceVar(&v.adrDirs, "adr-dirs", extract.DefaultADRDirs,
+		"directory names holding architecture decision records")
+	return v
+}
+
+func (v *rationaleFlagVals) options() extract.RationaleOptions {
+	return extract.RationaleOptions{
+		Enabled: !v.disabled,
+		Markers: v.markers,
+		ADRDirs: v.adrDirs,
+	}
 }
 
 // clusterFlagVals holds the raw community-detection flag values.
@@ -211,7 +243,8 @@ func exportCmd() *cobra.Command {
 func exportOkfwCmd() *cobra.Command {
 	var bundlePath, project, repoURL string
 	var minDegree int
-	var communitiesOnly, keepStale bool
+	var communitiesOnly, keepStale, noRationale bool
+	var rationaleMarkers []string
 	cmd := &cobra.Command{
 		Use:   "okfw",
 		Short: "Export the graph as concepts into an OKF Wiki bundle",
@@ -251,6 +284,9 @@ idempotent: concept ids and filenames stay stable across runs.`,
 				KeepStale:       keepStale,
 				RepoURL:         repoURL,
 				Generator:       "graphy " + version,
+
+				NoRationale:      noRationale,
+				RationaleMarkers: rationaleMarkers,
 			})
 			if err != nil {
 				return err
@@ -269,10 +305,13 @@ idempotent: concept ids and filenames stay stable across runs.`,
 	}
 	cmd.Flags().StringVar(&bundlePath, "bundle", "", "bundle location (default: discover .okfw from cwd)")
 	cmd.Flags().StringVar(&project, "project", "", "project folder under graphy/ (default: repo dir name)")
-	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept")
+	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept (does not apply to rationale)")
 	cmd.Flags().BoolVar(&communitiesOnly, "communities-only", false, "export only community concepts")
 	cmd.Flags().BoolVar(&keepStale, "keep-stale", false, "keep concepts whose graph nodes vanished")
 	cmd.Flags().StringVar(&repoURL, "repo-url", "", "web base URL (e.g. https://github.com/org/repo) — turns resource into a commit-pinned permalink")
+	cmd.Flags().BoolVar(&noRationale, "no-rationale", false, "skip rationale concepts")
+	cmd.Flags().StringSliceVar(&rationaleMarkers, "rationale-markers", export.DefaultRationaleMarkers,
+		"which rationale markers become concepts (extraction still captures all of them)")
 	return cmd
 }
 

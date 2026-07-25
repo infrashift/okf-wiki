@@ -37,7 +37,17 @@ type OkfwOptions struct {
 	KeepStale       bool   // keep concepts whose graph nodes vanished
 	RepoURL         string // optional web base (e.g. https://github.com/org/repo) for clickable resource permalinks
 	Generator       string // stamped into the graphy frontmatter block (e.g. "graphy 0.1.0")
+	// NoRationale skips rationale concepts entirely.
+	NoRationale bool
+	// RationaleMarkers selects which markers reach the bundle. Defaults to
+	// DefaultRationaleMarkers — deliberately narrower than what extraction
+	// captures, since a repo with 800 TODOs should not dump 800 concepts into
+	// a wiki by default. The rest stay queryable via graphy and MCP.
+	RationaleMarkers []string
 }
+
+// DefaultRationaleMarkers are the markers exported as concepts by default.
+var DefaultRationaleMarkers = []string{"WHY", "RATIONALE", "DECISION", "ADR"}
 
 // OkfwResult summarizes an export.
 type OkfwResult struct {
@@ -66,6 +76,9 @@ type item struct {
 	tags        []string
 	node        *model.Node      // nil for communities
 	community   *store.Community // nil for nodes
+	// parentKey overrides the community parent with another item's key. A
+	// rationale prefers to hang off the entity it explains.
+	parentKey string
 }
 
 // markerRe matches the machine-readable node marker embedded in concept
@@ -200,7 +213,17 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			return nil, fmt.Errorf("parsing %s: %w", p.relPath, err)
 		}
 		parentID := ""
-		if it.node != nil {
+		// A rationale prefers the entity it explains; that entity is only a
+		// valid parent if it was exported too, so fall through to the
+		// community otherwise (which is what ADRs, explaining many entities,
+		// always do). Never leave a dangling parent: the CUE schema requires
+		// a real concept id.
+		if it.parentKey != "" {
+			if p, ok := placed[it.parentKey]; ok {
+				parentID = p.conceptID
+			}
+		}
+		if parentID == "" && it.node != nil {
 			if c, ok := nodeCommunity[it.node.ID]; ok {
 				if cp, ok := placed[communityKey(c)]; ok {
 					parentID = cp.conceptID
@@ -208,9 +231,12 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			}
 		}
 		var body string
-		if it.community != nil {
+		switch {
+		case it.community != nil:
 			body = communityBody(it, nodes, linkTo)
-		} else {
+		case it.node != nil && it.node.Kind == model.KindRationale:
+			body = rationaleBody(s, it, nodes, linkTo)
+		default:
 			body = nodeBody(s, it, nodes, linkTo)
 		}
 		if !prev.Timestamp.IsZero() {
@@ -304,12 +330,20 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 	}
 
 	if !opts.CommunitiesOnly {
+		wantMarker := markerFilter(opts)
 		var selected []model.Node
 		for _, n := range nodes {
 			if n.External || n.Kind == model.KindFile || n.Kind == model.KindHeading {
 				continue
 			}
-			if n.Degree < opts.MinDegree {
+			if n.Kind == model.KindRationale {
+				// MinDegree is a significance proxy for code entities; for a
+				// rationale it is meaningless (always ~2). Marker selection
+				// takes its place.
+				if opts.NoRationale || !wantMarker(n.ID) {
+					continue
+				}
+			} else if n.Degree < opts.MinDegree {
 				continue
 			}
 			selected = append(selected, n)
@@ -317,6 +351,10 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		sort.Slice(selected, func(i, j int) bool { return selected[i].ID < selected[j].ID })
 		for i := range selected {
 			n := selected[i]
+			if n.Kind == model.KindRationale {
+				items = append(items, rationaleItem(s, n))
+				continue
+			}
 			desc := n.Doc
 			if desc == "" {
 				desc = n.Signature
@@ -335,6 +373,80 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		}
 	}
 	return items, nodeCommunity, nil
+}
+
+// markerFilter reports whether a rationale node id carries an exported marker.
+func markerFilter(opts OkfwOptions) func(nodeID string) bool {
+	want := opts.RationaleMarkers
+	if len(want) == 0 {
+		want = DefaultRationaleMarkers
+	}
+	set := make(map[string]bool, len(want))
+	for _, m := range want {
+		if m = strings.ToUpper(strings.TrimSpace(m)); m != "" {
+			set[m] = true
+		}
+	}
+	return func(nodeID string) bool {
+		_, marker, _, ok := model.ParseRationaleQual(qualOfNodeID(nodeID))
+		return ok && set[marker]
+	}
+}
+
+// rationaleItem builds the concept for one rationale node. It parents to the
+// entity the rationale explains when that entity was itself exported, falling
+// back to the community parent otherwise (which is what ADRs, explaining many
+// entities, always do).
+func rationaleItem(s *store.Store, n model.Node) item {
+	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
+	title := marker + ": " + truncateTitle(n.Doc)
+	if marker == "ADR" {
+		title = "ADR: " + truncateTitle(n.Doc)
+	}
+	parentKey := ""
+	if out, err := s.OutEdges(n.ID); err == nil {
+		var owners []string
+		for _, e := range out {
+			if e.Relation == model.RelExplains {
+				owners = append(owners, e.Target)
+			}
+		}
+		if len(owners) == 1 {
+			parentKey = owners[0]
+		}
+	}
+	return item{
+		key:         n.ID,
+		rid:         n.ID,
+		title:       title,
+		conceptType: "code-rationale",
+		description: n.Doc,
+		language:    n.Language,
+		entity:      string(model.KindRationale),
+		tags: []string{"graphy", "graphy/" + n.Language, "graphy/rationale",
+			"graphy/rationale/" + strings.ToLower(marker)},
+		node:      &n,
+		parentKey: parentKey,
+	}
+}
+
+// maxTitleRunes caps a rationale title. bundle.Slugify has no length cap and
+// NoteFilename concatenates the whole slug, so an untruncated prose first line
+// would produce a filename past the 255-byte limit. Truncation is on a word
+// boundary and deterministic, so the filename stays stable.
+const maxTitleRunes = 60
+
+func truncateTitle(s string) string {
+	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	r := []rune(s)
+	if len(r) <= maxTitleRunes {
+		return s
+	}
+	cut := string(r[:maxTitleRunes])
+	if i := strings.LastIndexByte(cut, ' '); i > maxTitleRunes/2 {
+		cut = cut[:i]
+	}
+	return strings.TrimRight(cut, " ,.;:-")
 }
 
 func communityKey(id int) string { return fmt.Sprintf("%s%d", communityKeyPrefix, id) }
@@ -541,11 +653,23 @@ func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []in
 		return nil, err
 	}
 	// Rule 2 — in-file renames: 1:1 pairing within (lang, kind, file).
+	//
+	// Rationale is excluded from this rule only. Its qualname already encodes
+	// owner, marker and ordinal, so rule 1 handles it correctly; but pairing
+	// on (lang, kind, file) alone would match a deleted WHY against a newly
+	// added TODO in the same file and adopt the old concept, carrying a stale
+	// identity into entirely unrelated reasoning.
+	rationaleKind := string(model.KindRationale)
 	renames := pair(
-		func(sc *staleConcept) string { return sc.lang + "\x00" + sc.kind + "\x00" + sc.file },
+		func(sc *staleConcept) string {
+			if sc.kind == rationaleKind {
+				return "\x00none-stale-" + sc.key
+			}
+			return sc.lang + "\x00" + sc.kind + "\x00" + sc.file
+		},
 		func(it item) string {
-			if it.node == nil {
-				return "\x00none"
+			if it.node == nil || it.node.Kind == model.KindRationale {
+				return "\x00none-" + it.key
 			}
 			return it.language + "\x00" + it.entity + "\x00" + it.node.File
 		},
@@ -649,9 +773,14 @@ func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(
 		fmt.Fprintf(&b, "- Location: `%s:%d`\n", n.File, n.Span.StartLine)
 	}
 	fmt.Fprintf(&b, "- Degree: %d\n", n.Degree)
+	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
+	return b.String()
+}
 
-	out, _ := s.OutEdges(n.ID)
-	in, _ := s.InEdges(n.ID)
+// writeEdgeSections appends the Outgoing and Incoming edge lists for a node.
+func writeEdgeSections(b *strings.Builder, s *store.Store, nodeID string, nodes map[string]model.Node, linkTo func(string) string) {
+	out, _ := s.OutEdges(nodeID)
+	in, _ := s.InEdges(nodeID)
 	writeEdges := func(title string, edges []model.Edge, forward bool) {
 		if len(edges) == 0 {
 			return
@@ -674,16 +803,37 @@ func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(
 				label = other.Label
 			}
 			if href := linkTo(otherID); href != "" {
-				fmt.Fprintf(&b, "- %s [%s](%s) (%s)\n", e.Relation, label, href, e.Confidence)
+				fmt.Fprintf(b, "- %s [%s](%s) (%s)\n", e.Relation, label, href, e.Confidence)
 			} else if ok && other.File != "" {
-				fmt.Fprintf(&b, "- %s %s — `%s:%d` (%s)\n", e.Relation, label, other.File, other.Span.StartLine, e.Confidence)
+				fmt.Fprintf(b, "- %s %s — `%s:%d` (%s)\n", e.Relation, label, other.File, other.Span.StartLine, e.Confidence)
 			} else {
-				fmt.Fprintf(&b, "- %s %s (%s)\n", e.Relation, label, e.Confidence)
+				fmt.Fprintf(b, "- %s %s (%s)\n", e.Relation, label, e.Confidence)
 			}
 		}
 	}
 	writeEdges("Outgoing", out, true)
 	writeEdges("Incoming", in, false)
+}
+
+// rationaleBody renders a rationale concept: the recorded reasoning, where it
+// was written, and what it explains.
+//
+// Deliberately no Degree bullet — it is meaningless for a rationale, and it
+// would rewrite the concept whenever an unrelated edge count shifted.
+func rationaleBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(string) string) string {
+	n := *it.node
+	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
+	var b strings.Builder
+	if n.Body != "" {
+		b.WriteString(n.Body + "\n\n")
+	} else if n.Doc != "" {
+		b.WriteString(n.Doc + "\n\n")
+	}
+	fmt.Fprintf(&b, "- Marker: %s\n", marker)
+	if n.File != "" {
+		fmt.Fprintf(&b, "- Source: `%s:%d`\n", n.File, n.Span.StartLine)
+	}
+	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
 	return b.String()
 }
 
@@ -777,4 +927,10 @@ func syncBundle(cfg *config.Config, relPaths []string) error {
 		}
 	}
 	return nil
+}
+
+// qualOfNodeID returns just the qualified-name half of a node id.
+func qualOfNodeID(id string) string {
+	_, _, _, qual, _ := parseNodeID(id)
+	return qual
 }

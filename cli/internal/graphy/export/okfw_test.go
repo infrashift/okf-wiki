@@ -492,3 +492,304 @@ func keys(m map[string][]byte) []string {
 	}
 	return out
 }
+
+// rationaleFixture adds two rationale nodes to the standard fixture: a WHY on
+// the exported Alpha, and a TODO on the below-threshold Tiny.
+func rationaleFixture(t *testing.T) (*store.Store, *config.Config) {
+	t.Helper()
+	s, cfg := fixture(t)
+
+	why := model.Node{
+		ID:    model.NodeID("go", model.KindRationale, "a.go", model.RationaleQual("Alpha", "WHY", 0)),
+		Label: "WHY: callers depend on the ordering", Kind: model.KindRationale, Language: "go",
+		File: "a.go", Span: model.Span{StartLine: 1},
+		Doc:    "callers depend on the ordering",
+		Body:   "callers depend on the ordering\nso this must not be reordered.",
+		Degree: 2,
+	}
+	todo := model.Node{
+		ID:    model.NodeID("go", model.KindRationale, "c.go", model.RationaleQual("Tiny", "TODO", 0)),
+		Label: "TODO: delete once the migration lands", Kind: model.KindRationale, Language: "go",
+		File: "c.go", Span: model.Span{StartLine: 1},
+		Doc: "delete once the migration lands", Degree: 2,
+	}
+	extra := []model.Node{why, todo}
+	if err := s.PutFile(store.FileRecord{Path: "rationale.go", NodeIDs: ids(extra)}, extra); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges([]model.Edge{
+		{Source: "go:function:a.go#Alpha", Target: "go:function:b.go#Beta",
+			Relation: model.RelCalls, Confidence: model.ConfExtracted},
+		{Source: why.ID, Target: "go:function:a.go#Alpha",
+			Relation: model.RelExplains, Confidence: model.ConfExtracted},
+		{Source: todo.ID, Target: "go:function:c.go#Tiny",
+			Relation: model.RelExplains, Confidence: model.ConfExtracted},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assign := map[string]int{
+		"go:function:a.go#Alpha": 0, "go:function:b.go#Beta": 0, "go:function:c.go#Tiny": 0,
+		why.ID: 0, todo.ID: 0,
+	}
+	if err := s.SetCommunities(assign, map[int]string{0: "core"}); err != nil {
+		t.Fatal(err)
+	}
+	return s, cfg
+}
+
+// findByNodeID returns the concept exported for a graph node. Matching on the
+// frontmatter node id rather than on body text matters: a rationale's prose
+// also appears in its owner's edge list, so a substring search would find the
+// wrong file.
+func findByNodeID(t *testing.T, files map[string][]byte, nodeID string) (string, *config.Concept, string) {
+	t.Helper()
+	for name, content := range files {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		if z.Graphy != nil && z.Graphy.NodeID == nodeID {
+			return name, z, string(content)
+		}
+	}
+	return "", nil, ""
+}
+
+// findByType returns the single concept of a given OKF type.
+func findByType(t *testing.T, files map[string][]byte, typ string) (string, *config.Concept, string) {
+	t.Helper()
+	for name, content := range files {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		if z.Type == typ {
+			return name, z, string(content)
+		}
+	}
+	return "", nil, ""
+}
+
+// rationale node ids used across the export tests.
+var (
+	whyNodeID  = model.NodeID("go", model.KindRationale, "a.go", model.RationaleQual("Alpha", "WHY", 0))
+	todoNodeID = model.NodeID("go", model.KindRationale, "c.go", model.RationaleQual("Tiny", "TODO", 0))
+)
+
+// TestExportRationaleExemptFromMinDegree: degree is a significance proxy for
+// code entities and meaningless for rationale, so the threshold must not apply.
+func TestExportRationaleExemptFromMinDegree(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{
+		Bundle: cfg, MinDegree: 3, RationaleMarkers: []string{"WHY", "TODO"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+
+	// Both degree-2 rationales are exported...
+	if _, z, _ := findByNodeID(t, files, whyNodeID); z == nil {
+		t.Error("degree-2 WHY rationale was dropped by the min-degree filter")
+	} else if z.Type != "code-rationale" {
+		t.Errorf("rationale type = %q, want code-rationale", z.Type)
+	}
+	if _, z, _ := findByNodeID(t, files, todoNodeID); z == nil {
+		t.Error("degree-2 TODO rationale was dropped by the min-degree filter")
+	}
+	// ...while the degree-1 code entity it hangs off is still excluded.
+	if name, _, _ := findByNodeID(t, files, "go:function:c.go#Tiny"); name != "" {
+		t.Errorf("degree-1 function Tiny was exported as %s; min-degree should still apply to code", name)
+	}
+}
+
+func TestExportRationaleMarkerFilter(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+	// The default set excludes TODO deliberately: a repo with 800 TODOs should
+	// not dump 800 concepts into the wiki.
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+	if _, z, _ := findByNodeID(t, files, whyNodeID); z == nil {
+		t.Error("WHY is in the default marker set but was not exported")
+	}
+	if name, _, _ := findByNodeID(t, files, todoNodeID); name != "" {
+		t.Errorf("TODO is not in the default marker set but was exported as %s", name)
+	}
+}
+
+func TestExportRationaleParentsToItsOwner(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{
+		Bundle: cfg, MinDegree: 3, RationaleMarkers: []string{"WHY", "TODO"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+
+	_, alpha, _ := findByNodeID(t, files, "go:function:a.go#Alpha")
+	if alpha == nil {
+		t.Fatal("Alpha concept missing")
+	}
+	_, community, _ := findByType(t, files, "code-community")
+	if community == nil {
+		t.Fatal("community concept missing")
+	}
+
+	// Alpha was exported, so its WHY parents to Alpha.
+	if _, why, _ := findByNodeID(t, files, whyNodeID); why == nil {
+		t.Fatal("WHY concept missing")
+	} else if why.Parent != alpha.ID {
+		t.Errorf("WHY parent = %q, want Alpha's id %q", why.Parent, alpha.ID)
+	}
+	// Tiny was NOT exported, so its TODO falls back to the community parent
+	// rather than dangling (a dangling parent fails the CUE schema).
+	if _, todo, _ := findByNodeID(t, files, todoNodeID); todo == nil {
+		t.Fatal("TODO concept missing")
+	} else if todo.Parent != community.ID {
+		t.Errorf("TODO parent = %q, want the community id %q", todo.Parent, community.ID)
+	}
+}
+
+func TestExportRationaleBodyAndTags(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+	_, z, text := findByNodeID(t, files, whyNodeID)
+	if z == nil {
+		t.Fatal("WHY concept missing")
+	}
+	if !strings.Contains(text, "so this must not be reordered.") {
+		t.Error("multi-line rationale Body is missing from the concept body")
+	}
+	if !strings.Contains(text, "- Marker: WHY") {
+		t.Error("marker bullet missing")
+	}
+	if strings.Contains(text, "- Degree:") {
+		t.Error("rationale concepts must omit Degree: it is meaningless and would churn the file")
+	}
+	var sawTag bool
+	for _, tag := range z.Tags {
+		if tag == "graphy/rationale/why" {
+			sawTag = true
+		}
+	}
+	if !sawTag {
+		t.Errorf("missing per-marker tag, got %v", z.Tags)
+	}
+	if z.Graphy == nil || z.Graphy.Entity != "rationale" {
+		t.Errorf("graphy block = %+v, want entity rationale", z.Graphy)
+	}
+}
+
+// TestReexportRationaleUnchanged is the idempotency guarantee: a no-op
+// re-export must write nothing at all.
+func TestReexportRationaleUnchanged(t *testing.T) {
+	s, cfg := rationaleFixture(t)
+	opts := OkfwOptions{Bundle: cfg, MinDegree: 3, RationaleMarkers: []string{"WHY", "TODO"}}
+	first, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Created == 0 {
+		t.Fatal("first export created nothing")
+	}
+	before := conceptFiles(t, cfg, first.Dir)
+
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Created != 0 || second.Updated != 0 || second.Deleted != 0 {
+		t.Errorf("re-export was not a no-op: %+v", second)
+	}
+	if second.Unchanged != len(before) {
+		t.Errorf("Unchanged = %d, want %d", second.Unchanged, len(before))
+	}
+	after := conceptFiles(t, cfg, second.Dir)
+	for name, content := range before {
+		if string(after[name]) != string(content) {
+			t.Errorf("%s changed on a no-op re-export", name)
+		}
+	}
+}
+
+// TestExportRationaleTitleIsTruncated: bundle.Slugify has no length cap and
+// NoteFilename concatenates the whole slug, so an untruncated prose line would
+// produce a filename past the 255-byte limit.
+func TestExportRationaleTitleIsTruncated(t *testing.T) {
+	s, cfg := fixture(t)
+	long := strings.TrimSpace(strings.Repeat("a very long winded explanation ", 20))
+	n := model.Node{
+		ID:    model.NodeID("go", model.KindRationale, "a.go", model.RationaleQual("Alpha", "WHY", 0)),
+		Label: "WHY: " + long, Kind: model.KindRationale, Language: "go",
+		File: "a.go", Span: model.Span{StartLine: 1}, Doc: long, Degree: 2,
+	}
+	if err := s.PutFile(store.FileRecord{Path: "r.go", NodeIDs: []string{n.ID}}, []model.Node{n}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range conceptFiles(t, cfg, res.Dir) {
+		if len(name) > 255 {
+			t.Errorf("filename is %d bytes, past the filesystem limit: %s", len(name), name)
+		}
+	}
+}
+
+// TestAdoptRenamesSkipsRationaleInFile guards a real regression: rule 2 pairs
+// 1:1 within (lang, kind, file), which for rationale would match a deleted WHY
+// against a newly added TODO and carry a stale identity into unrelated
+// reasoning.
+func TestAdoptRenamesSkipsRationaleInFile(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, MinDegree: 3, RationaleMarkers: []string{"WHY", "TODO"}}
+
+	why := model.Node{
+		ID:    model.NodeID("go", model.KindRationale, "a.go", model.RationaleQual("Alpha", "WHY", 0)),
+		Label: "WHY: the original reason", Kind: model.KindRationale, Language: "go",
+		File: "a.go", Span: model.Span{StartLine: 1}, Doc: "the original reason", Degree: 2,
+	}
+	if err := s.PutFile(store.FileRecord{Path: "r.go", NodeIDs: []string{why.ID}}, []model.Node{why}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	whyRec, err := s.GetExport(why.ID)
+	if err != nil || whyRec == nil {
+		t.Fatalf("WHY was not exported: %v", err)
+	}
+
+	// Replace the WHY with an unrelated TODO in the same file.
+	todo := model.Node{
+		ID:    model.NodeID("go", model.KindRationale, "a.go", model.RationaleQual("Alpha", "TODO", 0)),
+		Label: "TODO: something entirely different", Kind: model.KindRationale, Language: "go",
+		File: "a.go", Span: model.Span{StartLine: 1}, Doc: "something entirely different", Degree: 2,
+	}
+	if err := s.PutFile(store.FileRecord{Path: "r.go", NodeIDs: []string{todo.ID}}, []model.Node{todo}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Renamed != 0 {
+		t.Errorf("Renamed = %d: a deleted WHY was adopted by an unrelated TODO", res.Renamed)
+	}
+	todoRec, err := s.GetExport(todo.ID)
+	if err != nil || todoRec == nil {
+		t.Fatal("TODO was not exported")
+	}
+	if todoRec.ConceptID == whyRec.ConceptID {
+		t.Error("the TODO inherited the WHY's concept id")
+	}
+}
