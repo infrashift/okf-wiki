@@ -26,6 +26,10 @@ type Report struct {
 	GodNodes    []model.Node
 	Communities []CommunitySummary
 	Orphans     int
+	// Cluster is how the communities were produced. Rendering it makes
+	// GRAPH_REPORT.md a visible regression signal if the flag plumbing breaks;
+	// it is the zero value for stores built before it was recorded.
+	Cluster store.ClusterMeta
 }
 
 // labelPriority prefers meaningful code entities when naming a community.
@@ -165,5 +169,11 @@ func Build(s *store.Store, root string) (*Report, error) {
 		return r.Communities[i].ID < r.Communities[j].ID
 	})
 	r.Stats.Communities = len(r.Communities)
+
+	meta, err := s.GetClusterMeta()
+	if err != nil {
+		return nil, err
+	}
+	r.Cluster = meta
 	return r, nil
 }

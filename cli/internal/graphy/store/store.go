@@ -49,6 +49,19 @@ type Community struct {
 	NodeIDs []string `json:"node_ids"`
 }
 
+// ClusterMeta records how the persisted community assignment was produced, so
+// a graph's communities can be reproduced or explained after the fact. It is
+// stored as JSON under MetaClusterKey in the meta bucket, and surfaced in
+// GRAPH_REPORT.md.
+type ClusterMeta struct {
+	Algorithm  string  `json:"algorithm"`
+	Resolution float64 `json:"resolution"`
+	Seed       uint64  `json:"seed"`
+}
+
+// MetaClusterKey is the meta bucket key holding the JSON ClusterMeta.
+const MetaClusterKey = "cluster"
+
 // ExportRecord maps a graph node to the okfw concept it was exported as.
 type ExportRecord struct {
 	ConceptID string `json:"concept_id"`
@@ -587,6 +600,37 @@ func (s *Store) GetMeta(key string) (string, error) {
 		return nil
 	})
 	return v, err
+}
+
+// DeleteMeta removes a metadata key. Deleting an absent key is not an error.
+func (s *Store) DeleteMeta(key string) error {
+	return s.db.Update(func(tx *bolt.Tx) error {
+		return tx.Bucket([]byte("meta")).Delete([]byte(key))
+	})
+}
+
+// PutClusterMeta records how the current community assignment was produced.
+func (s *Store) PutClusterMeta(m ClusterMeta) error {
+	blob, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+	return s.PutMeta(MetaClusterKey, string(blob))
+}
+
+// GetClusterMeta returns the recorded clustering parameters. A store built
+// before this was recorded yields the zero value and no error, so callers can
+// render "unknown" rather than fail.
+func (s *Store) GetClusterMeta() (ClusterMeta, error) {
+	var m ClusterMeta
+	raw, err := s.GetMeta(MetaClusterKey)
+	if err != nil || raw == "" {
+		return m, err
+	}
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return ClusterMeta{}, nil // unreadable legacy value: treat as absent
+	}
+	return m, nil
 }
 
 // Counts returns node and edge totals.

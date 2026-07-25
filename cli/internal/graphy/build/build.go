@@ -8,6 +8,7 @@ package build
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"regexp"
 	"sort"
@@ -34,8 +35,39 @@ const ambiguousCap = 5
 
 // Options configures a build run.
 type Options struct {
-	Langs []string // subset of languages ("" = all supported)
-	Full  bool     // wipe the extraction cache first
+	Langs   []string // subset of languages ("" = all supported)
+	Full    bool     // wipe the extraction cache first
+	Cluster ClusterOptions
+}
+
+// ClusterOptions selects the community detector. The zero value means Leiden
+// at resolution 1 with seed 1 — which is deliberate: several callers (the MCP
+// update tool, `graphy update`) construct a bare Options, and they must get
+// the same defaults as an explicit `graphy build`.
+type ClusterOptions struct {
+	Algorithm  cluster.Algorithm // "" → cluster.DefaultAlgorithm
+	Resolution float64           // 0 → cluster.DefaultResolution
+	Seed       uint64            // 0 → cluster.DefaultSeed
+}
+
+// normalized fills in defaults and rejects invalid values. Validation lives
+// here rather than only at the CLI so that every caller is covered.
+func (c ClusterOptions) normalized() (ClusterOptions, error) {
+	algo, err := cluster.ParseAlgorithm(string(c.Algorithm))
+	if err != nil {
+		return c, err
+	}
+	c.Algorithm = algo
+	if c.Resolution < 0 || math.IsNaN(c.Resolution) || math.IsInf(c.Resolution, 0) {
+		return c, fmt.Errorf("invalid clustering resolution %v (want a finite value >= 0)", c.Resolution)
+	}
+	if c.Resolution == 0 {
+		c.Resolution = cluster.DefaultResolution
+	}
+	if c.Seed == 0 {
+		c.Seed = cluster.DefaultSeed
+	}
+	return c, nil
 }
 
 // Stats summarizes what a build did.
@@ -49,10 +81,19 @@ type Stats struct {
 	RefsResolved   int
 	RefsAmbiguous  int
 	RefsDropped    int
+	// ClusterAlgorithm is the detector that produced Communities.
+	ClusterAlgorithm string
 }
 
 // Run executes the pipeline against the workspace's store.
 func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
+	// Validate before any extraction work, so a bad flag fails fast.
+	clusterOpts, err := opts.Cluster.normalized()
+	if err != nil {
+		return nil, err
+	}
+	opts.Cluster = clusterOpts
+
 	session, err := extract.NewSession(opts.Langs)
 	if err != nil {
 		return nil, err
@@ -125,7 +166,7 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 	if err := s.RecomputeDegrees(); err != nil {
 		return nil, err
 	}
-	if err := clusterAndReport(w, s, stats); err != nil {
+	if err := clusterAndReport(w, s, opts.Cluster, stats); err != nil {
 		return nil, err
 	}
 
@@ -133,9 +174,9 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 	return stats, err
 }
 
-// clusterAndReport detects communities (deterministic Louvain), labels them,
-// and renders GRAPH_REPORT.md.
-func clusterAndReport(w *workspace.Workspace, s *store.Store, stats *Stats) error {
+// clusterAndReport detects communities with the configured deterministic
+// detector, labels them, and renders GRAPH_REPORT.md.
+func clusterAndReport(w *workspace.Workspace, s *store.Store, opts ClusterOptions, stats *Stats) error {
 	var nodes []model.Node
 	var nodeIDs []string
 	if err := s.EachNode(func(n model.Node) error {
@@ -153,7 +194,10 @@ func clusterAndReport(w *workspace.Workspace, s *store.Store, stats *Stats) erro
 		return err
 	}
 
-	detector := cluster.Louvain{Seed: louvainSeed}
+	detector, err := cluster.New(opts.Algorithm, opts.Resolution, opts.Seed)
+	if err != nil {
+		return err
+	}
 	assign, err := detector.Detect(nodeIDs, pairs)
 	if err != nil {
 		return err
@@ -161,9 +205,19 @@ func clusterAndReport(w *workspace.Workspace, s *store.Store, stats *Stats) erro
 	if err := s.SetCommunities(assign, analyze.CommunityLabels(nodes, assign)); err != nil {
 		return err
 	}
-	if err := s.PutMeta("louvain_seed", fmt.Sprint(louvainSeed)); err != nil {
+	if err := s.PutClusterMeta(store.ClusterMeta{
+		Algorithm:  string(opts.Algorithm),
+		Resolution: opts.Resolution,
+		Seed:       opts.Seed,
+	}); err != nil {
 		return err
 	}
+	// Drop the key this replaced; it was never read back, which is exactly how
+	// it rotted into recording an algorithm that was no longer the default.
+	if err := s.DeleteMeta("louvain_seed"); err != nil {
+		return err
+	}
+	stats.ClusterAlgorithm = string(opts.Algorithm)
 
 	rep, err := analyze.Build(s, w.Root)
 	if err != nil {
@@ -177,10 +231,6 @@ func clusterAndReport(w *workspace.Workspace, s *store.Store, stats *Stats) erro
 	defer f.Close()
 	return report.Render(f, rep)
 }
-
-// louvainSeed pins community detection for reproducible assignments; it is
-// recorded in the store's meta bucket for auditability.
-const louvainSeed = 1
 
 func extractFile(session *extract.Session, s *store.Store, f detect.File) error {
 	src, err := os.ReadFile(f.AbsPath)

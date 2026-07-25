@@ -29,7 +29,11 @@ The most-connected entities — the graph's flow hubs.
 
 ## Communities
 
-Subsystems detected by modularity clustering (Louvain, deterministic seed).
+{{ if .Cluster.Algorithm -}}
+Subsystems detected by modularity clustering (`{{ .Cluster.Algorithm }}`, resolution {{ .Cluster.Resolution }}, seed {{ .Cluster.Seed }}).
+{{- else -}}
+Subsystems detected by modularity clustering.
+{{- end }}
 
 {{ range .Communities -}}
 ### {{ .Label }} ({{ .Size }} nodes)

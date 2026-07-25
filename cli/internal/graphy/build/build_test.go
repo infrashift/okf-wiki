@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"okfw/cli/internal/graphy/cluster"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
@@ -246,5 +247,86 @@ func TestBuildResolvesAnsibleRolesAndSQLForeignKeys(t *testing.T) {
 	// Cross-file FK resolves through the symbol index.
 	if c := edges["sql:struct:db/orders.sql#orders -references-> sql:struct:db/users.sql#users"]; c != model.ConfInferred {
 		t.Errorf("orders->users FK missing: %v", edges)
+	}
+}
+
+// communityStamps snapshots every node's persisted community assignment.
+func communityStamps(t *testing.T, s *store.Store) map[string]int {
+	t.Helper()
+	out := map[string]int{}
+	if err := s.EachNode(func(n model.Node) error {
+		out[n.ID] = n.Community
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestBuildClusteringIsReproducible(t *testing.T) {
+	w, s := fixtureRepo(t)
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	first := communityStamps(t, s)
+
+	if _, err := Run(w, s, Options{Full: true}); err != nil {
+		t.Fatal(err)
+	}
+	second := communityStamps(t, s)
+
+	if len(first) != len(second) {
+		t.Fatalf("node count changed across builds: %d then %d", len(first), len(second))
+	}
+	for id, c := range first {
+		if second[id] != c {
+			t.Errorf("%s community %d then %d", id, c, second[id])
+		}
+	}
+}
+
+func TestBuildDefaultsToLeidenAndHonoursTheAlgorithmFlag(t *testing.T) {
+	w, s := fixtureRepo(t)
+
+	// A bare Options must mean Leiden — `graphy update` and the MCP update
+	// tool both construct one.
+	stats, err := Run(w, s, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.ClusterAlgorithm != string(cluster.AlgoLeiden) {
+		t.Errorf("zero-value Options used %q, want leiden", stats.ClusterAlgorithm)
+	}
+	meta, err := s.GetClusterMeta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Algorithm != string(cluster.AlgoLeiden) || meta.Resolution != 1 || meta.Seed != 1 {
+		t.Errorf("recorded cluster meta = %+v, want leiden/1/1", meta)
+	}
+
+	// Opting into Louvain must be recorded, so the report and any later audit
+	// reflect what actually ran.
+	if _, err := Run(w, s, Options{Cluster: ClusterOptions{Algorithm: cluster.AlgoLouvain}}); err != nil {
+		t.Fatal(err)
+	}
+	meta, err = s.GetClusterMeta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Algorithm != string(cluster.AlgoLouvain) {
+		t.Errorf("recorded algorithm = %q, want louvain", meta.Algorithm)
+	}
+}
+
+func TestBuildRejectsBadClusterOptions(t *testing.T) {
+	w, s := fixtureRepo(t)
+	for name, opts := range map[string]ClusterOptions{
+		"unknown algorithm":   {Algorithm: "louvian"},
+		"negative resolution": {Resolution: -1},
+	} {
+		if _, err := Run(w, s, Options{Cluster: opts}); err == nil {
+			t.Errorf("%s: want an error", name)
+		}
 	}
 }

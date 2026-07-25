@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
 	"okfw/cli/internal/graphy/build"
+	"okfw/cli/internal/graphy/cluster"
 	"okfw/cli/internal/graphy/export"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/skills"
@@ -52,9 +54,14 @@ func buildCmd() *cobra.Command {
 		Long: `Runs the pipeline: detect files, extract changed ones (tree-sitter AST +
 markdown links), resolve cross-file references into confidence-tagged edges,
 and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuild(build.Options{Full: full, Langs: langs})
-		},
+	}
+	cf := clusterFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		co, err := cf.options()
+		if err != nil {
+			return err
+		}
+		return runBuild(build.Options{Full: full, Langs: langs, Cluster: co})
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "wipe the extraction cache and re-extract everything")
 	cmd.Flags().StringSliceVar(&langs, "langs", nil, "restrict to these languages (default: all supported)")
@@ -62,13 +69,51 @@ and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
 }
 
 func updateCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "update",
 		Short: "Incrementally refresh the graph (alias of build)",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuild(build.Options{})
-		},
 	}
+	// The clustering flags belong here too: without them, a graph built with
+	// --cluster-algorithm louvain would be silently re-clustered with the
+	// default on the next `graphy update`.
+	cf := clusterFlags(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		co, err := cf.options()
+		if err != nil {
+			return err
+		}
+		return runBuild(build.Options{Cluster: co})
+	}
+	return cmd
+}
+
+// clusterFlagVals holds the raw community-detection flag values.
+type clusterFlagVals struct {
+	algorithm  string
+	resolution float64
+	seed       uint64
+}
+
+// clusterFlags binds the community-detection flags shared by build and update,
+// so the two cannot drift apart.
+func clusterFlags(cmd *cobra.Command) *clusterFlagVals {
+	v := &clusterFlagVals{}
+	cmd.Flags().StringVar(&v.algorithm, "cluster-algorithm", string(cluster.DefaultAlgorithm),
+		"community detection algorithm: "+strings.Join(cluster.Algorithms(), " or "))
+	cmd.Flags().Float64Var(&v.resolution, "cluster-resolution", cluster.DefaultResolution,
+		"resolution parameter: higher splits into more, smaller communities")
+	cmd.Flags().Uint64Var(&v.seed, "cluster-seed", cluster.DefaultSeed,
+		"RNG seed for reproducible community assignments")
+	return v
+}
+
+// options validates the flags and converts them for the build.
+func (v *clusterFlagVals) options() (build.ClusterOptions, error) {
+	algo, err := cluster.ParseAlgorithm(v.algorithm)
+	if err != nil {
+		return build.ClusterOptions{}, err
+	}
+	return build.ClusterOptions{Algorithm: algo, Resolution: v.resolution, Seed: v.seed}, nil
 }
 
 func runBuild(opts build.Options) error {
@@ -91,8 +136,9 @@ func runBuild(opts build.Options) error {
 	}
 	fmt.Printf("Scanned %d files (%d extracted, %d purged)\n",
 		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged)
-	fmt.Printf("Graph: %d nodes, %d edges, %d communities (%d refs resolved, %d ambiguous, %d dropped)\n",
-		stats.Nodes, stats.Edges, stats.Communities, stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
+	fmt.Printf("Graph: %d nodes, %d edges, %d communities via %s (%d refs resolved, %d ambiguous, %d dropped)\n",
+		stats.Nodes, stats.Edges, stats.Communities, stats.ClusterAlgorithm,
+		stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
 	fmt.Printf("Wrote %s\n", w.JSONPath())
 	return nil
 }
