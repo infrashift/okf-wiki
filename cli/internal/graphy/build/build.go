@@ -10,6 +10,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"regexp"
@@ -25,11 +26,6 @@ import (
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
 )
-
-// syntheticPath is the pseudo file record that owns nodes belonging to no
-// source file (external modules, internal package nodes). It is rewritten on
-// every build; detect never lists .graphy/, so it cannot collide.
-const syntheticPath = ".graphy/synthetic"
 
 // ambiguousCap is the most candidate targets an unresolved reference may fan
 // out to before it is dropped instead of tagged AMBIGUOUS.
@@ -61,11 +57,13 @@ const metaExtractFingerprintKey = "extract_fingerprint"
 func (o Options) extractFingerprint() string {
 	markers := append([]string(nil), o.Rationale.Markers...)
 	dirs := append([]string(nil), o.Rationale.ADRDirs...)
+	langs := append([]string(nil), o.Langs...)
 	sort.Strings(markers)
 	sort.Strings(dirs)
-	h := sha256.Sum256([]byte(fmt.Sprintf("v%d|rationale=%t|markers=%s|adrdirs=%s",
+	sort.Strings(langs)
+	h := sha256.Sum256([]byte(fmt.Sprintf("v%d|rationale=%t|markers=%s|adrdirs=%s|langs=%s",
 		extractorVersion, o.Rationale.Enabled,
-		strings.Join(markers, ","), strings.Join(dirs, ","))))
+		strings.Join(markers, ","), strings.Join(dirs, ","), strings.Join(langs, ","))))
 	return hex.EncodeToString(h[:])
 }
 
@@ -103,16 +101,33 @@ func (c ClusterOptions) normalized() (ClusterOptions, error) {
 type Stats struct {
 	FilesScanned   int
 	FilesExtracted int
-	FilesPurged    int
-	Nodes          int
-	Edges          int
-	Communities    int
-	RefsResolved   int
-	RefsAmbiguous  int
-	RefsDropped    int
+	// FilesPurged counts records dropped because the file left the repo.
+	FilesPurged int
+	// CacheCleared counts records dropped by --full to force re-extraction.
+	// Kept apart from FilesPurged so "purged" keeps meaning "gone from disk".
+	CacheCleared  int
+	Nodes         int
+	Edges         int
+	Communities   int
+	RefsResolved  int
+	RefsAmbiguous int
+	RefsDropped   int
 	// ClusterAlgorithm is the detector that produced Communities.
 	ClusterAlgorithm string
+	// Failures lists files that could not be extracted. The build continues
+	// past them, so callers must surface these — a silent skip is
+	// indistinguishable from a file that legitimately defines nothing.
+	Failures []FileError
 }
+
+// FileError is one file that failed extraction.
+type FileError struct {
+	Path string
+	Err  error
+}
+
+func (e FileError) Error() string { return e.Path + ": " + e.Err.Error() }
+func (e FileError) Unwrap() error { return e.Err }
 
 // Run executes the pipeline against the workspace's store.
 func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
@@ -158,12 +173,27 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 		}
 	}
 
+	// inScope reports whether a stored file record is this run's business.
+	//
+	// --langs restricts which files are extracted, not which nodes survive.
+	// Without this the language filter also drove the delete diff, so every
+	// file of another language looked deleted: `graphy build --langs go` on a
+	// mixed repo purged everything non-Go and reported it as routine deletion.
+	inScope := func(path string) bool {
+		if len(opts.Langs) == 0 {
+			return true
+		}
+		return session.Supported(detect.Language(path))
+	}
+
 	stats := &Stats{FilesScanned: len(supported)}
 
 	if opts.Full {
 		var stale []string
 		if err := s.EachFile(func(rec store.FileRecord) error {
-			stale = append(stale, rec.Path)
+			if rec.Path != store.SyntheticPath && inScope(rec.Path) {
+				stale = append(stale, rec.Path)
+			}
 			return nil
 		}); err != nil {
 			return nil, err
@@ -173,9 +203,20 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 				return nil, err
 			}
 		}
+		// Counted separately from FilesPurged: clearing the cache to rebuild
+		// is not the same event as a file disappearing from the repo, and
+		// conflating them made the incremental signal meaningless.
+		stats.CacheCleared = len(stale)
 	}
 
 	// Diff against the cache: extract new/changed, purge deleted.
+	//
+	// A file that cannot be extracted is recorded and skipped rather than
+	// aborting the run. A --full build purges the cache before extracting
+	// anything, so aborting midway left the store gutted — nodes deleted,
+	// edges from the previous run still pointing at them, and none of the
+	// repair passes below reached. One unreadable file taking out a whole
+	// repository's graph is the worse failure by far.
 	live := map[string]bool{}
 	for _, f := range supported {
 		live[f.Path] = true
@@ -187,13 +228,14 @@ func Run(w *workspace.Workspace, s *store.Store, opts Options) (*Stats, error) {
 			continue
 		}
 		if err := extractFile(session, s, f); err != nil {
-			return nil, fmt.Errorf("extracting %s: %w", f.Path, err)
+			stats.Failures = append(stats.Failures, FileError{Path: f.Path, Err: err})
+			continue
 		}
 		stats.FilesExtracted++
 	}
 	var deleted []string
 	if err := s.EachFile(func(rec store.FileRecord) error {
-		if rec.Path != syntheticPath && !live[rec.Path] {
+		if rec.Path != store.SyntheticPath && inScope(rec.Path) && !live[rec.Path] {
 			deleted = append(deleted, rec.Path)
 		}
 		return nil
@@ -301,12 +343,9 @@ func clusterAndReport(w *workspace.Workspace, s *store.Store, opts ClusterOption
 		return err
 	}
 	stats.Communities = rep.Stats.Communities
-	f, err := os.Create(w.ReportPath())
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return report.Render(f, rep)
+	return workspace.WriteFileAtomic(w.ReportPath(), func(f io.Writer) error {
+		return report.Render(f, rep)
+	})
 }
 
 func extractFile(session *extract.Session, s *store.Store, f detect.File) error {
@@ -336,6 +375,15 @@ func extractFile(session *extract.Session, s *store.Store, f detect.File) error 
 // resolve turns every cached ref into edges (pass 2), synthesizes external
 // and internal-package nodes, and rewrites the edge buckets wholesale.
 func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
+	// Drop the previous run's synthetic nodes before snapshotting, not after.
+	// They are rebuilt at the end of this function, but model.Indexable admits
+	// KindModule, so a stale module node left in the snapshot can win a
+	// resolution — and then PutFile deletes it while ReplaceEdges persists an
+	// edge pointing at it.
+	if err := s.PurgeFile(store.SyntheticPath); err != nil {
+		return err
+	}
+
 	// Load resolution inputs into memory.
 	nodes := map[string]model.Node{}
 	symbols := map[string][]string{} // lang \x00 name → node ids
@@ -365,7 +413,7 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 	var recs []store.FileRecord
 	fileFirstNode := map[string]string{} // rel path → file-level node id
 	if err := s.EachFile(func(rec store.FileRecord) error {
-		if rec.Path == syntheticPath {
+		if rec.Path == store.SyntheticPath {
 			return nil
 		}
 		recs = append(recs, rec)
@@ -468,7 +516,7 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 	for _, id := range ids {
 		nodeList = append(nodeList, synthetic[id])
 	}
-	if err := s.PutFile(store.FileRecord{Path: syntheticPath, NodeIDs: ids}, nodeList); err != nil {
+	if err := s.PutFile(store.FileRecord{Path: store.SyntheticPath, NodeIDs: ids}, nodeList); err != nil {
 		return err
 	}
 

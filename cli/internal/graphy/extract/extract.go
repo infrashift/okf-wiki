@@ -9,6 +9,8 @@ package extract
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"okfw/cli/internal/graphy/detect"
 	"okfw/cli/internal/graphy/model"
@@ -49,10 +51,28 @@ func NewSession(langs []string) (*Session, error) {
 }
 
 // NewSessionWith is NewSession with explicit non-language options.
+//
+// An unrecognized language name is an error. Silently ignoring it produced a
+// session with no extractors at all, which a build could not distinguish from
+// "this repo has no source files".
 func NewSessionWith(langs []string, opts SessionOptions) (*Session, error) {
 	want := map[string]bool{}
+	var unknown []string
 	for _, l := range langs {
+		l = strings.ToLower(strings.TrimSpace(l))
+		if l == "" {
+			continue
+		}
+		if _, ok := factories[l]; !ok {
+			unknown = append(unknown, l)
+			continue
+		}
 		want[l] = true
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("unknown language %s (supported: %s)",
+			strings.Join(unknown, ", "), strings.Join(Languages(), ", "))
 	}
 	s := &Session{extractors: map[string]Extractor{}, opts: opts}
 	for lang, factory := range factories {
@@ -113,12 +133,13 @@ func register(lang string, factory func() (Extractor, error)) {
 	factories[lang] = factory
 }
 
-// Languages returns the registered language names.
+// Languages returns the registered language names, sorted.
 func Languages() []string {
 	out := make([]string, 0, len(factories))
 	for lang := range factories {
 		out = append(out, lang)
 	}
+	sort.Strings(out)
 	return out
 }
 

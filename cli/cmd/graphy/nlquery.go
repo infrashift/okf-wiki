@@ -40,7 +40,18 @@ query degrades to keyword search and still works offline.`,
 				}
 			}
 
-			res, err := query.NL(cmd.Context(), s, backend, args[0], query.NLOptions{TopN: topN, Depth: depth})
+			// Leave Depth zero unless the user actually passed --depth, so an
+			// untouched flag lets the planner pick 2 for a flow question while
+			// an explicit --depth is honoured instead of being overridden.
+			opts := query.NLOptions{TopN: topN}
+			if cmd.Flags().Changed("depth") {
+				if depth < 1 || depth > query.MaxDepth {
+					return fmt.Errorf("--depth must be between 1 and %d", query.MaxDepth)
+				}
+				opts.Depth = depth
+			}
+
+			res, err := query.NL(cmd.Context(), s, backend, args[0], opts)
 			if err != nil {
 				return err
 			}
@@ -52,7 +63,8 @@ query degrades to keyword search and still works offline.`,
 		},
 	}
 	cmd.Flags().IntVar(&topN, "top", 1500, "candidate index size sent to the LLM")
-	cmd.Flags().IntVar(&depth, "depth", 1, "expansion depth around seed nodes")
+	cmd.Flags().IntVar(&depth, "depth", 1,
+		fmt.Sprintf("expansion depth around seed nodes, 1-%d (default: let the planner choose)", query.MaxDepth))
 	cmd.Flags().BoolVar(&noLLM, "no-llm", false, "skip the LLM and use keyword search")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "override the backend's default model")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit the raw subgraph as JSON")

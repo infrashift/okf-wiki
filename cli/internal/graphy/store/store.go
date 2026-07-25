@@ -17,10 +17,12 @@ package store
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	bolt "go.etcd.io/bbolt"
 
@@ -42,6 +44,13 @@ type FileRecord struct {
 	Refs    []model.Ref  `json:"refs,omitempty"`
 	Edges   []model.Edge `json:"edges,omitempty"` // intra-file edges, re-emitted on every ReplaceEdges
 }
+
+// SyntheticPath is the pseudo file record that owns nodes belonging to no
+// source file (external modules, internal package nodes). It is rewritten on
+// every build; detect never lists .graphy/, so it cannot collide with a real
+// path. It lives here rather than in build because every consumer of the files
+// bucket has to know to skip it — a count that does not is off by one.
+const SyntheticPath = ".graphy/synthetic"
 
 // Community is a detected community with a human label.
 type Community struct {
@@ -86,10 +95,20 @@ type Store struct {
 	path string
 }
 
+// openTimeout bounds the wait for the database's file lock. Without it the
+// flock wait is unbounded, so a second graphy process — an editor's after-edit
+// hook racing a manual build — hangs forever with nothing printed. Every
+// command takes the lock, including read-only ones: Open always runs a write
+// transaction to create missing buckets.
+const openTimeout = 10 * time.Second
+
 // Open opens (creating if needed) the store and ensures all buckets exist.
 func Open(path string) (*Store, error) {
-	db, err := bolt.Open(path, 0644, nil)
+	db, err := bolt.Open(path, 0644, &bolt.Options{Timeout: openTimeout})
 	if err != nil {
+		if errors.Is(err, bolt.ErrTimeout) {
+			return nil, fmt.Errorf("graph store %s is locked by another graphy process", path)
+		}
 		return nil, fmt.Errorf("failed to open graph store: %w", err)
 	}
 	err = db.Update(func(tx *bolt.Tx) error {

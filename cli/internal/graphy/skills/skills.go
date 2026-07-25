@@ -40,6 +40,11 @@ type Options struct {
 type Result struct {
 	Written []string // files created or updated
 	Notes   []string // follow-up guidance printed to the user
+	// HooksUnsupported is set when --hooks was requested on a platform where
+	// graphy cannot write the hook itself. Callers must say so loudly: the
+	// flag otherwise appears to have worked, and the user goes on believing
+	// the graph refreshes itself after every edit when nothing refreshes it.
+	HooksUnsupported bool
 }
 
 // Install writes the platform integration.
@@ -90,6 +95,7 @@ func Install(opts Options) (*Result, error) {
 		}
 		res.Written = append(res.Written, "GEMINI.md")
 		if opts.Hooks {
+			res.HooksUnsupported = true
 			res.Notes = append(res.Notes,
 				"Gemini CLI hook schemas vary by version — add a before/after-edit hook running `graphy update` to .gemini/settings.json manually.")
 		}
@@ -101,6 +107,7 @@ func Install(opts Options) (*Result, error) {
 		}
 		res.Written = append(res.Written, "AGENTS.md")
 		if opts.Hooks {
+			res.HooksUnsupported = true
 			res.Notes = append(res.Notes,
 				"Codex hook configuration is not yet stable — instruct the agent (AGENTS.md already does) or run `graphy update` yourself after edits.")
 		}

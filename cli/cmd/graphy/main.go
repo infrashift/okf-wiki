@@ -5,12 +5,17 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
@@ -27,7 +32,11 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
-	if err := rootCmd().Execute(); err != nil {
+	// Commands read this via cmd.Context(). Without it an in-flight LLM
+	// request ignores Ctrl-C until its own HTTP timeout expires.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := rootCmd().ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", err)
 		os.Exit(1)
 	}
@@ -41,6 +50,8 @@ func rootCmd() *cobra.Command {
 deterministic AST extraction (tree-sitter), detects communities, and answers
 graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		SilenceUsage: true,
+		// main prints the error itself; without this cobra prints it too.
+		SilenceErrors: true,
 	}
 	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), installCmd(), mcpCmd(), versionCmd())
 	return root
@@ -59,34 +70,33 @@ and refresh graph.json. Extraction is incremental; use --full to rebuild.`,
 	cf := clusterFlags(cmd)
 	rf := rationaleFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		co, err := cf.options()
-		if err != nil {
-			return err
-		}
-		return runBuild(build.Options{Full: full, Langs: langs, Cluster: co, Rationale: rf.options()})
+		return runBuild(build.Options{Full: full, Langs: langs, Rationale: rf.options()}, cf)
 	}
 	cmd.Flags().BoolVar(&full, "full", false, "wipe the extraction cache and re-extract everything")
-	cmd.Flags().StringSliceVar(&langs, "langs", nil, "restrict to these languages (default: all supported)")
+	cmd.Flags().StringSliceVar(&langs, "langs", nil,
+		"restrict extraction to these languages; other languages keep their existing nodes")
 	return cmd
 }
 
 func updateCmd() *cobra.Command {
+	var langs []string
 	cmd := &cobra.Command{
 		Use:   "update",
-		Short: "Incrementally refresh the graph (alias of build)",
+		Short: "Incrementally refresh the graph",
+		Long: `Re-extracts changed files and re-resolves the graph. Equivalent to a plain
+` + "`graphy build`" + `: the clustering settings the graph was last built with are
+inherited, and any of them can be overridden here.`,
 	}
-	// The clustering flags belong here too: without them, a graph built with
-	// --cluster-algorithm louvain would be silently re-clustered with the
-	// default on the next `graphy update`.
+	// The clustering flags belong here too: without them there would be no way
+	// to change the algorithm during an update. Inheriting the previous run's
+	// settings is handled by clusterFlagVals.resolve, not by the defaults.
 	cf := clusterFlags(cmd)
 	rf := rationaleFlags(cmd)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
-		co, err := cf.options()
-		if err != nil {
-			return err
-		}
-		return runBuild(build.Options{Cluster: co, Rationale: rf.options()})
+		return runBuild(build.Options{Langs: langs, Rationale: rf.options()}, cf)
 	}
+	cmd.Flags().StringSliceVar(&langs, "langs", nil,
+		"restrict extraction to these languages; other languages keep their existing nodes")
 	return cmd
 }
 
@@ -119,17 +129,20 @@ func (v *rationaleFlagVals) options() extract.RationaleOptions {
 	}
 }
 
-// clusterFlagVals holds the raw community-detection flag values.
+// clusterFlagVals holds the raw community-detection flag values, plus the flag
+// set they were bound to so resolve can tell "the user asked for the default"
+// from "the user said nothing".
 type clusterFlagVals struct {
 	algorithm  string
 	resolution float64
 	seed       uint64
+	flags      *pflag.FlagSet
 }
 
 // clusterFlags binds the community-detection flags shared by build and update,
 // so the two cannot drift apart.
 func clusterFlags(cmd *cobra.Command) *clusterFlagVals {
-	v := &clusterFlagVals{}
+	v := &clusterFlagVals{flags: cmd.Flags()}
 	cmd.Flags().StringVar(&v.algorithm, "cluster-algorithm", string(cluster.DefaultAlgorithm),
 		"community detection algorithm: "+strings.Join(cluster.Algorithms(), " or "))
 	cmd.Flags().Float64Var(&v.resolution, "cluster-resolution", cluster.DefaultResolution,
@@ -139,16 +152,78 @@ func clusterFlags(cmd *cobra.Command) *clusterFlagVals {
 	return v
 }
 
-// options validates the flags and converts them for the build.
-func (v *clusterFlagVals) options() (build.ClusterOptions, error) {
+// resolve validates the flags and converts them for the build, inheriting any
+// flag the user did not pass from how the graph was last clustered.
+//
+// Binding these flags to `update` is not enough on its own: they default to
+// graphy's defaults, so a bare `graphy update` after
+// `graphy build --cluster-algorithm louvain` would re-cluster with Leiden —
+// the exact silent reversion the flags were added to prevent. Communities are
+// numbered by their smallest member and become subsystem concepts, so a
+// spurious re-partition rewrites `parent:` on every exported concept.
+//
+// An explicit flag always wins, including an explicit `--cluster-algorithm
+// leiden` on a louvain graph: that is a deliberate switch, not an omission.
+func (v *clusterFlagVals) resolve(s *store.Store) (build.ClusterOptions, error) {
+	// Validate the flag even when it is about to be overridden by the
+	// inherited value, so a typo is still reported.
 	algo, err := cluster.ParseAlgorithm(v.algorithm)
 	if err != nil {
 		return build.ClusterOptions{}, err
 	}
-	return build.ClusterOptions{Algorithm: algo, Resolution: v.resolution, Seed: v.seed}, nil
+	opts := build.ClusterOptions{Algorithm: algo, Resolution: v.resolution, Seed: v.seed}
+	if s == nil {
+		return opts, nil
+	}
+	inherited, err := inheritedClusterOptions(s)
+	if err != nil {
+		return build.ClusterOptions{}, err
+	}
+	if !v.flags.Changed("cluster-algorithm") {
+		opts.Algorithm = inherited.Algorithm
+	}
+	if !v.flags.Changed("cluster-resolution") {
+		opts.Resolution = inherited.Resolution
+	}
+	if !v.flags.Changed("cluster-seed") {
+		opts.Seed = inherited.Seed
+	}
+	return opts, nil
 }
 
-func runBuild(opts build.Options) error {
+// inheritedClusterOptions returns the settings the graph was last clustered
+// with, falling back to graphy's defaults for a store that has never been
+// clustered. A meta value that does not parse — a store written by a newer
+// graphy, or a corrupted one — degrades to the default rather than refusing to
+// build.
+func inheritedClusterOptions(s *store.Store) (build.ClusterOptions, error) {
+	opts := build.ClusterOptions{
+		Algorithm:  cluster.DefaultAlgorithm,
+		Resolution: cluster.DefaultResolution,
+		Seed:       cluster.DefaultSeed,
+	}
+	prev, err := s.GetClusterMeta()
+	if err != nil {
+		return build.ClusterOptions{}, err
+	}
+	if prev.Algorithm != "" {
+		if algo, err := cluster.ParseAlgorithm(prev.Algorithm); err == nil {
+			opts.Algorithm = algo
+		}
+	}
+	if prev.Resolution > 0 {
+		opts.Resolution = prev.Resolution
+	}
+	if prev.Seed != 0 {
+		opts.Seed = prev.Seed
+	}
+	return opts, nil
+}
+
+// runBuild opens the workspace and runs a build. Cluster options are resolved
+// after the store is open, so unset flags can inherit the previous run's
+// settings.
+func runBuild(opts build.Options, cf *clusterFlagVals) error {
 	w, err := openWorkspace()
 	if err != nil {
 		return err
@@ -159,6 +234,14 @@ func runBuild(opts build.Options) error {
 	}
 	defer s.Close()
 
+	if cf != nil {
+		co, err := cf.resolve(s)
+		if err != nil {
+			return err
+		}
+		opts.Cluster = co
+	}
+
 	stats, err := build.Run(w, s, opts)
 	if err != nil {
 		return err
@@ -166,8 +249,19 @@ func runBuild(opts build.Options) error {
 	if err := writeGraphJSON(w, s, w.JSONPath()); err != nil {
 		return err
 	}
-	fmt.Printf("Scanned %d files (%d extracted, %d purged)\n",
-		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged)
+	cleared := ""
+	if stats.CacheCleared > 0 {
+		cleared = fmt.Sprintf(", %d cache cleared", stats.CacheCleared)
+	}
+	failed := ""
+	if n := len(stats.Failures); n > 0 {
+		failed = fmt.Sprintf(", %d failed", n)
+	}
+	fmt.Printf("Scanned %d files (%d extracted, %d purged%s%s)\n",
+		stats.FilesScanned, stats.FilesExtracted, stats.FilesPurged, cleared, failed)
+	for _, fe := range stats.Failures {
+		fmt.Fprintf(os.Stderr, "warning: skipped %s\n", fe)
+	}
 	fmt.Printf("Graph: %d nodes, %d edges, %d communities via %s (%d refs resolved, %d ambiguous, %d dropped)\n",
 		stats.Nodes, stats.Edges, stats.Communities, stats.ClusterAlgorithm,
 		stats.RefsResolved, stats.RefsAmbiguous, stats.RefsDropped)
@@ -322,7 +416,7 @@ func exportJSONCmd() *cobra.Command {
 		Short: "Write the portable graph.json",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JSONPath() },
-				func(f *os.File, g *export.Graph) error {
+				func(f io.Writer, g *export.Graph) error {
 					st := g.Stats()
 					return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
 				})
@@ -343,7 +437,7 @@ relation, confidence) are declared as GraphML keys. The output carries no
 timestamp, so an unchanged graph re-exports byte for byte identically.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGraphExport(out, func(w *workspace.Workspace) string { return w.GraphMLPath() },
-				func(f *os.File, g *export.Graph) error {
+				func(f io.Writer, g *export.Graph) error {
 					return export.WriteGraphML(f, g, "graphy "+version)
 				})
 		},
@@ -363,7 +457,7 @@ everything graphy-specific under "metadata". The output carries no timestamp,
 so an unchanged graph re-exports byte for byte identically.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGraphExport(out, func(w *workspace.Workspace) string { return w.JGFPath() },
-				func(f *os.File, g *export.Graph) error {
+				func(f io.Writer, g *export.Graph) error {
 					return export.WriteJGF(f, g, "graphy "+version)
 				})
 		},
@@ -391,7 +485,7 @@ graph if it is missing, and by default clears it first so that re-exporting
 after a rebuild cannot leave behind vertices for code that no longer exists.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runGraphExport(out, func(w *workspace.Workspace) string { return w.CypherPath() },
-				func(f *os.File, g *export.Graph) error {
+				func(f io.Writer, g *export.Graph) error {
 					name := graphName
 					if name == "" {
 						name = filepath.Base(g.Root)
@@ -419,19 +513,16 @@ func writeGraphJSON(w *workspace.Workspace, s *store.Store, path string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	st := g.Stats()
-	return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+	return workspace.WriteFileAtomic(path, func(f io.Writer) error {
+		return model.EncodeGraphJSON(f, g.Root, g.Nodes, g.Edges, st.Communities, st.Files)
+	})
 }
 
-// runGraphExport loads the store into a snapshot and hands it to a writer.
-// The output file is created only once the snapshot has succeeded, so a failed
-// export cannot truncate the previous one.
-func runGraphExport(out string, def func(*workspace.Workspace) string, write func(*os.File, *export.Graph) error) error {
+// runGraphExport loads the store into a snapshot and hands it to a writer. The
+// destination is replaced only once the whole file has been written, so
+// neither a failed snapshot nor a failed write can damage the previous export.
+func runGraphExport(out string, def func(*workspace.Workspace) string, write func(io.Writer, *export.Graph) error) error {
 	w, s, err := openStore()
 	if err != nil {
 		return err
@@ -445,15 +536,9 @@ func runGraphExport(out string, def func(*workspace.Workspace) string, write fun
 	if path == "" {
 		path = def(w)
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	if err := write(f, g); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
+	if err := workspace.WriteFileAtomic(path, func(f io.Writer) error {
+		return write(f, g)
+	}); err != nil {
 		return err
 	}
 	st := g.Stats()
@@ -491,11 +576,16 @@ block, optional PostToolUse hook), gemini (GEMINI.md block), codex
 			for _, n := range res.Notes {
 				fmt.Println("Note:", n)
 			}
+			if res.HooksUnsupported {
+				fmt.Fprintf(os.Stderr,
+					"warning: --hooks installed no hook for %s; the graph will not refresh itself\n", platform)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&platform, "platform", "claude", "target platform: claude, gemini, or codex")
-	cmd.Flags().BoolVar(&hooks, "hooks", false, "also install an after-edit hook running `graphy update`")
+	cmd.Flags().BoolVar(&hooks, "hooks", false,
+		"also install an after-edit hook running `graphy update` (claude only; other platforms print manual steps)")
 	cmd.Flags().BoolVar(&force, "force", false, "rewrite the skill file even if it exists")
 	return cmd
 }

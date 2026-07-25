@@ -131,8 +131,12 @@ func Build(s *store.Store, root string) (*Report, error) {
 		return nil, err
 	}
 
-	if err := s.EachFile(func(store.FileRecord) error {
-		r.Stats.Files++
+	// The synthetic record is a container for nodes that belong to no file
+	// (external modules, package nodes), not a file the repository has.
+	if err := s.EachFile(func(rec store.FileRecord) error {
+		if rec.Path != store.SyntheticPath {
+			r.Stats.Files++
+		}
 		return nil
 	}); err != nil {
 		return nil, err

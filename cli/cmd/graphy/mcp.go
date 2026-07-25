@@ -12,11 +12,13 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -36,6 +38,14 @@ type (
 
 const mcpProtocolVersion = "2024-11-05"
 
+// maxRPCLine caps one JSON-RPC request line.
+const maxRPCLine = 4 * 1024 * 1024
+
+// toolCallTimeout bounds a single tool call. The serve loop is sequential, so
+// without it one hung LLM request wedges the whole server with no way to
+// cancel from the client side.
+const toolCallTimeout = 90 * time.Second
+
 func graphyVersion() string { return version }
 
 func mcpCmd() *cobra.Command {
@@ -44,8 +54,7 @@ func mcpCmd() *cobra.Command {
 		Short: "Serve graph queries over MCP (stdio)",
 		Long: `Runs a Model Context Protocol stdio server exposing graphy_query,
 graphy_path, graphy_explain, graphy_rationale, graphy_report, and graphy_update.
-Register it in
-an agent's MCP config with command "graphy" and args ["mcp"].`,
+Register it in an agent's MCP config with command "graphy" and args ["mcp"].`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			srv := &mcpServer{out: os.Stdout}
 			return srv.serve(os.Stdin)
@@ -166,21 +175,44 @@ func mcpTools() []map[string]interface{} {
 
 func (s *mcpServer) serve(in io.Reader) error {
 	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxRPCLine)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
-		if resp := s.handleLine(line); resp != nil {
-			data, err := json.Marshal(resp)
-			if err != nil {
-				continue
-			}
-			fmt.Fprintf(s.out, "%s\n", data)
+		s.emit(s.handleLine(line))
+	}
+	// A line over the buffer cap is one client's mistake, not a reason to take
+	// the server down: report it and keep serving. Scanner cannot continue
+	// after ErrTooLong, so the connection still ends — but the client learns
+	// why instead of watching the process vanish.
+	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			s.emit(&rpcResponse{JSONRPC: "2.0", ID: json.RawMessage("null"),
+				Error: &rpcError{Code: -32700, Message: fmt.Sprintf("request exceeds %d bytes", maxRPCLine)}})
+		}
+		return err
+	}
+	return nil
+}
+
+// emit writes one response, falling back to a JSON-RPC error when the response
+// itself cannot be marshalled. Dropping it instead would leave the client
+// waiting forever on a request id that never gets an answer.
+func (s *mcpServer) emit(resp *rpcResponse) {
+	if resp == nil {
+		return
+	}
+	data, err := json.Marshal(resp)
+	if err != nil {
+		fallback := &rpcResponse{JSONRPC: "2.0", ID: resp.ID,
+			Error: &rpcError{Code: -32603, Message: "internal error: " + err.Error()}}
+		if data, err = json.Marshal(fallback); err != nil {
+			return // cannot happen: the fallback is plain strings
 		}
 	}
-	return scanner.Err()
+	fmt.Fprintf(s.out, "%s\n", data)
 }
 
 func (s *mcpServer) handleLine(line string) *rpcResponse {
@@ -314,12 +346,17 @@ func (s *mcpServer) toolQuery(args json.RawMessage) *toolResult {
 	if err := json.Unmarshal(args, &p); err != nil || p.Question == "" {
 		return errResult(fmt.Errorf("question is required"))
 	}
+	if p.Depth != 0 && (p.Depth < 1 || p.Depth > query.MaxDepth) {
+		return errResult(fmt.Errorf("depth must be between 1 and %d", query.MaxDepth))
+	}
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
 		backend, err := llm.FromEnv("")
 		if err != nil && err != llm.ErrNoBackend {
 			return errResult(err)
 		}
-		res, err := query.NL(context.Background(), st, backend, p.Question, query.NLOptions{Depth: p.Depth})
+		ctx, cancel := context.WithTimeout(context.Background(), toolCallTimeout)
+		defer cancel()
+		res, err := query.NL(ctx, st, backend, p.Question, query.NLOptions{Depth: p.Depth})
 		if err != nil {
 			return errResult(err)
 		}
@@ -456,18 +493,33 @@ func (s *mcpServer) toolReport() *toolResult {
 
 func (s *mcpServer) toolUpdate() *toolResult {
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
-		stats, err := build.Run(w, st, build.Options{})
+		// This tool exposes no flags, so inheriting the graph's recorded
+		// clustering settings is the only way a louvain-clustered repo stays
+		// louvain-clustered when an agent refreshes it.
+		co, err := inheritedClusterOptions(st)
+		if err != nil {
+			return errResult(err)
+		}
+		stats, err := build.Run(w, st, build.Options{Cluster: co})
 		if err != nil {
 			return errResult(err)
 		}
 		if err := writeGraphJSON(w, st, w.JSONPath()); err != nil {
 			return errResult(err)
 		}
-		return jsonResult(map[string]interface{}{
+		out := map[string]interface{}{
 			"extracted": stats.FilesExtracted,
 			"purged":    stats.FilesPurged,
 			"nodes":     stats.Nodes,
 			"edges":     stats.Edges,
-		})
+		}
+		if len(stats.Failures) > 0 {
+			skipped := make([]string, 0, len(stats.Failures))
+			for _, fe := range stats.Failures {
+				skipped = append(skipped, fe.Error())
+			}
+			out["skipped"] = skipped
+		}
+		return jsonResult(out)
 	})
 }

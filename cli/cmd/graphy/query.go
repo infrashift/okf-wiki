@@ -45,7 +45,6 @@ func pathCmd() *cobra.Command {
 				return json.NewEncoder(os.Stdout).Encode(hops)
 			}
 			fmt.Printf("%s (%d hops)\n", from.Label, len(hops))
-			cur := from.ID
 			for _, h := range hops {
 				next, arrow := h.Edge.Target, fmt.Sprintf("-[%s, %s]->", h.Edge.Relation, h.Edge.Confidence)
 				if !h.Forward {
@@ -57,9 +56,7 @@ func pathCmd() *cobra.Command {
 					label = fmt.Sprintf("%s (%s)", n.Label, n.Kind)
 				}
 				fmt.Printf("  %s %s\n", arrow, label)
-				cur = next
 			}
-			_ = cur
 			return nil
 		},
 	}

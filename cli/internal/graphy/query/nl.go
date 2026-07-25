@@ -13,10 +13,17 @@ import (
 	"okfw/cli/internal/graphy/store"
 )
 
+// MaxDepth bounds a subgraph expansion. Each hop multiplies the result by the
+// average degree, so an unbounded depth on a hub node walks most of the graph.
+const MaxDepth = 2
+
 // NLOptions tunes a natural-language query.
 type NLOptions struct {
-	TopN  int // candidate index size sent to the LLM (default 1500)
-	Depth int // default expansion depth when the LLM doesn't pick one (default 1)
+	TopN int // candidate index size sent to the LLM (default 1500)
+	// Depth is the expansion depth, clamped to [1, MaxDepth]. When set
+	// explicitly it overrides the depth the LLM proposes; the LLM's choice
+	// only applies to a caller that expressed no preference.
+	Depth int
 }
 
 // NLResult is a natural-language query answer.
@@ -59,9 +66,10 @@ func NL(ctx context.Context, s *store.Store, backend llm.Backend, question strin
 	if opts.TopN <= 0 {
 		opts.TopN = 1500
 	}
-	if opts.Depth <= 0 {
-		opts.Depth = 1
-	}
+	// Whether the caller asked for a depth decides who wins below, so record
+	// it before the value is defaulted.
+	explicitDepth := opts.Depth > 0
+	opts.Depth = clampDepth(opts.Depth)
 
 	if backend == nil {
 		return keywordFallback(s, question, opts)
@@ -86,9 +94,11 @@ func NL(ctx context.Context, s *store.Store, backend llm.Backend, question strin
 		return res, nil
 	}
 
-	depth := p.Depth
-	if depth < 1 || depth > 2 {
-		depth = opts.Depth
+	// An explicitly requested depth is an instruction, not a hint: the LLM
+	// plans which nodes to seed, not how far the caller wanted to look.
+	depth := opts.Depth
+	if !explicitDepth && p.Depth > 0 {
+		depth = clampDepth(p.Depth)
 	}
 	nodes, edges, err := Subgraph(s, p.NodeIDs, depth, p.Relations)
 	if err != nil {
@@ -145,6 +155,18 @@ func parsePlan(s *store.Store, reply string) (*plan, error) {
 	}
 	p.NodeIDs = valid
 	return &p, nil
+}
+
+// clampDepth bounds a requested depth to [1, MaxDepth]. Applied to both the
+// caller's value and the LLM's, so neither can drive an unbounded BFS.
+func clampDepth(d int) int {
+	if d < 1 {
+		return 1
+	}
+	if d > MaxDepth {
+		return MaxDepth
+	}
+	return d
 }
 
 func keywordFallback(s *store.Store, question string, opts NLOptions) (*NLResult, error) {

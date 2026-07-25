@@ -5,6 +5,7 @@ package workspace
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,40 @@ const DirName = ".graphy"
 
 // IgnoreFileName holds gitignore-style patterns applied on top of gitignore.
 const IgnoreFileName = ".graphyignore"
+
+// WriteFileAtomic writes a generated file via a temporary file in the same
+// directory, renaming it into place only once write and Close have both
+// succeeded.
+//
+// The generated files here — graph.json, GRAPH_REPORT.md, the interchange
+// exports — are meant to be committed and diffed, so a half-written one is
+// worse than a stale one. Creating the destination up front and deferring an
+// unchecked Close, as these writers used to, truncated the previous good file
+// before knowing whether the new one could be produced, and swallowed any
+// error surfaced by the final flush.
+func WriteFileAtomic(path string, write func(io.Writer) error) (err error) {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		if err != nil {
+			tmp.Close()
+			os.Remove(tmpName)
+		}
+	}()
+	if err = write(tmp); err != nil {
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	if err = os.Chmod(tmpName, 0644); err != nil { // CreateTemp makes it 0600
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
 
 // Workspace is a discovered graphy workspace.
 type Workspace struct {
