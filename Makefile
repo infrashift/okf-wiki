@@ -1,7 +1,11 @@
-.PHONY: build test lint fmt clean install tidy ui-check integration-test e2e docs-dev image run-dev stop-dev
+.PHONY: build build-graphy build-all test lint fmt clean install install-graphy tidy ui-check integration-test e2e docs-dev image run-dev stop-dev
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
+
+# graphy — code knowledge-graph sibling binary (tree-sitter requires CGo)
+GRAPHY_BINARY=graphy
+GRAPHY_CMD_PATH=./cli/cmd/graphy
 
 # Container settings
 CONTAINER_ENGINE=podman
@@ -15,7 +19,12 @@ OKFW_BUNDLE=$(HOME)/okfw
 USER_UID=$(shell id -u)
 
 build:
-	go build -o $(BINARY_NAME) $(CMD_PATH)
+	CGO_ENABLED=0 go build -o $(BINARY_NAME) $(CMD_PATH)
+
+build-graphy:
+	CGO_ENABLED=1 go build -o $(GRAPHY_BINARY) $(GRAPHY_CMD_PATH)
+
+build-all: build build-graphy
 
 test:
 	@echo "Running Go tests..."
@@ -35,6 +44,9 @@ fmt:
 install: build
 	mv $(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
 
+install-graphy: build-graphy
+	mv $(GRAPHY_BINARY) $(GOPATH)/bin/$(GRAPHY_BINARY)
+
 ui-check:
 	@echo "Checking Lua syntax..."
 	luacheck lua/
@@ -50,7 +62,7 @@ e2e:
 	@echo "e2e build succeeded — okfw CLI + NeoVim plugin pass end-to-end in-container."
 
 clean:
-	rm -f $(BINARY_NAME)
+	rm -f $(BINARY_NAME) $(GRAPHY_BINARY)
 	
 tidy:
 	go mod tidy

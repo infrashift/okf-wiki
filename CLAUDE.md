@@ -8,16 +8,29 @@ and discovered by every command walking upward from the cwd (like `.git`).
 There is no config file — storage is standardized. (Formerly the Zettelkasten
 CLI `zk`.)
 
+The repo also incubates **`graphy`** (`cli/cmd/graphy`), a sibling binary that
+builds a code knowledge graph of a repository (graphify-inspired, tree-sitter
+AST extraction) and exports it into an okfw bundle. okfw stays a pure OKF-spec
+implementation; graphy owns the enhanced graph capabilities.
+
 ## Project Layout
 
 ```
-cli/cmd/okfw/main.go         — Cobra CLI entry point (all commands)
+cli/cmd/okfw/main.go         — okfw Cobra CLI entry point (all commands)
+cli/cmd/graphy/              — graphy CLI (build/query/path/explain/report/export/install/mcp)
 cli/internal/config/         — .okfw discovery, CUE schema, concept parsing
+cli/internal/bundle/         — Shared bundle write-path (concept creation, frontmatter,
+                               index/graph sync) used by BOTH binaries
 cli/internal/graph/          — In-memory graph + rendering (ASCII tree, Mermaid)
-cli/internal/graphdb/        — Persistent graph store (bbolt)
+cli/internal/graphdb/        — okfw persistent graph store (bbolt, 4 predicates)
 cli/internal/index/          — Bleve full-text search index
 cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git project-context helper
+cli/internal/graphy/         — graphy packages: model, store (own bbolt schema with
+                               typed+confidence edges), detect, extract (tree-sitter,
+                               CGo), build, cluster (Louvain), analyze, report, query,
+                               llm (Claude/Gemini/OpenAI REST), export (okfw bundle),
+                               skills, workspace (.graphy/ discovery)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
 plugin/okfw.lua              — Neovim plugin auto-load
 ```
@@ -25,11 +38,30 @@ plugin/okfw.lua              — Neovim plugin auto-load
 ## Build & Test
 
 ```bash
-make build           # Builds ./okfw binary
+make build           # Builds ./okfw binary (CGO_ENABLED=0 — keep okfw pure Go)
+make build-graphy    # Builds ./graphy binary (CGO_ENABLED=1 — tree-sitter needs a C toolchain)
+make build-all       # Both
 make test            # Runs Go tests + CUE schema validation
-make install         # Installs to $GOPATH/bin
+make install         # Installs okfw to $GOPATH/bin (install-graphy for graphy)
 go test ./cli/... -count=1   # Run all tests
 ```
+
+graphy conventions: node ids are deterministic strings
+(`<lang>:<kind>:<relfile>#<qualified-name>`); edges carry
+EXTRACTED/INFERRED/AMBIGUOUS confidence; extraction is incremental
+(sha256-diffed) while resolution/clustering rerun globally each build; extractor
+golden fixtures (`cli/internal/graphy/extract/testdata/`, regenerate with
+`go test -update`) double as tree-sitter grammar-upgrade canaries;
+`graphy export okfw` is idempotent via the store's exports bucket, recoverable
+from the `<!-- graphy:node … -->` body markers if `.graphy/` is lost, and
+stamps exported concepts with `type: code-<entity>`, `resource:` (source
+location, commit-pinned permalink with `--repo-url`), and the optional
+`graphy:` frontmatter extension block (node_id/language/entity/commit/generator
+— declared in concept-schema.cue alongside okfw's other OKF extensions).
+No-op re-exports write nothing (content compared with previous
+timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
+renamed/moved entities keep their concept id: unique same-name-different-file
+or 1:1 same-file-same-kind pairings adopt the old concept and rename its file.
 
 ## Data Model
 

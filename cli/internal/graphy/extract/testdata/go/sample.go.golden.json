@@ -1,0 +1,204 @@
+{
+  "Nodes": [
+    {
+      "id": "go:file:testdata/go/sample.go#",
+      "label": "testdata/go/sample.go",
+      "kind": "file",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 1
+      },
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:struct:testdata/go/sample.go#Greeter",
+      "label": "Greeter",
+      "kind": "struct",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 10,
+        "start_col": 6,
+        "end_line": 12,
+        "end_col": 2
+      },
+      "signature": "Greeter struct {",
+      "doc": "Greeter greets people.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:interface:testdata/go/sample.go#Mood",
+      "label": "Mood",
+      "kind": "interface",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 15,
+        "start_col": 6,
+        "end_line": 17,
+        "end_col": 2
+      },
+      "signature": "Mood interface {",
+      "doc": "Mood is how a greeting feels.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:type:testdata/go/sample.go#Alias",
+      "label": "Alias",
+      "kind": "type",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 20,
+        "start_col": 6,
+        "end_line": 20,
+        "end_col": 20
+      },
+      "signature": "Alias = string",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:function:testdata/go/sample.go#NewGreeter",
+      "label": "NewGreeter",
+      "kind": "function",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 23,
+        "start_col": 1,
+        "end_line": 25,
+        "end_col": 2
+      },
+      "signature": "func NewGreeter(prefix string) *Greeter",
+      "doc": "NewGreeter builds a Greeter.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:method:testdata/go/sample.go#Greeter.Greet",
+      "label": "Greeter.Greet",
+      "kind": "method",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 28,
+        "start_col": 1,
+        "end_line": 30,
+        "end_col": 2
+      },
+      "signature": "func (g *Greeter) Greet(name string) string",
+      "doc": "Greet says hello.",
+      "community": 0,
+      "degree": 0
+    },
+    {
+      "id": "go:function:testdata/go/sample.go#format",
+      "label": "format",
+      "kind": "function",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 32,
+        "start_col": 1,
+        "end_line": 34,
+        "end_col": 2
+      },
+      "signature": "func format(prefix, name string) string",
+      "community": 0,
+      "degree": 0
+    }
+  ],
+  "Edges": [
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:struct:testdata/go/sample.go#Greeter",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 10
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:interface:testdata/go/sample.go#Mood",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 15
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:type:testdata/go/sample.go#Alias",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 20
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:function:testdata/go/sample.go#NewGreeter",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 23
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:method:testdata/go/sample.go#Greeter.Greet",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 28
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:function:testdata/go/sample.go#format",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 32
+    }
+  ],
+  "Refs": [
+    {
+      "from": "go:method:testdata/go/sample.go#Greeter.Greet",
+      "name": "Greeter",
+      "relation": "defines",
+      "line": 28
+    },
+    {
+      "from": "go:file:testdata/go/sample.go#",
+      "name": "fmt",
+      "relation": "imports",
+      "line": 5
+    },
+    {
+      "from": "go:file:testdata/go/sample.go#",
+      "name": "strings",
+      "relation": "imports",
+      "line": 6
+    },
+    {
+      "from": "go:function:testdata/go/sample.go#NewGreeter",
+      "name": "strings.TrimSpace",
+      "relation": "calls",
+      "line": 24
+    },
+    {
+      "from": "go:method:testdata/go/sample.go#Greeter.Greet",
+      "name": "format",
+      "relation": "calls",
+      "line": 29
+    },
+    {
+      "from": "go:function:testdata/go/sample.go#format",
+      "name": "fmt.Sprintf",
+      "relation": "calls",
+      "line": 33
+    }
+  ]
+}

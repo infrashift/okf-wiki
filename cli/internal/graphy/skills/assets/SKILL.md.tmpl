@@ -1,0 +1,37 @@
+---
+name: graphy
+description: Query {{ .Repo }}'s code knowledge graph instead of scanning files. Use for architecture questions ("how does X work", "what are the subsystems"), impact analysis ("what calls Y", "what depends on Z"), and finding connections between entities. Also use after editing code to refresh the graph.
+---
+
+# graphy — code knowledge graph
+
+This repository has a pre-built knowledge graph (`.graphy/`) of its code:
+functions, methods, types, docs, and their typed relationships (calls,
+imports, inherits, implements, references, contains, defines), each tagged
+EXTRACTED, INFERRED, or AMBIGUOUS by resolution confidence.
+
+Prefer graph queries over file scanning for structural questions — one query
+replaces many file reads.
+
+## Commands
+
+- `graphy query "<question>"` — natural-language question; returns the
+  relevant subgraph. Works offline (keyword mode) without an API key.
+- `graphy path <a> <b>` — shortest connection between two entities.
+- `graphy explain <entity>` — entity card: location, signature, doc,
+  community, and every in/out edge.
+- `graphy report` — GRAPH_REPORT.md: stats, god nodes (flow hubs),
+  detected communities. Read this first for architecture overviews.
+
+Entities are matched by name (`CreateConcept`), qualified name
+(`Store.PutFile`), or id; ambiguous names list candidates.
+
+## Freshness
+
+After editing code, run `graphy update` (incremental; sub-second) so
+queries reflect your changes.
+
+## MCP alternative
+
+`graphy mcp` serves the same capabilities as MCP stdio tools
+(graphy_query, graphy_path, graphy_explain, graphy_report, graphy_update).
