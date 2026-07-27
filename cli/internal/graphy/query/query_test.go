@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"okfw/cli/internal/graphy/model"
@@ -447,4 +448,57 @@ func testSeedFixture(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	return s
+}
+
+// TestResolveEntityExplainsAConceptID: `okfw search --node-id` hands agents
+// "community:<slug>" and "graph:<slug>" routinely. Neither is in the nodes
+// bucket, and "no entity matches" reads as "that subsystem is not in the
+// graph" — which is wrong, and leaves the agent with nowhere to go.
+func TestResolveEntityExplainsAConceptID(t *testing.T) {
+	s := fixture(t)
+	for _, tc := range []struct{ arg, want string }{
+		{"community:store", "graphy community"},
+		{"graph:myproj", "graphy report"},
+	} {
+		_, err := ResolveEntity(s, tc.arg)
+		if err == nil {
+			t.Fatalf("%s resolved as an entity", tc.arg)
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("error for %s does not name %s: %v", tc.arg, tc.want, err)
+		}
+	}
+}
+
+// TestConceptsForFileReturnsTheEntitiesDocumentedInIt: a file node is never
+// exported, so `graphy concept <path>` could only ever fail — and it failed
+// advising an export that would never produce a concept for a file.
+func TestConceptsForFileReturnsTheEntitiesDocumentedInIt(t *testing.T) {
+	s := traverseFixture(t)
+	if err := s.PutExport("HUB", store.ExportRecord{
+		ConceptID: "019680f0-7e00-7abc-8def-100000000000", RelPath: "graphy/demo/serve--0001.md",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ConceptsForFile(s, "svc/svc.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("concepts = %d, want the one exported entity: %+v", len(got), got)
+	}
+	if got[0].NodeID != "HUB" || got[0].RelPath != "graphy/demo/serve--0001.md" {
+		t.Errorf("concept = %+v", got[0])
+	}
+
+	// A file whose entities are all undocumented is empty, not an error: that
+	// is the case the caller has to phrase as "below --min-degree".
+	got, err = ConceptsForFile(s, "cmd/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("undocumented file returned %+v", got)
+	}
 }

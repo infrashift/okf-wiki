@@ -55,6 +55,7 @@ graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 	}
 	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(),
 		neighborsCmd(), callersCmd(), usesCmd(), whyCmd(), nodesCmd(), conceptCmd(),
+		communityCmd(),
 		reportCmd(), exportCmd(), installCmd(), mcpCmd(), versionCmd())
 	return root
 }

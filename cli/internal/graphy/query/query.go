@@ -77,6 +77,16 @@ func ResolveEntity(s *store.Store, arg string) (*model.Node, error) {
 	if len(fuzzy) > 0 {
 		return pick(fuzzy)
 	}
+	// `okfw search --node-id` hands agents these two strings, so they arrive
+	// here routinely. They are exported-concept ids, not node ids — no
+	// community or overview node exists in the nodes bucket — and "no entity
+	// matches" reads as "that subsystem is not in the graph", which is wrong.
+	if label, ok := strings.CutPrefix(arg, "community:"); ok {
+		return nil, fmt.Errorf("%q is a community concept, not a code entity — try `graphy community %s`", arg, label)
+	}
+	if strings.HasPrefix(arg, "graph:") {
+		return nil, fmt.Errorf("%q is the graph overview concept, not a code entity — try `graphy report`", arg)
+	}
 	return nil, fmt.Errorf("no entity matches %q", arg)
 }
 

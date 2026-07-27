@@ -70,3 +70,30 @@ func withBundle(s *store.Store, nodeID, conceptID, relPath string) (*Concept, er
 	}
 	return c, nil
 }
+
+// ConceptsForFile returns the concepts exported for the entities declared in a
+// repo-relative file, in source order.
+//
+// A file node is never exported — selectItems skips KindFile — yet both
+// `graphy concept` and the graphy_concept MCP tool advertise a repo-relative
+// path, and ResolveEntity honours it. So a path resolved to the file node and
+// then failed with "run `graphy export okfw`": advice that could never work,
+// because re-exporting will never produce a concept for a file. The answerable
+// question for a path is "what in here has been documented".
+func ConceptsForFile(s *store.Store, path string) ([]Concept, error) {
+	nodes, err := FileNodes(s, path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Concept, 0, len(nodes))
+	for _, n := range nodes {
+		c, err := ConceptFor(s, n.ID)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			out = append(out, *c)
+		}
+	}
+	return out, nil
+}

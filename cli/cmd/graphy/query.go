@@ -281,3 +281,61 @@ func headingText(line string) (string, bool) {
 	}
 	return strings.TrimSpace(line[n+1:]), true
 }
+
+// communityCmd closes the wiki→graph direction for subsystems.
+//
+// A community concept carries `graphy.node_id: community:<slug>` and
+// `okfw search --node-id` finds it, but nothing crossed back: ResolveEntity
+// only searches the nodes bucket and no community node lives there.
+func communityCmd() *cobra.Command {
+	var asJSON bool
+	var limit int
+	cmd := &cobra.Command{
+		Use:   "community <label-or-slug>",
+		Short: "A subsystem: its members and the concept documenting it",
+		Long: `Resolves a detected community by label, slug, or the ` + "`community:<slug>`" + `
+node id that ` + "`okfw search --node-id`" + ` reports, and lists its members most
+connected first.
+
+Communities are not nodes, so ` + "`graphy explain`" + ` cannot answer for one. This is
+the command that can.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+
+			card, err := query.Community(s, args[0], limit)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return json.NewEncoder(os.Stdout).Encode(card)
+			}
+			fmt.Printf("%s (community %d, %d entities)\n", card.Label, card.ID, card.Total)
+			if len(card.Languages) > 0 {
+				fmt.Printf("  languages: %s\n", strings.Join(card.Languages, ", "))
+			}
+			if card.Concept != nil {
+				path := card.Concept.Path
+				if path == "" {
+					path = card.Concept.RelPath
+				}
+				fmt.Printf("  concept:   %s\n", path)
+			}
+			fmt.Println()
+			for _, n := range card.Members {
+				fmt.Printf("  %s (%s, degree %d)  %s\n", n.Label, n.Kind, n.Degree, location(n))
+			}
+			if card.More {
+				fmt.Printf("  … %d more (raise --limit)\n", card.Total-len(card.Members))
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	cmd.Flags().IntVar(&limit, "limit", query.DefaultLimit, "maximum members listed")
+	return cmd
+}

@@ -306,6 +306,33 @@ reverse direction is ` + "`okfw search --node-id <id>`" + `.`,
 			if err != nil {
 				return err
 			}
+			// A file node is never exported, so asking it for "its" concept
+			// could only ever fail — and the failure advised an export that
+			// would never produce one. What a path can answer is which of the
+			// entities it declares have been documented.
+			if n.Kind == model.KindFile {
+				concepts, err := query.ConceptsForFile(s, n.File)
+				if err != nil {
+					return err
+				}
+				if asJSON {
+					return json.NewEncoder(os.Stdout).Encode(
+						map[string]interface{}{"file": n.File, "concepts": concepts})
+				}
+				if len(concepts) == 0 {
+					return fmt.Errorf("%s declares no exported concepts (its entities are below --min-degree, or the export has not run)", n.File)
+				}
+				fmt.Printf("%s — %d documented %s\n\n", n.File, len(concepts),
+					plural(len(concepts), "entity", "entities"))
+				for _, c := range concepts {
+					path := c.Path
+					if path == "" {
+						path = c.RelPath
+					}
+					fmt.Printf("  %s\n    %s\n", qualOf(c.NodeID), path)
+				}
+				return nil
+			}
 			c, err := query.ConceptFor(s, n.ID)
 			if err != nil {
 				return err
@@ -349,4 +376,20 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s[:n-1] + "…"
+}
+
+// qualOf renders the qualified-name half of a node id, which is the part a
+// reader recognizes.
+func qualOf(nodeID string) string {
+	if i := strings.LastIndex(nodeID, "#"); i >= 0 && i+1 < len(nodeID) {
+		return nodeID[i+1:]
+	}
+	return nodeID
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }

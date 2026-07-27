@@ -20,7 +20,12 @@ order:
 
 Edges are tagged EXTRACTED (trust it), INFERRED (usually right) or AMBIGUOUS
 (verify). Results are capped: `truncated` or `… N more` means you did not see
-everything. Test entities are excluded unless you pass `--tests`.
+everything — raise `--limit`/`"limit"` or narrow, rather than re-asking. This
+includes `graphy query`/`graphy_query`. Test entities are excluded unless you
+pass `--tests`/`"tests":true`.
 
 After editing code, run `graphy update` (incremental, sub-second) to keep the
-graph fresh. `graphy mcp` serves all of this as MCP stdio tools.
+graph fresh. `graphy mcp` serves all of this as MCP stdio tools, named
+`graphy_*`; over MCP, `graphy uses` is `graphy_neighbors` with
+`"direction":"out"`, and edges in `graphy_query`/`graphy_neighbors` index into
+the response's `nodes` array by position.

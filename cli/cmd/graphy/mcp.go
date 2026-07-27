@@ -203,10 +203,20 @@ func mcpTools() []map[string]interface{} {
 		{
 			"name": "graphy_concept",
 			"description": "The wiki concept documenting an entity: its OKF id and bundle path. " +
+				"A repo-relative file path returns every concept documented in that file. " +
 				"Use it to cross from the code graph into the wiki, then read the concept with okfw.",
 			"inputSchema": obj(map[string]interface{}{
 				"entity": str("entity name, node id, or repo-relative file path"),
 			}, "entity"),
+		},
+		{
+			"name": "graphy_community",
+			"description": "A subsystem: its members most connected first, and the concept documenting it. " +
+				"Communities are not nodes, so graphy_explain cannot answer for one — pass the `community:<slug>` node id okfw search reports here instead.",
+			"inputSchema": obj(map[string]interface{}{
+				"community": str("community label, slug, or community:<slug> node id"),
+				"limit":     num("maximum members (default 50)"),
+			}, "community"),
 		},
 		{
 			"name":        "graphy_rationale",
@@ -362,6 +372,8 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
 		return s.toolFileNodes(args)
 	case "graphy_concept":
 		return s.toolConcept(args)
+	case "graphy_community":
+		return s.toolCommunity(args)
 	case "graphy_rationale":
 		return s.toolRationale(args)
 	case "graphy_report":
@@ -749,6 +761,17 @@ func (s *mcpServer) toolConcept(args json.RawMessage) *toolResult {
 		if err != nil {
 			return errResult(err)
 		}
+		// A file node is never exported, so asking it for "its" concept could
+		// only ever fail — and the failure advised an export that would never
+		// produce one. What a path can answer is which of the entities it
+		// declares have been documented.
+		if n.Kind == model.KindFile {
+			concepts, err := query.ConceptsForFile(st, n.File)
+			if err != nil {
+				return errResult(err)
+			}
+			return jsonResult(map[string]interface{}{"file": n.File, "concepts": concepts})
+		}
 		c, err := query.ConceptFor(st, n.ID)
 		if err != nil {
 			return errResult(err)
@@ -757,6 +780,39 @@ func (s *mcpServer) toolConcept(args json.RawMessage) *toolResult {
 			return errResult(fmt.Errorf("%s has no exported concept (run `graphy export okfw`)", n.Label))
 		}
 		return jsonResult(c)
+	})
+}
+
+// toolCommunity closes the wiki→graph direction for subsystems: a community
+// concept carries a `community:<slug>` node id that nothing could resolve,
+// because communities are not nodes.
+func (s *mcpServer) toolCommunity(args json.RawMessage) *toolResult {
+	var p struct {
+		Community string `json:"community"`
+		Limit     int    `json:"limit"`
+	}
+	if err := json.Unmarshal(args, &p); err != nil || p.Community == "" {
+		return errResult(fmt.Errorf("community is required"))
+	}
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		card, err := query.Community(st, p.Community, p.Limit)
+		if err != nil {
+			return errResult(err)
+		}
+		out := map[string]interface{}{
+			"label":     card.Label,
+			"slug":      card.Slug,
+			"languages": card.Languages,
+			"members":   compactNodesWith(card.Members, conceptIndex(st)),
+		}
+		if card.Concept != nil {
+			out["concept"] = card.Concept.RelPath
+		}
+		if card.More {
+			out["truncated"] = true
+			out["total"] = card.Total
+		}
+		return jsonResult(out)
 	})
 }
 
