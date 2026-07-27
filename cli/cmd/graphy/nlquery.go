@@ -14,8 +14,8 @@ import (
 )
 
 func queryCmd() *cobra.Command {
-	var topN, depth int
-	var noLLM, asJSON bool
+	var topN, depth, limit int
+	var noLLM, asJSON, tests bool
 	var modelFlag string
 	cmd := &cobra.Command{
 		Use:   "query <question>",
@@ -43,7 +43,7 @@ query degrades to keyword search and still works offline.`,
 			// Leave Depth zero unless the user actually passed --depth, so an
 			// untouched flag lets the planner pick 2 for a flow question while
 			// an explicit --depth is honoured instead of being overridden.
-			opts := query.NLOptions{TopN: topN}
+			opts := query.NLOptions{TopN: topN, Limit: limit, IncludeTests: tests}
 			if cmd.Flags().Changed("depth") {
 				if depth < 1 || depth > query.MaxDepth {
 					return fmt.Errorf("--depth must be between 1 and %d", query.MaxDepth)
@@ -65,6 +65,8 @@ query degrades to keyword search and still works offline.`,
 	cmd.Flags().IntVar(&topN, "top", 1500, "candidate index size sent to the LLM")
 	cmd.Flags().IntVar(&depth, "depth", 1,
 		fmt.Sprintf("expansion depth around seed nodes, 1-%d (default: let the planner choose)", query.MaxDepth))
+	cmd.Flags().IntVar(&limit, "limit", query.DefaultLimit, "maximum entities returned, seeds first then most connected")
+	cmd.Flags().BoolVar(&tests, "tests", false, "include entities declared in test files")
 	cmd.Flags().BoolVar(&noLLM, "no-llm", false, "skip the LLM and use keyword search")
 	cmd.Flags().StringVar(&modelFlag, "model", "", "override the backend's default model")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit the raw subgraph as JSON")
@@ -104,6 +106,9 @@ func printNLResult(s storeReader, res *query.NLResult) {
 		if n.Doc != "" {
 			fmt.Printf("      %s\n", n.Doc)
 		}
+	}
+	if res.More {
+		fmt.Printf("  … %d more entities (raise --limit)\n", res.Total-len(res.Nodes))
 	}
 
 	if len(res.Edges) > 0 {

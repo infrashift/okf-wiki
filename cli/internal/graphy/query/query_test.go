@@ -2,6 +2,7 @@ package query
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -32,6 +33,50 @@ func fixture(t *testing.T) *store.Store {
 		{Source: "A", Target: "B", Relation: model.RelCalls, Confidence: model.ConfExtracted},
 		{Source: "B", Target: "C", Relation: model.RelCalls, Confidence: model.ConfInferred},
 		{Source: "DOC", Target: "A", Relation: model.RelReferences, Confidence: model.ConfExtracted},
+	}
+	if err := s.ReplaceEdges(edges); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecomputeDegrees(); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// hubFixture builds a star: one "hub" node with n leaves, every third of them
+// declared in a test file. Big enough to trip a result cap, which the small
+// fixture above deliberately is not.
+func hubFixture(t *testing.T, n int) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	nodes := []model.Node{{
+		ID: "hub", Label: "hub", Kind: model.KindFunction,
+		Language: "go", File: "hub.go", Doc: "the hub",
+	}}
+	var edges []model.Edge
+	for i := 0; i < n; i++ {
+		isTest := i%3 == 0
+		file := fmt.Sprintf("leaf%d.go", i)
+		if isTest {
+			file = fmt.Sprintf("leaf%d_test.go", i)
+		}
+		id := fmt.Sprintf("leaf%d", i)
+		nodes = append(nodes, model.Node{
+			ID: id, Label: id, Kind: model.KindFunction,
+			Language: "go", File: file, Test: isTest,
+		})
+		edges = append(edges, model.Edge{
+			Source: "hub", Target: id,
+			Relation: model.RelCalls, Confidence: model.ConfExtracted,
+		})
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
 	}
 	if err := s.ReplaceEdges(edges); err != nil {
 		t.Fatal(err)
@@ -111,29 +156,6 @@ func TestExplain(t *testing.T) {
 	}
 	if len(card.In) != 1 || card.In[0].Source != "A" {
 		t.Errorf("in = %+v", card.In)
-	}
-}
-
-func TestSubgraph(t *testing.T) {
-	s := fixture(t)
-	nodes, edges, err := Subgraph(s, []string{"A"}, 1, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := map[string]bool{}
-	for _, n := range nodes {
-		got[n.ID] = true
-	}
-	for _, want := range []string{"A", "B", "DOC"} {
-		if !got[want] {
-			t.Errorf("depth-1 subgraph missing %s: %v", want, got)
-		}
-	}
-	if got["C"] || got["D"] {
-		t.Errorf("depth-1 subgraph too large: %v", got)
-	}
-	if len(edges) != 2 {
-		t.Errorf("edges = %d, want 2 (%+v)", len(edges), edges)
 	}
 }
 
@@ -391,4 +413,38 @@ func TestParseVocabularyRejectsUnknownNames(t *testing.T) {
 			t.Errorf("ParseDirection(%q): %v", d, err)
 		}
 	}
+}
+
+// testSeedFixture: a test helper whose label matches the query better than the
+// production entity does, which is the situation keyword seeding gets wrong.
+func testSeedFixture(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	nodes := []model.Node{
+		{ID: "H", Label: "widgetTestHelper", Kind: model.KindFunction,
+			Language: "go", File: "widget_test.go", Test: true},
+		{ID: "W", Label: "widget", Kind: model.KindFunction,
+			Language: "go", File: "widget.go", Doc: "the widget"},
+		{ID: "N", Label: "widgetNext", Kind: model.KindFunction,
+			Language: "go", File: "next.go"},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	edges := []model.Edge{
+		{Source: "H", Target: "W", Relation: model.RelCalls, Confidence: model.ConfExtracted},
+		{Source: "W", Target: "N", Relation: model.RelCalls, Confidence: model.ConfExtracted},
+	}
+	if err := s.ReplaceEdges(edges); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecomputeDegrees(); err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

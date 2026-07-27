@@ -431,3 +431,63 @@ func TestMCPConceptBridge(t *testing.T) {
 		t.Errorf("nodes should carry their concept path: %s", out)
 	}
 }
+
+// TestMCPQueryAnnouncesItsCap pins the wire contract Wave 1 introduced:
+// graphy_query is bounded, it says when it withheld rows, and its edges index
+// into the node array rather than repeating two full node ids apiece.
+func TestMCPQueryAnnouncesItsCap(t *testing.T) {
+	s := mcpTestServer(t)
+
+	out, isErr := callTool(t, s, "graphy_query", `{"question":"run","limit":1}`)
+	if isErr {
+		t.Fatalf("graphy_query errored: %s", out)
+	}
+	var got struct {
+		Nodes []struct {
+			ID string `json:"id"`
+		} `json:"nodes"`
+		Edges []struct {
+			From int `json:"from"`
+			To   int `json:"to"`
+		} `json:"edges"`
+		Truncated bool `json:"truncated"`
+		Total     int  `json:"total"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("graphy_query result is not the declared shape: %v\n%s", err, out)
+	}
+	if len(got.Nodes) != 1 {
+		t.Errorf("limit:1 returned %d nodes", len(got.Nodes))
+	}
+	if !got.Truncated || got.Total <= 1 {
+		t.Errorf("withheld rows were not announced: truncated=%v total=%d", got.Truncated, got.Total)
+	}
+	for _, e := range got.Edges {
+		if e.From < 0 || e.From >= len(got.Nodes) || e.To < 0 || e.To >= len(got.Nodes) {
+			t.Errorf("edge endpoint %d->%d is not an index into %d nodes", e.From, e.To, len(got.Nodes))
+		}
+	}
+	if strings.Contains(out, `"from":"`) {
+		t.Errorf("edges still carry full node ids: %s", out)
+	}
+
+	if out, isErr := callTool(t, s, "graphy_query", `{"question":"run","limit":-1}`); !isErr {
+		t.Errorf("a negative limit should error, got: %s", out)
+	}
+}
+
+// TestMCPExplainOmitsTheConstantEndpoint: a card's edges all touch the entity
+// the card is about, so naming it on every edge is pure repetition.
+func TestMCPExplainOmitsTheConstantEndpoint(t *testing.T) {
+	s := mcpTestServer(t)
+	out, isErr := callTool(t, s, "graphy_explain", `{"entity":"Helper"}`)
+	if isErr {
+		t.Fatalf("graphy_explain errored: %s", out)
+	}
+	if strings.Contains(out, `"from":`) || strings.Contains(out, `"to":`) {
+		t.Errorf("card edges should name only their other end (`node`): %s", out)
+	}
+	if !strings.Contains(out, `"node":`) {
+		t.Errorf("card edges lost their other end: %s", out)
+	}
+}

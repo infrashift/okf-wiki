@@ -24,6 +24,16 @@ type NLOptions struct {
 	// explicitly it overrides the depth the LLM proposes; the LLM's choice
 	// only applies to a caller that expressed no preference.
 	Depth int
+	// Limit caps the returned nodes, seeds first then most connected.
+	// 0 = DefaultLimit.
+	//
+	// Depth bounded the expansion; nothing bounded the *result*, and depth 2
+	// from a hub seed is most of the graph — 199KB, ~50k tokens, on this
+	// repository's own graph, from the one tool whose description tells agents
+	// to prefer it over reading files.
+	Limit int
+	// IncludeTests keeps entities declared in test files, matching Neighbors.
+	IncludeTests bool
 }
 
 // NLResult is a natural-language query answer.
@@ -32,6 +42,8 @@ type NLResult struct {
 	Seeds []string
 	Nodes []model.Node
 	Edges []model.Edge
+	Total int  // nodes found before the limit
+	More  bool // Total exceeded Limit
 }
 
 const nlSystemPrompt = `You are a retrieval planner over a code knowledge graph.
@@ -100,15 +112,37 @@ func NL(ctx context.Context, s *store.Store, backend llm.Backend, question strin
 	if !explicitDepth && p.Depth > 0 {
 		depth = clampDepth(p.Depth)
 	}
-	nodes, edges, err := Subgraph(s, p.NodeIDs, depth, p.Relations)
+	return expand(s, p.NodeIDs, depth, p.Relations, opts, "llm:"+backend.Name())
+}
+
+// expand runs the bounded traversal both NL paths share, so the LLM-planned and
+// the keyword-fallback answers cannot differ in size or in ordering.
+//
+// It delegates to Neighbors rather than expanding here: Neighbors already owns
+// the cap, the test filter and the seeds-first-then-degree ordering that every
+// other traversal in this package reports, and a second implementation is how
+// the two drifted apart in the first place.
+func expand(s *store.Store, seeds []string, depth int, rels []model.Relation, opts NLOptions, mode string) (*NLResult, error) {
+	res, err := Neighbors(s, seeds, NeighborOptions{
+		Depth:        depth,
+		Direction:    Both,
+		Relations:    rels,
+		Limit:        opts.Limit,
+		IncludeTests: opts.IncludeTests,
+	})
 	if err != nil {
 		return nil, err
 	}
+	// res.Seeds is the seeds that actually resolved, not the ids the LLM
+	// proposed — reporting an id Neighbors skipped invites a follow-up query
+	// for a node that does not exist.
 	return &NLResult{
-		Mode:  "llm:" + backend.Name(),
-		Seeds: p.NodeIDs,
-		Nodes: nodes,
-		Edges: edges,
+		Mode:  mode,
+		Seeds: res.Seeds,
+		Nodes: res.Nodes,
+		Edges: res.Edges,
+		Total: res.Total,
+		More:  res.More,
 	}, nil
 }
 
@@ -174,15 +208,26 @@ func keywordFallback(s *store.Store, question string, opts NLOptions) (*NLResult
 	if err != nil {
 		return nil, err
 	}
-	seeds := make([]string, len(hits))
-	for i, h := range hits {
-		seeds[i] = h.ID
+	// Neighbors exempts seeds from the test filter, because a caller who names
+	// a test function must still get an answer. A keyword-scored seed is not
+	// that: nobody named it. Test helpers routinely carry the best-matching
+	// label — "how does the MCP server work" seeded on mcpTestServer — so the
+	// exemption has to stop at the boundary where the seed became a guess.
+	seeds := make([]string, 0, len(hits))
+	for _, h := range hits {
+		if h.Test && !opts.IncludeTests {
+			continue
+		}
+		seeds = append(seeds, h.ID)
 	}
-	nodes, edges, err := Subgraph(s, seeds, opts.Depth, nil)
-	if err != nil {
-		return nil, err
+	// Unless that leaves nothing: a question genuinely about the test suite
+	// should answer from the test suite rather than return an empty graph.
+	if len(seeds) == 0 {
+		for _, h := range hits {
+			seeds = append(seeds, h.ID)
+		}
 	}
-	return &NLResult{Mode: "keyword", Seeds: seeds, Nodes: nodes, Edges: edges}, nil
+	return expand(s, seeds, opts.Depth, nil, opts, "keyword")
 }
 
 // candidateIndex renders the top-N nodes by degree as compact TSV, keeping

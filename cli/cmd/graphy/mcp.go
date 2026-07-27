@@ -141,10 +141,13 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "graphy_query",
-			"description": "Ask the code knowledge graph a question. Returns relevant entities + relationships. Prefer this over scanning files for architecture/impact questions.",
+			"description": "Ask the code knowledge graph a question. Returns relevant entities + relationships; edges index into `nodes` by position. " +
+				"Capped at `limit` nodes — `truncated` means raise limit or narrow the question. Prefer this over scanning files for architecture/impact questions.",
 			"inputSchema": obj(map[string]interface{}{
 				"question": str("natural-language question about the codebase"),
 				"depth":    num("expansion depth 1-2 (default 1)"),
+				"limit":    num("maximum nodes (default 50)"),
+				"tests":    boolean("include entities declared in test files (default false)"),
 			}, "question"),
 		},
 		{
@@ -157,7 +160,7 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "graphy_explain",
-			"description": "Entity card: location, signature, doc, community, and its edges with confidence. Narrow with relations/direction on hub entities.",
+			"description": "Entity card: location, signature, doc, community, and its edges with confidence. Each edge names only its other end (`node`); this entity is the constant side. Narrow with relations/direction on hub entities.",
 			"inputSchema": obj(map[string]interface{}{
 				"entity":    str("entity name, node id, or repo-relative file path"),
 				"relations": strs("restrict to these relations, e.g. [\"calls\"]"),
@@ -168,7 +171,7 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name": "graphy_neighbors",
-			"description": "Entities around one you already know, to a bounded depth, filtered by relation and kind. " +
+			"description": "Entities around one you already know, to a bounded depth, filtered by relation and kind. Edges index into `nodes` by position. " +
 				"Deterministic — prefer this over graphy_query when you know the starting entity.",
 			"inputSchema": obj(map[string]interface{}{
 				"entity":    str("entity name, node id, or repo-relative file path"),
@@ -387,11 +390,58 @@ type mcpNode struct {
 	Concept string `json:"concept,omitempty"`
 }
 
+// mcpEdge references its endpoints by index into the same response's `nodes`
+// array.
+//
+// Two full node ids per edge was two thirds of every subgraph payload — a
+// depth-2 query on this repository's own graph carried 111KB of edges against
+// 56KB of nodes, and every one of those id strings was already sitting in
+// `nodes`. Edges are always induced over the nodes that survived the cap, so an
+// index is always defined.
 type mcpEdge struct {
-	From       string `json:"from"`
+	From       int    `json:"from"`
 	Rel        string `json:"rel"`
-	To         string `json:"to"`
+	To         int    `json:"to"`
 	Confidence string `json:"conf"`
+}
+
+// mcpCardEdge is an edge on an entity card, which names only the other end.
+//
+// A card's In and Out lists come from InEdges/OutEdges on one node, so every
+// Out edge has from == the entity and every In edge has to == the entity. The
+// old shape emitted that constant once per edge, up to the 50-edge cap.
+type mcpCardEdge struct {
+	Rel        string `json:"rel"`
+	Node       string `json:"node"` // the other end; the entity is the card's `id`
+	Confidence string `json:"conf"`
+}
+
+// nodeIndex maps node id to position in a rendered node list, for mcpEdge.
+func nodeIndex(nodes []mcpNode) map[string]int {
+	idx := make(map[string]int, len(nodes))
+	for i, n := range nodes {
+		idx[n.ID] = i
+	}
+	return idx
+}
+
+// compactEdges projects edges to index form, dropping any edge whose endpoints
+// did not both survive the node cap.
+func compactEdges(edges []queryEdge, idx map[string]int) []mcpEdge {
+	out := make([]mcpEdge, 0, len(edges))
+	for _, e := range edges {
+		from, ok := idx[e.Source]
+		if !ok {
+			continue
+		}
+		to, ok := idx[e.Target]
+		if !ok {
+			continue
+		}
+		out = append(out, mcpEdge{From: from, Rel: string(e.Relation), To: to,
+			Confidence: string(e.Confidence)})
+	}
+	return out
 }
 
 // maxNodeBody caps the rationale prose carried inline on a node.
@@ -448,12 +498,17 @@ func (s *mcpServer) toolQuery(args json.RawMessage) *toolResult {
 	var p struct {
 		Question string `json:"question"`
 		Depth    int    `json:"depth"`
+		Limit    int    `json:"limit"`
+		Tests    bool   `json:"tests"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil || p.Question == "" {
 		return errResult(fmt.Errorf("question is required"))
 	}
 	if p.Depth != 0 && (p.Depth < 1 || p.Depth > query.MaxDepth) {
 		return errResult(fmt.Errorf("depth must be between 1 and %d", query.MaxDepth))
+	}
+	if p.Limit < 0 {
+		return errResult(fmt.Errorf("limit must not be negative"))
 	}
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
 		backend, err := llm.FromEnv("")
@@ -462,19 +517,23 @@ func (s *mcpServer) toolQuery(args json.RawMessage) *toolResult {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), toolCallTimeout)
 		defer cancel()
-		res, err := query.NL(ctx, st, backend, p.Question, query.NLOptions{Depth: p.Depth})
+		res, err := query.NL(ctx, st, backend, p.Question, query.NLOptions{
+			Depth: p.Depth, Limit: p.Limit, IncludeTests: p.Tests,
+		})
 		if err != nil {
 			return errResult(err)
 		}
-		edges := make([]mcpEdge, 0, len(res.Edges))
-		for _, e := range res.Edges {
-			edges = append(edges, mcpEdge{From: e.Source, Rel: string(e.Relation), To: e.Target, Confidence: string(e.Confidence)})
-		}
-		return jsonResult(map[string]interface{}{
+		nodes := compactNodesWith(res.Nodes, conceptIndex(st))
+		out := map[string]interface{}{
 			"mode":  res.Mode,
-			"nodes": compactNodesWith(res.Nodes, conceptIndex(st)),
-			"edges": edges,
-		})
+			"nodes": nodes,
+			"edges": compactEdges(res.Edges, nodeIndex(nodes)),
+		}
+		if res.More {
+			out["truncated"] = true
+			out["total"] = res.Total
+		}
+		return jsonResult(out)
 	})
 }
 
@@ -544,11 +603,17 @@ func (p traverseParams) edgeQuery(dir query.Direction) (query.EdgeQuery, error) 
 	}, nil
 }
 
-// compactEdges projects edges to the compact wire shape.
-func compactEdges(list []queryEdge) []mcpEdge {
-	out := make([]mcpEdge, len(list))
+// compactCardEdges projects one entity's edges, naming only the other end.
+// `self` is the entity the card is about, which sits on the constant side.
+func compactCardEdges(list []queryEdge, self string) []mcpCardEdge {
+	out := make([]mcpCardEdge, len(list))
 	for i, e := range list {
-		out[i] = mcpEdge{From: e.Source, Rel: string(e.Relation), To: e.Target, Confidence: string(e.Confidence)}
+		other := e.Target
+		if other == self {
+			other = e.Source
+		}
+		out[i] = mcpCardEdge{Rel: string(e.Relation), Node: other,
+			Confidence: string(e.Confidence)}
 	}
 	return out
 }
@@ -575,8 +640,8 @@ func (s *mcpServer) toolExplain(args json.RawMessage) *toolResult {
 			"node":      compactNodesWith([]queryNode{card.Node}, conceptIndex(st))[0],
 			"signature": card.Node.Signature,
 			"community": card.CommunityLabel,
-			"out":       compactEdges(card.Out),
-			"in":        compactEdges(card.In),
+			"out":       compactCardEdges(card.Out, card.Node.ID),
+			"in":        compactCardEdges(card.In, card.Node.ID),
 		}
 		// Only ever set when edges were withheld, so a caller can tell a short
 		// list from a capped one instead of assuming it saw everything.
@@ -620,10 +685,11 @@ func (s *mcpServer) toolNeighbors(args json.RawMessage) *toolResult {
 		if err != nil {
 			return errResult(err)
 		}
+		nodes := compactNodesWith(res.Nodes, conceptIndex(st))
 		out := map[string]interface{}{
 			"seed":  n.ID,
-			"nodes": compactNodesWith(res.Nodes, conceptIndex(st)),
-			"edges": compactEdges(res.Edges),
+			"nodes": nodes,
+			"edges": compactEdges(res.Edges, nodeIndex(nodes)),
 		}
 		if res.More {
 			out["truncated"] = true
