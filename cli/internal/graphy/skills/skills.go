@@ -118,6 +118,21 @@ func Install(opts Options) (*Result, error) {
 	return res, nil
 }
 
+// Docs renders the skill and the agent-instructions block for a repository,
+// without writing anything.
+//
+// Exported so the CLI package can check the two against the command set it
+// actually registers. The skill is the only description of graphy an agent
+// ever reads, and it drifting from the binary is not hypothetical: it
+// advertised impact analysis for months while no command answered it.
+func Docs(repo string) (skill, instructions string, err error) {
+	if skill, err = render(skillTmpl, repo); err != nil {
+		return "", "", err
+	}
+	instructions, err = render(instructionsTmpl, repo)
+	return skill, instructions, err
+}
+
 func render(tmpl, repo string) (string, error) {
 	t, err := template.New("asset").Parse(tmpl)
 	if err != nil {

@@ -1,47 +1,88 @@
 ---
 name: graphy
-description: Query {{ .Repo }}'s code knowledge graph instead of scanning files. Use for architecture questions ("how does X work", "what are the subsystems"), impact analysis ("what calls Y", "what depends on Z"), and finding connections between entities. Also use after editing code to refresh the graph.
+description: Query {{ .Repo }}'s code knowledge graph instead of scanning files. Use for architecture questions ("how does X work", "what are the subsystems"), impact analysis ("what calls Y", "what breaks if I change Z"), finding what tests or documents something, and reading recorded rationale before changing unfamiliar code. Also use after editing code to refresh the graph.
 ---
 
 # graphy — code knowledge graph
 
-This repository has a pre-built knowledge graph (`.graphy/`) of its code:
-functions, methods, types, docs, and their typed relationships (calls,
-imports, inherits, implements, references, contains, defines, explains), each
-tagged EXTRACTED, INFERRED, or AMBIGUOUS by resolution confidence.
+This repository has a pre-built graph (`.graphy/`) of its code: functions,
+methods, types, docs and config, joined by typed relationships — `calls`,
+`imports`, `inherits`, `implements`, `references`, `contains`, `defines`,
+`explains`, `tests`, `depends_on`. Every edge records how it was established:
 
-It also records *why* the code is the way it is: `rationale` nodes, extracted
-from marked comments (WHY:, RATIONALE:, DECISION:, HACK:, FIXME:, TODO:) and
-from architecture decision records, linked to what they justify by `explains`
-edges. Check an entity's rationale before changing unfamiliar code.
+- **EXTRACTED** — stated in the source and resolved unambiguously. Trust it.
+- **INFERRED** — resolved through a unique global match. Usually right.
+- **AMBIGUOUS** — several plausible targets. Verify before relying on it.
 
-Prefer graph queries over file scanning for structural questions — one query
-replaces many file reads.
+One query replaces many file reads. Prefer the graph for structural questions.
 
-## Commands
+## The loop
 
-- `graphy query "<question>"` — natural-language question; returns the
-  relevant subgraph. Works offline (keyword mode) without an API key.
-- `graphy path <a> <b>` — shortest connection between two entities.
-- `graphy explain <entity>` — entity card: location, signature, doc,
-  community, and every in/out edge.
-- `graphy report` — GRAPH_REPORT.md: stats, god nodes (flow hubs),
-  detected communities, recorded rationale. Read this first for architecture
-  overviews.
+Work down this list; each step narrows what you have to read.
 
-Asking "why does X work this way?" surfaces the rationale attached to X,
-offline, because rationale prose is keyword-searchable.
+**1. Orient** — `graphy report --sections`, then `graphy report --section
+"<name>"`. Stats, the most-connected entities, and the detected subsystems.
+Do this before broad architecture questions; skip it when you already know
+which entity you care about.
 
-Entities are matched by name (`CreateConcept`), qualified name
-(`Store.PutFile`), or id; ambiguous names list candidates.
+**2. Locate** — get a foothold:
 
-## Freshness
+- You know the file: `graphy nodes --file path/to/file.go`
+- You know the name: use it directly. Every command accepts a name
+  (`CreateConcept`), a qualified name (`Store.PutFile`), a node id, or a
+  repo-relative file path.
+- You know neither: `graphy query "<question>"`. This is the only
+  non-deterministic command here — it picks its starting points by model or
+  keyword score — so use it to *find* an entity, then switch to the commands
+  below.
 
-After editing code, run `graphy update` (incremental; sub-second) so
-queries reflect your changes.
+**3. Expand** — `graphy neighbors <entity>` for what surrounds it. Narrow with
+`--rel calls`, `--kind function`, `--direction out`, `--depth 2`.
+`graphy explain <entity>` gives one entity in full instead: location,
+signature, doc, community and its edges (same `--rel`/`--direction`/`--limit`).
 
-## MCP alternative
+**4. Assess impact** — before changing anything:
 
-`graphy mcp` serves the same capabilities as MCP stdio tools
-(graphy_query, graphy_path, graphy_explain, graphy_rationale, graphy_report,
-graphy_update).
+- `graphy callers <entity>` — what calls, imports, implements, tests or
+  documents it. This is "what breaks if I change this".
+- `graphy uses <entity>` — what it depends on.
+- `graphy callers <entity> --rel tests --tests` — just its test suite.
+- `graphy path <a> <b>` — how two entities connect at all.
+
+**5. Understand intent** — `graphy why <entity>` returns the WHY:, DECISION:
+and RATIONALE: comments and the architecture decision records attached to it.
+Read this before changing unfamiliar code: it is the reasoning that is not in
+the signature.
+
+**6. Read** — `graphy concept <entity>` gives the wiki concept documenting it,
+which `okfw read` opens. Otherwise take the location any command prints and
+read the source.
+
+**7. Refresh** — after editing, `graphy update` (incremental, sub-second), so
+the next query reflects your changes.
+
+## Bounds
+
+Every traversal is capped and says so. A result carrying `truncated`, or
+printing `… N more`, means you did **not** see everything — raise `--limit` or
+narrow with `--rel`. Test entities are excluded by default, because a
+well-tested function's neighbourhood is mostly its own suite; `--tests`
+includes them.
+
+## Crossing into the wiki
+
+Entities significant enough to document are exported as OKF concepts:
+
+- graph → wiki: `graphy concept <entity>`
+- wiki → graph: `okfw search --node-id <node id>`
+
+Use the wiki for prose, decisions and hand-written context; use the graph for
+structure.
+
+## MCP
+
+`graphy mcp` serves the same capabilities as stdio tools: `graphy_report`,
+`graphy_file_nodes`, `graphy_query`, `graphy_neighbors`, `graphy_callers`,
+`graphy_explain`, `graphy_path`, `graphy_rationale`, `graphy_concept`,
+`graphy_update`. Every node they return carries the `concept` documenting it,
+when one exists.

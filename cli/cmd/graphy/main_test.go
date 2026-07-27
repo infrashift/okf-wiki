@@ -1,6 +1,8 @@
 package main
 
 import (
+	"okfw/cli/internal/graphy/skills"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -192,5 +194,78 @@ func TestRootCommandSilencesCobraErrorPrinting(t *testing.T) {
 	// Without SilenceErrors, cobra prints the error and main prints it again.
 	if !rootCmd().SilenceErrors {
 		t.Error("rootCmd must set SilenceErrors; main() prints the error itself")
+	}
+}
+
+// TestSkillDocumentsEveryCommand keeps the agent-facing documentation honest
+// against the binary.
+//
+// The skill is the only description of graphy most agents ever read, and the
+// two drifting apart is not hypothetical: the skill advertised impact analysis
+// ("what calls Y") for months while no command answered it, so an agent
+// following it had to improvise. A command nobody documents is a command
+// nobody uses; a documented command that does not exist is worse.
+func TestSkillDocumentsEveryCommand(t *testing.T) {
+	skill, instructions, err := skills.Docs("testrepo")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Commands that carry no agent-facing capability: setup and plumbing.
+	exempt := map[string]bool{
+		"init": true, "install": true, "mcp": true, "version": true,
+		"build": true, "export": true, "help": true, "completion": true,
+	}
+	for _, c := range rootCmd().Commands() {
+		name := c.Name()
+		if exempt[name] {
+			continue
+		}
+		if !strings.Contains(skill, "graphy "+name) {
+			t.Errorf("SKILL.md does not mention `graphy %s`", name)
+		}
+	}
+
+	// And every MCP tool, since an agent may only see those.
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		if !strings.Contains(skill, name) {
+			t.Errorf("SKILL.md does not mention the MCP tool %s", name)
+		}
+	}
+
+	// The instructions block is injected into CLAUDE.md/AGENTS.md and rides in
+	// every context, so it stays short — but it must still name the steps that
+	// change what an agent does.
+	for _, must := range []string{
+		"graphy callers", "graphy why", "graphy nodes --file", "graphy update",
+	} {
+		if !strings.Contains(instructions, must) {
+			t.Errorf("instructions block does not mention %q", must)
+		}
+	}
+	if lines := strings.Count(instructions, "\n"); lines > 40 {
+		t.Errorf("instructions block is %d lines; it is injected into every agent context", lines)
+	}
+}
+
+// TestSkillPromisesOnlyRealCommands is the other direction: every `graphy X`
+// the documentation names must actually be a registered command.
+func TestSkillPromisesOnlyRealCommands(t *testing.T) {
+	skill, instructions, err := skills.Docs("testrepo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	real := map[string]bool{}
+	for _, c := range rootCmd().Commands() {
+		real[c.Name()] = true
+	}
+	re := regexp.MustCompile(`graphy ([a-z][a-z-]*)`)
+	for _, doc := range []string{skill, instructions} {
+		for _, m := range re.FindAllStringSubmatch(doc, -1) {
+			if !real[m[1]] {
+				t.Errorf("documentation promises `graphy %s`, which is not a command", m[1])
+			}
+		}
 	}
 }

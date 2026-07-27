@@ -1,17 +1,26 @@
 ## Code knowledge graph (graphy)
 
 This repository has a pre-built code knowledge graph in `.graphy/`. For
-architecture and impact questions, query the graph instead of scanning files:
+structural questions, query the graph instead of scanning files — in this
+order:
 
-- `graphy query "<question>"` — relevant entities + relationships for a
-  natural-language question (works offline without an API key)
-- `graphy path <a> <b>` — how two entities connect
-- `graphy explain <entity>` — location, signature, community, all edges
-- `graphy report` — stats, god nodes, subsystem communities, rationale
+1. **Orient** — `graphy report --sections`, then `--section "<name>"`.
+2. **Locate** — `graphy nodes --file <path>` when you know the file; the name
+   directly when you know it; `graphy query "<question>"` when you know
+   neither. Entities resolve by name, qualified name, node id, or file path.
+3. **Expand** — `graphy neighbors <entity>` (`--rel`, `--kind`, `--depth`,
+   `--direction`).
+4. **Impact** — `graphy callers <entity>` before changing anything;
+   `graphy uses <entity>` for the reverse; `graphy path <a> <b>` for how two
+   things connect.
+5. **Intent** — `graphy why <entity>` for the WHY:/DECISION: comments and ADRs
+   attached to it. Read this before changing unfamiliar code.
+6. **Read** — `graphy concept <entity>` gives the wiki concept documenting it
+   (`okfw search --node-id` goes the other way).
 
-The graph also holds `rationale` nodes — WHY:/DECISION:/HACK: comments and
-architecture decision records — joined to the code they justify by `explains`
-edges. Ask "why does X work this way?" before changing unfamiliar code.
+Edges are tagged EXTRACTED (trust it), INFERRED (usually right) or AMBIGUOUS
+(verify). Results are capped: `truncated` or `… N more` means you did not see
+everything. Test entities are excluded unless you pass `--tests`.
 
 After editing code, run `graphy update` (incremental, sub-second) to keep the
-graph fresh. `graphy mcp` serves these as MCP stdio tools.
+graph fresh. `graphy mcp` serves all of this as MCP stdio tools.
