@@ -24,6 +24,9 @@ cli/internal/bundle/         — Shared bundle write-path (concept creation, fro
 cli/internal/graph/          — In-memory graph + rendering (ASCII tree, Mermaid)
 cli/internal/graphdb/        — okfw persistent graph store (bbolt, 4 predicates)
 cli/internal/index/          — Bleve full-text search index
+cli/internal/agentskill/     — Shared agent-skill installer (tool-neutral; used by
+                               BOTH binaries, so okfw need not import graphy)
+cli/internal/okfwskills/     — okfw's SKILL.md / CLAUDE.md-block templates
 cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git project-context helper
 cli/internal/graphy/         — graphy packages: model, store (own bbolt schema with
@@ -286,6 +289,32 @@ withheld rows, and an unknown relation/kind/direction is a hard error listing th
 vocabulary rather than a silently-ignored filter, which would widen the query to
 everything and read as "no matches". Test entities are excluded by default.
 
+**That cap rule now covers the whole MCP surface, in both binaries, and
+`TestEveryMCPToolIsCappedAndSaysSo` is what keeps it there** — driven from
+`mcpTools()` so a tool added later cannot escape. It exists for the same reason
+`TestExportStaysWithinItsTokenBudget` does: every other MCP test asserts a tool
+*returns* something, so all of them push toward returning more. `graphy_query`
+was the proof — the tool whose own description says to prefer it over reading
+files returned 199,703 bytes (~50k tokens) at `depth:2` on this repo's graph,
+uncapped, with no `truncated` flag because there was nothing to truncate
+against. `query.Subgraph` was deleted rather than capped: `Neighbors` already
+did the same expansion *plus* the cap, the test filter and the ordering, and a
+second uncapped BFS reachable inside the package is how the defect happened.
+Both NL paths now go through one `expand()` helper. Keyword-scored seeds skip
+test entities, unlike named ones — `Neighbors` exempts seeds so that naming a
+test function still answers, but nobody named a keyword seed, and test helpers
+routinely own the best-matching label ("how does the MCP server work" seeded on
+`mcpTestServer`).
+
+Two wire shapes follow from that. `mcpEdge` references its endpoints by
+**index into the same response's `nodes` array** — the edge block was two thirds
+of every subgraph payload and every id in it was already in `nodes`; edges are
+induced over the nodes that survived the cap, so an index is always defined. And
+an entity card's edges name only their other end, since every `Out` edge's
+source is the entity the card is about. `graphy report` with no section returns
+the small sections and *names* the large ones (35,132 → ~2,000 bytes here);
+`--full` keeps the whole thing.
+
 **The bridge.** `graphy export okfw` records `store.MetaBundleKey` (the bundle
 root) alongside each `ExportRecord`, because a record holds a *bundle-relative*
 path and nothing else identified the bundle — so the mapping could not be turned
@@ -295,7 +324,38 @@ the Bleve index as a keyword field. Every node graphy's MCP tools return carries
 its `concept` path. `cmd/graphy`'s `TestSkillDocumentsEveryCommand` /
 `TestSkillPromisesOnlyRealCommands` check the agent skill against the registered
 command set in both directions: the skill advertised impact analysis for months
-while no command answered it, and that drift is now a test failure.
+while no command answered it, and that drift is now a test failure. `cmd/okfw`
+has the same pair plus `TestUpdateToolMatchesTheCLIWriters`, which is why
+`main()`'s command tree is extracted into `rootCmd()`.
+
+**`syncBundle` reconciles, it does not replay.** It takes both what pass 2 wrote
+and *every* concept the run placed, and unions in anything the Bleve index or
+the graph db is missing. Keying only off what was written meant a lost
+`.okfw/.index` was never rebuilt: a re-export finds every concept byte-identical,
+writes nothing, and so indexed nothing — leaving `okfw search --node-id` dead
+for good. It also **creates** `.graph.db` when absent (with a full walk, so
+hand-written concepts are in it too) and says so, because the whole exported
+tree — one `parent:` edge per concept — was otherwise invisible to every okfw
+graph command until a `graph-sync` nothing mentioned. Conversely
+`graphdb.OpenExisting` is what the four `okfw graph-query` subcommands use:
+`bolt.Open` *creates* the file, and every command that chooses between the store
+and a filesystem scan by whether it exists then answered from the empty store,
+permanently, from one read-only query.
+
+`scanExisting` walks the **whole bundle**, and a concept found outside the
+export directory is moved back through `bundle.MoveConcept`. `okfw move` cannot
+update the exports bucket (cmd/okfw imports no graphy package), so a
+directory-scoped scan missed it, `adoptRenames` skipped it, and the export
+created a duplicate carrying the same `graphy.node_id`. Recovering it in place is
+not an option while `linkTo` emits a bare `./<file>.md`.
+
+Exported concepts carry **`kind: "code"`**. Without it `GetKind` falls through
+its legacy `type` switch — `code-function` matches nothing — and returns
+`"note"`, so `okfw search --kind note` handed back the entire code export
+alongside the notes it was asked for, and `SearchOptions` has no negation with
+which to exclude it. `GetKind` also classifies any concept carrying a `graphy`
+block as code on read, so bundles exported by an older graphy separate without a
+rewrite.
 
 ## Data Model
 
@@ -307,8 +367,10 @@ Placement: an explicit `--path` wins, else an explicit `--project` name as a
 top-level folder, else the wiki root. Concepts may live in any directory and
 are still found by id (lookup scans the whole bundle). `project` is optional
 metadata, never auto-derived.
-Kinds (`kind`): `note` (default), `daily-note`, `issue`. OKF's required
-free-form `type` field is also written on every concept.
+Kinds (`kind`): `note` (default), `daily-note`, `issue`, and `code` — the last
+written only by `graphy export okfw`, never by `okfw create`. OKF's required
+free-form `type` field is also written on every concept; for a code concept it
+is the finer `code-<entity>`, which `--type` filters on.
 Links: vanilla markdown links to bundle-relative (`/dir/file.md`) or relative
 (`./file.md`) paths.
 
@@ -399,7 +461,16 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   its single `syncBundle` pass).
 - The Bleve index is pruned by `bundle.PruneIndex`, wired into `graph-sync`.
   Nothing used to prune it, so a deleted concept stayed in `okfw search` results
-  forever — `search` reports index hits without stat-ing the file.
+  forever — `search` reports index hits without stat-ing the file. Bulk writers
+  use `bundle.IndexFiles` (one open/close for the batch) and reconcile against
+  `bundle.IndexedIDs`, which must **not** create the index it only reads.
+- Search snippets use a registered plain highlighter, not bleve's default. The
+  default is `html`, whose formatter runs `html.EscapeString` over the text
+  *surrounding* each match — so a snippet of a markdown concept came back with
+  `&amp;` and `&lt;` in it. That was corruption, not markup, and stripping the
+  `<mark>` tags would not have fixed it. The highlighted field is pinned on the
+  request too: it used to be whichever key ranging `hit.Fragments` yielded
+  first, which is a Go map.
 - CUE schemas enforce all validation (concept frontmatter, graph edges)
 - bbolt (BoltDB) is the persistent graph store — single-file, read-optimized, pure Go
 - Bleve is the full-text search engine — separate from the graph store
@@ -407,7 +478,33 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - Run `okfw graph-sync` to build/update the persistent graph for O(1) backlink lookups
 - Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing, auto-maintained by okfw on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
 - The Neovim plugin uses snacks.nvim for pickers (not telescope), and needs `plenary.job` at **runtime**, not only for tests
-- `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated tools (search/create/read/update/graph), compact JSON, no protocol dependency. `update` actions must stay at parity with the CLI writers. `read` takes `section`/`offset`/`limit` rather than always dumping a whole concept, and `search` takes `node_id` — the wiki→graph half of the bridge, which needs `graphy.node_id` indexed as a Bleve keyword field (`bundle.IndexFile` populates it from the frontmatter extension block)
+- `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated
+  tools, advertised as `okfw_search`/`okfw_create`/`okfw_read`/`okfw_update`/
+  `okfw_graph` (`read` and `search` are not distinctive names in a client that
+  flattens across servers) with the bare names still dispatching. Compact JSON,
+  no protocol dependency. `update` actions must stay at parity with the CLI
+  writers — a claim that went unchecked long enough to become false, so
+  `TestUpdateToolMatchesTheCLIWriters` now pins it, and the actions share the
+  CLI's frontmatter mutators rather than reimplementing them. `read` takes
+  `section`/`offset`/`limit` and caps at 200 lines rather than dumping a whole
+  concept; `search` takes `node_id` — the wiki→graph half of the bridge, which
+  needs `graphy.node_id` indexed as a Bleve keyword field (`bundle.IndexFile`
+  populates it from the frontmatter extension block) — plus `type`, `offset`,
+  and `kind: "code"` for separating graphy's export from hand-written notes
+- Both binaries install an agent skill through `cli/internal/agentskill`
+  (`okfw install` / `graphy install`), which owns the platform mechanics —
+  SKILL.md placement, the managed CLAUDE.md/GEMINI.md/AGENTS.md block, the
+  Claude hook merge. It is deliberately tool-neutral because okfw must not
+  import a graphy package, and the marker block is namespaced by tool so both
+  can maintain one in the same file. Each tool's package holds only its two
+  templates. Both skills are written **dual-surface** — every step gives the CLI
+  form and the MCP tool on the same line. A trailing flat list of tool names is
+  what let graphy's procedure stay CLI-only while its drift test passed, so an
+  MCP agent was reading steps written in flags it cannot pass
+- The OKF-family CLI writers use `bundle.GuardMutation`, not
+  `ValidateGenerated`. The latter is unconditional, so `okfw set-lifecycle` on a
+  malformed concept refused and the CLI had no way to repair a broken file —
+  contradicting the invariant stated below
 - `cli/internal/bundle` is the shared write path for **both** binaries, so it owns
   its tests. Do not reintroduce the pass-through wrappers that used to sit in
   `cmd/okfw/main.go` (`slugify`, `noteFilename`, …): they existed only so

@@ -75,6 +75,16 @@ pass "tree-sitter extraction works in this image (CGo is linked correctly)"
 
 # ── Export into an okfw bundle and have okfw validate what graphy wrote.
 okfw init >/dev/null
+
+# A read-only graph query must not bring the graph database into existence.
+# bolt.Open creates the file, and every command that chooses between the store
+# and a filesystem scan by whether it exists then answered from the empty store
+# — permanently, from one query.
+if okfw graph-query dangling >/dev/null 2>&1; then
+	fail "okfw graph-query succeeded with no graph database"
+fi
+[ ! -f .okfw/.graph.db ] || fail "okfw graph-query created an empty graph database"
+pass "a read-only graph query does not create the graph database"
 # --min-degree 1 on a fixture this small: the default of 3 would export only the
 # few hub entities, leaving the bridge and traversal checks below with nothing
 # to resolve. It also exercises a non-default threshold.
@@ -95,6 +105,37 @@ pass "okfw validate --all accepts every graphy-generated concept"
 
 okfw validate --okf || fail "the exported bundle is not OKF-conformant"
 pass "the exported bundle is OKF-conformant"
+
+# The export must leave okfw's link graph usable. Without this the whole
+# exported tree — one `parent:` edge per concept — was invisible to okfw graph,
+# backlinks and graph-query until a graph-sync nothing mentioned.
+[ -f .okfw/.graph.db ] || fail "the export did not build the bundle's link graph"
+okfw graph-query dangling >/dev/null || fail "okfw graph-query cannot read the graph the export built"
+pass "the export builds a usable link graph"
+
+# Code concepts must be separable from hand-written ones. Every exported concept
+# used to index as kind "note", so an agent asking for its notes got the whole
+# code export as well, with no way to exclude it.
+okfw search --kind code --json >code.json 2>&1 || fail "okfw search --kind code"
+grep -q '"title"' code.json || {
+	cat code.json >&2
+	fail "no concept is indexed as kind code"
+}
+okfw search --kind note --json >notes.json 2>&1 || fail "okfw search --kind note"
+grep -q '"title"' notes.json && {
+	cat notes.json >&2
+	fail "a generated concept is still indexed as kind note"
+}
+pass "graphy's concepts are separable from hand-written notes (--kind code/note)"
+
+# A repo-relative path resolves to the file node, which is never exported — so
+# this used to fail with advice ("run graphy export okfw") that could never work.
+graphy concept src/server.go --json >filecpt.json 2>&1 || fail "graphy concept <file path>"
+grep -q "Greet" filecpt.json || {
+	cat filecpt.json >&2
+	fail "graphy concept <file path> did not list the entities documented in it"
+}
+pass "graphy concept answers for a repo-relative file path"
 
 # ── A second export must be a no-op. This is graphy's idempotency contract, and
 #    it is easy to break: any stamp that moves on every run defeats it.
@@ -133,6 +174,44 @@ grep -q '"title":"Greet"' bridge.json || grep -q '"title": "Greet"' bridge.json 
 	fail "okfw could not find the concept for $node_id"
 }
 pass "the node id round-trips: graphy concept -> okfw search --node-id"
+
+# The bridge must survive a lost search index. A re-export finds every concept
+# byte-identical and writes nothing, so keying the index refresh off what was
+# written left `okfw search --node-id` returning zero hits for good.
+rm -rf .okfw/.index
+graphy export okfw --min-degree 1 >export3.log 2>&1 || {
+	cat export3.log >&2
+	fail "re-export after deleting the search index"
+}
+grep -qE '0 created, 0 updated' export3.log || {
+	cat export3.log >&2
+	fail "the repairing re-export rewrote concepts"
+}
+okfw search --node-id "$node_id" --json >bridge2.json 2>&1 ||
+	fail "okfw search --node-id failed after the index was rebuilt"
+grep -q "Greet" bridge2.json || {
+	cat bridge2.json >&2
+	fail "a no-op re-export did not rebuild the lost search index"
+}
+pass "a no-op re-export repairs a deleted search index"
+
+# okfw move cannot update graphy'"'"'s exports bucket, so the next export used to
+# create a duplicate: two concepts carrying the same node id.
+okfw move "$concept_path" archive/ >/dev/null || fail "okfw move"
+graphy export okfw --min-degree 1 >export4.log 2>&1 || {
+	cat export4.log >&2
+	fail "re-export after okfw move"
+}
+grep -qE '0 created' export4.log || {
+	cat export4.log >&2
+	fail "the moved concept was duplicated rather than adopted"
+}
+okfw search --node-id "$node_id" --json >bridge3.json 2>&1 || fail "okfw search --node-id after move"
+[ "$(grep -o '"id"' bridge3.json | wc -l)" -eq 1 ] || {
+	cat bridge3.json >&2
+	fail "node id $node_id is on more than one concept"
+}
+pass "a concept moved by okfw is adopted, not duplicated"
 
 # ── Deterministic traversal. These answer impact questions without a model, so
 #    a missing edge here is a silently wrong answer rather than a crash.
