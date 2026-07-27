@@ -2,6 +2,54 @@
 
 All notable changes to this project are documented here.
 
+## 2026-07-25
+
+### Changed (breaking)
+- **okfw now targets OKF v0.2** (released 2026-07-24). The bundle-root `index.md` declares `okf_version: "0.2"`. Three optional metadata families are implemented, each with a CLI writer:
+  - **Lifecycle** (spec §5.4–5.5): `status` (`draft`/`stable`/`deprecated`; absent means `stable`) and `stale_after`, an absolute date — a concept is stale once today is on or after it. `okfw set-lifecycle`, `okfw set-stale-after`, `okfw search --status`, `okfw search --stale`.
+  - **Trust** (§5.2–5.3): `generated{by,at}` and `verified[]{by,at}`, with trust tiers derived from `verified` keyed strictly on the `human:` actor prefix. `okfw verify`, `okfw set-generated`. A bare `verified` mapping is read as a one-element list, as the spec requires.
+  - **Provenance** (§5.1): `sources[]` (with `resource` required per entry) plus a sibling `usage_window`. `okfw add-source`. `sources[].id` is the join key for `[^id]` body footnotes.
+  - Also new: `okfw set-resource` finally writes the `resource` field, which had been modelled and documented but unsettable.
+  - Attested Computation (§10) is deliberately not implemented — the spec still defers its receipt formats, attester ABI, and sandboxing.
+- **`okfw graph` now documents what it actually emits.** It has always printed Mermaid, while its help promised an ASCII tree. The help is corrected, and the previously-unreachable tree renderer is available as `okfw graph --ascii`.
+- **The search index gained `status`/`stale_after` and lost the four todo fields.** Run `rm -rf .okfw/.index && okfw index .okfw` so the new fields become searchable.
+
+### Removed (breaking)
+- **Task tracking is gone.** OKF v0.2 spec'd `status` as the lifecycle field, and okfw was using it for todo progress (`open`/`in_progress`/`closed`). Rather than namespace around the collision, the feature was removed: okfw is a knowledge format, not a task tracker.
+  - Removed frontmatter: `status` (in its todo sense), `due`, `completed`, `priority`, and `kind: todo`
+  - Removed commands: `okfw todo`, `okfw todos`, `okfw todo-list`, `okfw set-status`
+  - Removed flags: `okfw search --priority`, `--due-before`, `--due-after` (`--status` survives with its OKF lifecycle meaning)
+  - Removed elsewhere: the `todo` template, the `.todos/` directory, MCP's `set_status` action and `kind: "todo"` creation, and the Neovim todo workflow (`:OkfwTodo`, `:OkfwTodoList`)
+  - **Migrating:** run `okfw migrate` (`--dry-run` to preview). It drops the retired fields and rewrites `status: closed` to `status: deprecated`; `open`/`in_progress` lose `status` entirely, since absent means `stable`. Idempotent. The free-form `type` is left alone, since OKF does not register type values.
+  - MCP gains `set_lifecycle` and `set_stale_after` actions in their place.
+
+### Added
+- **`okfw delete <ref>`** (alias `rm`) removes a concept's file, its search-index entry, its graph node, and its line in the `index.md` listings — the four things a plain `rm` leaves desynchronized. It confirms first unless `--force` is given, and refuses to prompt when stdin is not a terminal, so a script that forgot `--force` stops instead of deleting. Concepts still linking to the deleted one are reported but deliberately not rewritten: OKF requires consumers to tolerate a link whose target does not exist, and editing someone's prose to tidy one would destroy authored content.
+- **`okfw move <ref> <dest>`** (aliases `rename`, `mv`) relocates a concept, keeping its `id` so `parent` hierarchies survive. The destination follows `mv`: a `.md` path names the file, anything else is a directory to move into. Links are repaired at **both** ends — inbound links in other concepts are retargeted (a bundle-absolute link stays absolute, a relative one stays relative), *and* the moved concept's own relative links are rewritten so they still resolve from the new directory. Missing that second half is what silently breaks a graph: `./sibling.md` quietly points somewhere else the moment a file changes directory.
+- **`:OkfwDelete` and `:OkfwMove` in the Neovim plugin.** `:OkfwDelete` acts on the current buffer (or a path), confirms with a No default, and wipes the orphaned buffer afterwards; `:OkfwMove [src] <dest>` moves or renames and the buffer follows the concept to its new path. The confirmation happens in Lua rather than the CLI, because plenary.job hands the child a pipe and `okfw delete` refuses to prompt on anything that is not a terminal — the plugin asks, then passes `--force`.
+- **`--json` on `okfw delete` and `okfw move`**, so tooling reads a result object instead of parsing prose. `delete --json` returns `{"id","path","inbound":[…]}`; `move --json` returns `{"from","to","from_rel","to_rel","rewrote":[…],"self_link"}`. `inbound`/`rewrote` are always arrays, never `null`.
+- **`okfw validate --all`** applies the strict okfw schema to every concept in the bundle. `okfw validate --okf` remains the permissive OKF §11 conformance check — two questions, two answers, since okfw's schema is deliberately stricter than the spec.
+- **An `x:` frontmatter block for custom fields.** The schema is closed, so it rejects a typo'd key like `descrption:` — but that also left no way to attach your own metadata. Anything under `x:` now passes through untouched.
+- **`okfw migrate`** brings concepts written by an older okfw up to the current schema.
+
+### Fixed
+- **Frontmatter is no longer edited by rewriting lines.** All mutations round-trip through `yaml.Node`, preserving key order, comments, unrecognized keys, and each scalar's quoting style. This fixes a data-loss bug: the previous editor scanned with a `bufio.Scanner` whose 64KB line cap was never checked, so a longer frontmatter line silently truncated the block and the truncated version was written back. It also made nested fields editable at all, which the new families need.
+- **Validation now runs on the write path.** `okfw create` refuses to write a concept its own schema rejects, and an edit that would make a *valid* concept invalid is refused before it reaches disk (an already-invalid concept stays editable, or the CLI could never repair one). `graphy export okfw` validates its generated frontmatter too. Previously CUE validation ran only when you asked for it, and the struct-level validator had no callers at all.
+- **The search index is pruned.** Deleting a concept used to leave it in `okfw search` results indefinitely — `index.DeleteDocument` had no callers anywhere. `okfw graph-sync` now prunes stale entries.
+- **`--path`/`--project` can no longer write into the bundle's internals.** `okfw create X --path .index` resolved inside the Bleve index directory, and because dot-directories are skipped by every walk, the concept was then invisible to search and `index.md`. Any path segment beginning with `.` is now rejected.
+- **The compiled CUE schema is cached** instead of being recompiled on every validation.
+- **Appended frontmatter fields are written in a stable order** rather than Go's randomized map order.
+- **Link rewriting no longer corrupts links whose text equals their target.** `graph.RewriteLinks` replaced the first occurrence of the href within the whole match, so for `[/dir/a.md](/dir/a.md)` — exactly what the Neovim link-insert keymap produces — it rewrote the visible text and left the real target behind. It now splices at the capture group's own offsets. `okfw export` used this path too.
+- **Emptying a directory no longer leaves a stale `index.md`** still advertising the concepts that used to be there. `WriteIndexFiles` now prunes listings for directories that hold no concepts, and removes the directory once it is empty (a directory with other files in it is left alone).
+
+### Internal
+- **graphy is now in both Containerfiles.** Neither built it before, so the devcontainer shipped without it and the e2e gate never exercised it. The devcontainer installs `graphy` on `PATH` alongside `okfw` and smoke-tests that it starts, which matters because graphy is the only dynamically linked binary in the image — it is built with CGo on Debian and run on Fedora, and a glibc mismatch would otherwise surface as a confusing error on first use. (`graphy install` is per-project and is deliberately not run at build time.)
+- **The e2e image now gates the graphy/okfw seam** (`Containerfiles/config/graphy-e2e.sh`, also runnable as `make graphy-e2e`). It builds a graph of a small fixture, exports it into a real bundle, and has okfw validate the result — covering two things `go test` cannot: that graphy's tree-sitter CGo binary runs in the target distro, and that the two binaries agree on the concept schema at runtime, including graphy's hand-built `graphy:` frontmatter block. It also asserts a re-export is a byte-for-byte no-op. Verified to fail as intended when the two disagree.
+- The Neovim integration suite now sources `plugin/okfw.lua` explicitly, so the `:Okfw*` user commands are covered for the first time — `nvim -u NONE` implies `--noplugin`, which had made every one of them invisible to the suite. Sourcing it directly keeps the run hermetic, where `-u NORC` would load whatever the developer has installed.
+- `cli/internal/bundle` — the write path shared by both binaries — has its own tests for the first time (0% → 89%), and the ~23 pass-through wrappers in `cmd/okfw/main.go` that existed only so `package main` tests could reach it are gone. `cli/internal/gitctx` went from no tests to 100%. Coverage across the okfw internal packages: 55% → 84%.
+- CI now runs `-race`, a real (non-`|| true`) staticcheck, `gofmt -l`, `go mod tidy -diff`, and `luacheck`. `cue vet` on the schema alone could never catch a concept that violates `#Concept`; a Go test now validates the fixture corpus against the compiled schema.
+- Deleted `cli/internal/config/config.cue` (an empty file) and `templates-schema.cue` (never compiled, and stale).
+
 ## 2026-07-02
 
 ### Changed (breaking)

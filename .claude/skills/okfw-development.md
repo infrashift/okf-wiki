@@ -27,7 +27,7 @@ All CLI commands live in a single file: `cli/cmd/okfw/main.go`. Commands are def
 Wikis are per-project `.okfw/` directories, created by `okfw init` and
 discovered by searching upward from the current working directory (like git
 finds `.git`). There is no config file. Fixed artifact names inside `.okfw/`:
-`.index/` (Bleve), `.graph.db` (bbolt), `.todos/` (generated todo lists),
+`.index/` (Bleve), `.graph.db` (bbolt),
 `ephemeral/` (exports). `okfw connect` verifies the wiki; `okfw root` prints
 its path.
 

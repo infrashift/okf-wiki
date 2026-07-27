@@ -6,7 +6,7 @@ description: Walk through building the devcontainer, connecting via SSH, and usi
 This tutorial walks you through building the devcontainer, connecting via SSH,
 and using the full OKF Wiki workflow: creating notes, linking them together,
 refining quick captures into permanent knowledge, searching, generating
-graphs, and managing todos.
+graphs, and recording OKF metadata.
 
 ## Prerequisites
 
@@ -97,6 +97,18 @@ If you disconnect and reconnect, SSH reattaches to the same tmux session
 automatically. Your editor state, shell history, and Claude conversation are
 preserved.
 
+Both CLIs are on `PATH` in the container:
+
+```bash
+okfw --help      # the OKF wiki CLI
+graphy version   # the code knowledge-graph CLI
+```
+
+`graphy` builds a graph of a repository and can export it into an okfw bundle
+(`graphy build`, then `graphy export okfw`). Run `graphy install` inside a
+project to register its skill with Claude Code — that is per-project, so it is
+deliberately not done when the image is built.
+
 ## 4. Where Are Notes Stored?
 
 Each project gets its own wiki: a `.okfw/` directory at the project's root,
@@ -119,8 +131,7 @@ project:
   ephemeral/                   Export scratch dir (gitignored)
   .index/                      Full-text search index (auto-managed)
   .graph.db                    Persistent graph database (auto-managed)
-  .todos/                      Generated todo lists
-  .gitignore                   Ignores .index/, .graph.db, .todos/, ephemeral/
+  .gitignore                   Ignores .index/, .graph.db, ephemeral/
 ```
 
 Every `okfw` command **discovers** the wiki automatically by searching upward
@@ -270,7 +281,7 @@ Templates give notes structure. Open the template picker:
 ```
 
 Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`,
-`feature`, `daily`, `todo`, `issue`.
+`feature`, `daily`, `issue`.
 
 Create a meeting note:
 
@@ -497,36 +508,70 @@ You can also start the tree from a specific note and control depth:
 okfw graph --start infra/linked-note-taking-method--019f0494 --depth 3
 ```
 
-## 16. Manage Todos
+## 16. Record OKF Metadata
 
-### Create a todo
+okfw has **no task tracking** — the `status` field is OKF's *lifecycle* status,
+not task progress. What it does track is how trustworthy and current a concept
+is.
 
-```vim
-:OkfwTodo Buy a notebook for handwritten concept drafts
+### Mark a concept as superseded
+
+```bash
+okfw set-lifecycle infra/old-method--019f0494 deprecated
 ```
 
-Or with a due date and priority:
+`draft` means not yet reviewed, `stable` (the default when absent) means ready to
+use, and `deprecated` means kept for its links and history but no longer current.
+Find them later with `okfw search --status draft`.
 
-```vim
-:OkfwTodo Review meeting notes --due 2026-02-21 --priority high
+### Give a concept a shelf life
+
+```bash
+okfw set-stale-after infra/pricing--019f0494 2026-12-31
 ```
 
-### Change todo status
+A concept is stale once today is on or after that date. `okfw search --stale`
+lists everything that has expired, so review is a query rather than a memory
+exercise.
 
-With the todo open in the editor, press `\s` to open the status picker. Choose from:
-- `open` — not started
-- `in_progress` — being worked on
-- `closed` — completed
+### Record that you reviewed something
 
-### Generate a todo list
-
-Create a markdown summary of your todos:
-
-```vim
-:OkfwTodoList
+```bash
+okfw verify infra/pricing--019f0494
 ```
 
-This generates a markdown summary and opens it in a split.
+This appends an entry to the concept's `verified` list, defaulting to
+`human:<your login>`. A concept with no entries is *unverified*; one verified
+only by automation is *machine-confirmed*; one a human signed off on is
+*human-reviewed*.
+
+### Cite where the knowledge came from
+
+```bash
+okfw add-source infra/pricing--019f0494 \
+    --resource https://example.com/pricing-spec --id spec
+```
+
+Then attribute a specific claim in the body with a footnote whose label is that
+source id:
+
+```markdown
+Enterprise tiers renew annually.[^spec]
+
+[^spec]: Pricing specification
+```
+
+### Check the whole wiki
+
+```bash
+okfw validate --all    # strict okfw schema
+okfw validate --okf    # permissive OKF conformance check
+```
+
+If you are opening a wiki created by an older okfw, run `okfw migrate` first: it
+removes the retired task-tracking fields.
+
+
 
 ## 17. Use Templates for Structured Notes
 
@@ -608,8 +653,6 @@ okfw index
 | `:OkfwSearch!` | Live search (updates as you type) |
 | `:Glow` | Render current note as styled Markdown |
 | `:OkfwGraph [limit]` | Show Mermaid graph |
-| `:OkfwTodo [title]` | Create a todo |
-| `:OkfwTodoList` | Generate todo list markdown |
 | `:OkfwIndex` | Reindex all notes |
 | `:OkfwRefreshTags` | Refresh tag cache |
 
@@ -621,10 +664,9 @@ okfw index
 | `\L` | Insert a markdown link using the concept title as link text |
 | `gf` | Follow the link under the cursor |
 | `\b` | Toggle backlinks panel |
-| `\p` | Set project (note and todo types) |
+| `\p` | Set project |
 | `\a` | Add tags (all concept types) |
 | `\v` | Validate frontmatter (all concept types) |
-| `\s` | Set todo status (todo-type only) |
 | `Ctrl-x Ctrl-t` | Tag completion (insert mode) |
 
 ### Picker Keys
@@ -643,16 +685,23 @@ okfw index
 | `okfw connect` | Verify the discovered wiki and print a summary |
 | `okfw create [title]` | Create a note |
 | `okfw daily` | Create/open daily note |
-| `okfw todo [title]` | Create a todo |
-| `okfw todos` | List todos |
-| `okfw set-status [file] [status]` | Set todo status (open/in_progress/closed) |
 | `okfw search [query]` | Search notes |
-| `okfw graph [path]` | Show graph tree |
+| `okfw graph [path]` | Render a Mermaid diagram (`--ascii` for a text tree) |
 | `okfw set-project [file] [project]` | Set project on a note |
+| `okfw delete <ref>` | Delete a concept and everything derived from it |
+| `okfw move <ref> <dest>` | Move or rename a concept, repairing links |
 | `okfw backlinks [file]` | Show backlinks |
 | `okfw add-tags <file> <tag1> [tag2...]` | Add tags to a concept |
-| `okfw validate <file>` | Validate frontmatter against CUE schema |
-| `okfw validate --okf [path]` | Validate whole-wiki OKF conformance |
+| `okfw validate <file>` | Validate frontmatter against okfw's CUE schema |
+| `okfw validate --all [path]` | Apply that strict check to every concept |
+| `okfw validate --okf [path]` | Validate whole-wiki OKF conformance (permissive) |
+| `okfw migrate [path]` | Bring a pre-0.2 wiki up to the current schema |
+| `okfw set-lifecycle <ref> <status>` | Set draft/stable/deprecated |
+| `okfw set-stale-after <ref> <date>` | Set the staleness date |
+| `okfw verify <ref>` | Record a verification event |
+| `okfw add-source <ref> --resource <uri>` | Append a provenance source |
+| `okfw set-resource <ref> <uri>` | Set the described asset's URI |
+| `okfw export [path]` | Export a portable subset to `ephemeral/` |
 | `okfw index [path]` | Index notes |
 | `okfw index-md [path]` | Generate OKF `index.md` directory listings |
 | `okfw log [path]` | Generate OKF `log.md` from git history |

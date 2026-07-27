@@ -12,11 +12,11 @@ A fast, opinionated command-line tool for managing a local-first personal knowle
 - **Backlinks discovery** - Find all concepts that link to any concept
 - **Note templates** - Built-in templates for meetings, user stories, features, and more
 - **Daily notes** - Idempotent daily capture with review workflows
-- **Todo management** - Task tracking with status, due dates, priority, and generated lists
+- **OKF metadata** - Lifecycle status, staleness, verification trail, and provenance sources
 - **NeoVim integration** - Lua plugin for seamless note creation from your editor
 - **AI-agent ready** - `--json` output, self-documenting help, a token-lean MCP server (`okfw mcp`), and a drop-in agent skill ([`skills/okfw.md`](skills/okfw.md))
 - **Hierarchical notes** - Support for parent-child relationships between concepts
-- **Universal linking** - Link any concept to any other concept (todos, notes, daily notes)
+- **Universal linking** - Link any concept to any other concept (notes, daily notes, issues)
 
 ---
 
@@ -97,9 +97,8 @@ The layout inside `.okfw/` is fixed:
 | `daily/YYYY/MM/` | Daily notes |
 | `.index/` | Bleve full-text search index (generated) |
 | `.graph.db` | Persistent graph database (generated) |
-| `.todos/` | Generated todo lists |
 | `ephemeral/` | Export scratch dir |
-| `.gitignore` | Ignores `.index/`, `.graph.db`, `.todos/`, `ephemeral/` |
+| `.gitignore` | Ignores `.index/`, `.graph.db`, `ephemeral/` |
 
 Concept markdown is meant to be committed with the project; generated
 artifacts are gitignored.

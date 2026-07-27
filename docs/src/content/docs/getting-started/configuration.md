@@ -51,9 +51,8 @@ The layout inside `.okfw/` is fixed:
 | `daily/YYYY/MM/` | Daily notes, grouped by year and month |
 | `.index/` | Bleve full-text search index (generated) |
 | `.graph.db` | Persistent graph database (generated) |
-| `.todos/` | Generated todo lists |
 | `ephemeral/` | Export scratch directory |
-| `.gitignore` | Ignores `.index/`, `.graph.db`, `.todos/`, `ephemeral/` |
+| `.gitignore` | Ignores `.index/`, `.graph.db`, `ephemeral/` |
 
 Concept markdown is meant to be **committed with your project**; the generated
 artifacts are gitignored.

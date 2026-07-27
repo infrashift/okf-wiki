@@ -17,25 +17,31 @@ command discovers the wiki by searching upward from the current working
 directory (like git finds `.git`) and errors with init advice when none is
 found. `okfw connect` verifies the wiki and prints a summary; `okfw root`
 prints the discovered `.okfw` path. Generated artifacts inside `.okfw/`:
-`.index/` (search index), `.graph.db` (graph database), `.todos/` (todo
-lists), `ephemeral/` (exports) — all gitignored; concept markdown is
-committed with the project.
+`.index/` (search index), `.graph.db` (graph database), `ephemeral/` (exports)
+— all gitignored; concept markdown is committed with the project.
 
 ## Concept Format
 
-Every concept is a markdown file with YAML frontmatter. ID format: `YYYYMMDDHHmmss-UUIDv4`.
+Every concept is a markdown file with YAML frontmatter. ID format: UUIDv7
+(legacy `YYYYMMDDHHmmss-UUIDv4` still accepted).
 
 ```yaml
 ---
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "My Concept Title"
-type: "note"           # note | todo | daily-note | issue
-project: "myproject"   # always optional
+type: "note"           # OKF free-form concept kind; required, non-empty
+kind: "issue"          # note (default, omitted) | daily-note | issue
+project: "myproject"   # always optional, never derived from git
 tags:
   - "golang"
   - "architecture"
 created: "2026-02-13T10:45:00Z"
-parent: "20260212..."  # optional, links to parent concept ID
+timestamp: "2026-02-13T10:45:00Z"
+status: "deprecated"   # OKF lifecycle: draft | stable (default) | deprecated
+stale_after: "2026-12-31"
+parent: "019f0312-..." # optional, links to parent concept id
+x:                     # your own metadata; the only place custom keys are legal
+  jira_epic: "PLAT-1421"
 ---
 
 # My Concept Title
@@ -52,7 +58,7 @@ okfw create "My Concept Title"
 # Concept with explicit project
 okfw create "Design Doc" --project myproject
 
-# From template (meeting, book-review, snippet, project-idea, user-story, feature, daily, todo, issue)
+# From template (meeting, book-review, snippet, project-idea, user-story, feature, daily, issue)
 okfw create "Sprint Planning" --template meeting --project myproject
 
 # With tags
@@ -72,11 +78,10 @@ okfw search "authentication patterns"
 
 # Filter by metadata
 okfw search --project myproject
-okfw search --type todo --status open --priority high
+okfw search --status draft              # OKF lifecycle status
+okfw search --stale                    # stale_after has passed
 okfw search --tag golang --tag api    # AND filter
-
-# Date range (for todos)
-okfw search --due-before 2026-03-01 --due-after 2026-02-01
+okfw search --kind issue               # structured kind
 
 # JSON output
 okfw search "query" --json --limit 50
@@ -110,22 +115,44 @@ okfw daily --list             # List recent daily notes
 okfw daily --list --week      # This week's daily notes
 ```
 
-## Todos
+## Reorganizing and removing
+
+Use these rather than `mv`/`rm`: they keep the search index, graph database, and
+`index.md` listings in step, and repair links.
 
 ```bash
-# Create
-okfw todo "Fix login bug" --priority high --due 2026-02-20 --project myproject
+okfw move <ref> archive/              # into a directory (id is preserved)
+okfw move <ref> notes/new-name.md     # new path and name
+okfw delete <ref> --force             # file + index entry + graph node
+```
 
-# List/search
-okfw todos                              # All open todos
-okfw todos --priority high --overdue    # High priority overdue
-okfw todos --project myproject --today  # Project todos due today
-okfw todos "fix bug" --json             # Full-text search, JSON output
+`move` retargets every inbound link and rewrites the moved concept's own relative
+links so they still resolve. `delete` reports concepts still linking to the
+removed one but does not edit them — OKF requires consumers to tolerate broken
+links.
 
-# Update status
-okfw set-status ./todo.md in_progress
-okfw set-status ./todo.md closed
+## OKF metadata
 
-# Generate markdown todo list
-okfw todo-list --project myproject --output report.md
+okfw has **no task tracking** — `status` is the OKF lifecycle field, not task
+progress. Run `okfw migrate` on a wiki written by an older okfw.
+
+```bash
+# Lifecycle
+okfw set-lifecycle ./note.md deprecated     # draft | stable | deprecated
+okfw set-stale-after ./note.md 2026-12-31
+okfw set-stale-after ./note.md --clear
+
+# Trust: who reviewed this, and when
+okfw verify ./note.md                       # defaults to human:<login>
+okfw verify ./note.md --by process:nightly-audit
+okfw set-generated ./note.md --by human:ryan
+
+# Provenance: where the knowledge came from
+okfw add-source ./note.md --resource https://example.com/schema --id ga4
+okfw set-resource ./note.md bigquery://project.dataset.orders
+
+# Validation
+okfw validate ./note.md      # strict okfw schema, one concept
+okfw validate --all          # ...every concept in the wiki
+okfw validate --okf          # permissive OKF conformance check instead
 ```

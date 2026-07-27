@@ -74,16 +74,14 @@ that.
 ├── ephemeral/                     # Export scratch dir (gitignored)
 ├── .index/                        # Bleve full-text search index (auto-managed)
 ├── .graph.db                      # Persistent graph database (auto-managed)
-├── .todos/                        # Generated todo lists
-└── .gitignore                     # Ignores .index/, .graph.db, .todos/, ephemeral/
+└── .gitignore                     # Ignores .index/, .graph.db, ephemeral/
 ```
 
 Concept markdown is meant to be **committed with the project**; the generated
-artifacts (`.index/`, `.graph.db`, `.todos/`, `ephemeral/`) are covered by the
+artifacts (`.index/`, `.graph.db`, `ephemeral/`) are covered by the
 `.gitignore` that `okfw init` writes.
 
 `index.md` and `log.md` are **reserved filenames** that carry no concept
 frontmatter. `index.md` is a per-directory listing for progressive disclosure
 (the root `index.md` carries `okf_version: "0.1"`), and `log.md` is an update
 history generated from git. Generate them with `okfw index-md` and `okfw log`.
-

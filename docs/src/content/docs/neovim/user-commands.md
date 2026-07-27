@@ -83,10 +83,10 @@ Use the bang (`!`) variant for live search that updates as you type.
 :OkfwSearch --project my-project
 
 " Filter by structured kind and status
-:OkfwSearch --kind todo --status open
+:OkfwSearch --kind issue --status draft
 
-" Filter by priority and due date
-:OkfwSearch --priority high --due-before 2026-03-01
+" Find stale concepts
+:OkfwSearch --stale
 
 " Filter by tag
 :OkfwSearch --tag security
@@ -100,12 +100,10 @@ Use the bang (`!`) variant for live search that updates as you type.
 | Flag | Values | Description |
 |------|--------|-------------|
 | `--project` | any string | Filter by project |
-| `--kind` | `note`, `todo`, `daily-note`, `issue` | Filter by structured kind |
+| `--kind` | `note`, `daily-note`, `issue` | Filter by structured kind |
 | `--type` | any string | Filter by the free-form OKF `type` field |
-| `--status` | `open`, `in_progress`, `closed` | Filter by status |
-| `--priority` | `high`, `medium`, `low` | Filter by priority |
-| `--due-before` | `YYYY-MM-DD` | Due before date |
-| `--due-after` | `YYYY-MM-DD` | Due after date |
+| `--status` | `draft`, `stable`, `deprecated` | Filter by OKF lifecycle status |
+| `--stale` | - | Only concepts whose `stale_after` has passed |
 | `--tag` | any string | Filter by tag (can repeat) |
 
 **Picker keymaps (when available):**
@@ -184,72 +182,59 @@ Browse daily notes in a picker. Use the bang variant to show only this week.
 
 ---
 
-## Todos
+## Deleting and Moving
 
-### `:OkfwTodo`
+Use these rather than shelling out to `rm` / `mv`: they keep the search index,
+graph database, and `index.md` listings in step, and repair links.
 
-Create a new todo. The title is everything that isn't a flag.
+### `:OkfwDelete`
 
-```vim
-" Simple todo
-:OkfwTodo Buy a notebook for handwritten concept drafts
-
-" With due date and priority
-:OkfwTodo Review meeting notes --due 2026-02-21 --priority high
-
-" With project
-:OkfwTodo Fix login bug --project my-project --priority medium
-```
-
-**Flags:**
-
-| Flag | Values | Description |
-|------|--------|-------------|
-| `--due` | `YYYY-MM-DD` | Due date |
-| `--priority` | `high`, `medium`, `low` | Priority level |
-| `--project` | any string | Project name |
-
-### `:OkfwTodoList`
-
-Generate a markdown summary of todos and open it in a split.
+Delete a concept. With no argument it acts on the current buffer.
 
 ```vim
-" All open todos
-:OkfwTodoList
+" Delete the concept you are editing
+:OkfwDelete
 
-" Due today
-:OkfwTodoList today
-
-" Due this week
-:OkfwTodoList week
-
-" Project-specific list
-:OkfwTodoList my-project
+" ...or one by path
+:OkfwDelete .okfw/notes/scratch--019f0494.md
 ```
 
----
+Asks for confirmation first, defaulting to **No**. On success it removes the
+concept's file, its search-index entry, its graph node, and its `index.md` line,
+then wipes the now-orphaned buffer.
 
-## Index & Tags
+Concepts that still link to the deleted one are named in a warning but left
+untouched — OKF requires consumers to tolerate a link whose target does not
+exist, so a dangling link is not an error to be fixed by editing another note.
 
-### `:OkfwIndex`
+### `:OkfwMove`
 
-Index concepts for full-text search. Indexes the current directory by default.
+Move or rename a concept. With one argument it moves the current buffer's
+concept; with two, the first is the source.
 
 ```vim
-" Index current directory
-:OkfwIndex
+" Move the concept you are editing into a directory
+:OkfwMove archive/
 
-" Index specific path
-:OkfwIndex path/to/.okfw/
+" Rename it
+:OkfwMove notes/better-name.md
+
+" Move a specific concept
+:OkfwMove .okfw/notes/scratch--019f0494.md archive/
+
+" Omit the destination to be prompted for one
+:OkfwMove
 ```
 
-### `:OkfwRefreshTags`
+The destination follows `mv`: a path ending in `.md` is the new full path,
+anything else is a directory to move into. The concept keeps its `id`, so
+`parent` hierarchies survive, and the buffer follows the concept to its new path
+so you can carry on editing.
 
-Clear the tag cache and reload tags from the index.
-
-```vim
-:OkfwRefreshTags
-```
+Links are repaired at **both** ends — inbound links in other concepts, and the
+moved concept's own relative links, which resolve against its directory and so
+break the moment it changes directory. The notification reports how many
+concepts were rewritten.
 
 ---
 
@@ -262,9 +247,10 @@ Clear the tag cache and reload tags from the index.
 | `:OkfwTemplate [name]` | Create from template |
 | `:OkfwSearch[!] [query]` | Search concepts (! for live search) |
 | `:OkfwGraph` | Graph visualization |
+| `:OkfwExport` | Export a portable subset to `ephemeral/` |
 | `:OkfwDaily [date]` | Open daily note |
 | `:OkfwDailyList[!]` | Browse daily notes (! for this week) |
-| `:OkfwTodo [title]` | Create a todo |
-| `:OkfwTodoList [filter]` | Generate todo list markdown |
+| `:OkfwDelete [path]` | Delete a concept (asks first) and its index/graph entries |
+| `:OkfwMove [src] <dest>` | Move/rename a concept, repairing links |
 | `:OkfwIndex [path]` | Index concepts |
 | `:OkfwRefreshTags` | Refresh tag cache |

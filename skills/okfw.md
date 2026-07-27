@@ -1,6 +1,6 @@
 ---
 name: okfw
-description: Capture, link, and retrieve project knowledge in the project's OKF wiki (.okfw/). Use when the user wants to save a note, idea, decision, or todo; journal in a daily note; or find/connect existing project knowledge.
+description: Capture, link, and retrieve project knowledge in the project's OKF wiki (.okfw/). Use when the user wants to save a note, idea, or decision; journal in a daily note; or find/connect existing project knowledge.
 ---
 
 # OKF Wiki (`okfw`)
@@ -22,8 +22,10 @@ okfw init                                  # once per project (no-op if present)
 okfw create "Title" --body "..." --json    # returns {"id","path"}
 okfw search "query" --json                 # full-text + filters
 okfw daily                                 # today's daily note
-okfw todo "Task" --due 2026-03-01
 okfw backlinks <id-or-path> --json
+okfw move <id-or-path> archive/             # relocate; repairs links both ways
+okfw delete <id-or-path> --force            # destructive; --force skips the prompt
+okfw validate --all                        # strict schema check of every concept
 ```
 
 If a command fails with "no OKF wiki found", run `okfw init` at the project
@@ -46,9 +48,22 @@ root first.
    filtering. Untouched, notes land at the wiki root — that's fine.
 5. **Daily notes are for capture** (`daily/YYYY/MM/`), one per day,
    idempotent. Refine durable ideas out of them into their own concepts, then
-   link. Todos carry `status` (open/in_progress/closed), optional `due` and
-   `priority`; close them via `update set_status` / `okfw set-status`.
-6. **Don't edit `index.md` or `log.md`** — they are reserved, generated files
+   link.
+6. **Mark superseded knowledge rather than deleting it.** `status` is the OKF
+   lifecycle field — `draft`, `stable` (the default when absent), or
+   `deprecated`. Set it with `okfw set-lifecycle`, and `stale_after` with
+   `okfw set-stale-after` when a concept has a known shelf life. okfw has **no
+   task-tracking fields**; `status` is lifecycle only.
+7. **Cite where knowledge came from** with `okfw add-source --resource <uri>`,
+   and record review with `okfw verify`. Custom metadata goes under the `x:`
+   frontmatter block — it is the only place unrecognized keys are accepted, as
+   the schema is otherwise closed and will reject a typo'd field.
+8. **Reorganize with `okfw move`, not `mv`.** It keeps the concept's `id`,
+   retargets every inbound link, and fixes the moved concept's own relative
+   links; moving the file yourself silently breaks both. `okfw delete` likewise
+   clears the search index and graph node that a plain `rm` would strand.
+   Deleting leaves inbound links dangling on purpose — OKF tolerates them.
+9. **Don't edit `index.md` or `log.md`** — they are reserved, generated files
    owned by okfw.
 
 ## Workflow

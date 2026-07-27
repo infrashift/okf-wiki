@@ -117,21 +117,43 @@ Search ~
 
                         Flags: ~
                           --project {val}    filter by project name
-                          --type {val}       note, todo, daily-note, issue
-                          --status {val}     open, in_progress, closed
-                          --priority {val}   high, medium, low
-                          --due-before {val} YYYY-MM-DD
-                          --due-after {val}  YYYY-MM-DD
+                          --type {val}       free-form OKF type (e.g. note, issue)
+                          --kind {val}       note, daily-note, issue
+                          --status {val}     draft, stable, deprecated
+                          --stale            stale_after date has passed
                           --tag {val}        filter by tag (repeatable)
 
                         Examples: >vim
                           :OkfwSearch authentication
-                          :OkfwSearch --type todo --status open
-                          :OkfwSearch --project my-project --priority high
-                          :OkfwSearch! --type todo
+                          :OkfwSearch --status draft
+                          :OkfwSearch --project my-project --stale
+                          :OkfwSearch! --kind issue
 <
 
 Indexing ~
+                                                                  *:OkfwDelete*
+:OkfwDelete [{path}]      Delete a concept and everything derived from it: the
+                          file, its search-index entry, its graph node, and its
+                          index.md line. With no argument, acts on the current
+                          buffer. Asks for confirmation (defaulting to No) and
+                          then wipes the orphaned buffer.
+
+                          Concepts still linking to the deleted one are reported
+                          but not edited: OKF requires consumers to tolerate a
+                          link whose target does not exist.
+
+                                                                   *:OkfwMove*
+:OkfwMove [{src}] {dest}  Move or rename a concept. With one argument, moves the
+                          current buffer's concept; with two, {src} is the
+                          source. Omit {dest} entirely to be prompted.
+
+                          {dest} follows mv: a path ending in .md is the new full
+                          path, anything else is a directory to move into. The
+                          concept keeps its id, the buffer follows it to the new
+                          path, and links are repaired at both ends — inbound
+                          links in other concepts, and the moved concept's own
+                          relative links.
+
                                                                   *:OkfwIndex*
 :OkfwIndex [path]       Index concepts for searching.
                         Default: current directory
@@ -217,8 +239,7 @@ Search ~
                                                                *okfw.search()*
 search({query}, {opts}) Search concepts.
                         opts.project, opts.tags, opts.limit
-                        opts.type, opts.status, opts.priority
-                        opts.due_before, opts.due_after
+                        opts.type, opts.kind, opts.status, opts.stale
                         opts.on_results: callback function
 
                                                                 *okfw.index()*
@@ -305,11 +326,9 @@ require("okfw.picker").live_search({opts}) Live search
 
     Search opts: ~
         {project}     Filter by project name
-        {type}        Filter by type (note/todo/daily-note/issue)
-        {status}      Filter by status (open/in_progress/closed)
-        {priority}    Filter by priority (high/medium/low)
-        {due_before}  Filter due before date (YYYY-MM-DD)
-        {due_after}   Filter due after date (YYYY-MM-DD)
+        {kind}        Filter by kind (note/daily-note/issue)
+        {status}      Filter by OKF lifecycle status (draft/stable/deprecated)
+        {stale}       Only concepts whose stale_after has passed
         {tags}        Table of tag strings (AND logic)
 require("okfw.picker").insert_link({opts}) Insert link to concept
 
@@ -331,8 +350,7 @@ automatically sets up:
   - <localleader>b for backlinks toggle
   - <localleader>a for adding tags (all concept types)
   - <localleader>v for validating frontmatter (all concept types)
-  - <localleader>p for set project (note and todo types)
-  - <localleader>s for todo status picker (todo-type only)
+  - <localleader>p for set project
 
 SUGGESTED KEYMAPS                                             *okfw-keymaps*
 

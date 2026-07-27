@@ -47,7 +47,6 @@ export default defineConfig({
             { label: 'User Commands', slug: 'neovim/user-commands' },
             { label: 'Notes Workflow', slug: 'neovim/notes-workflow' },
             { label: 'Daily Notes Workflow', slug: 'neovim/daily-notes-workflow' },
-            { label: 'Todo Workflow', slug: 'neovim/todo-workflow' },
           ],
         },
         {

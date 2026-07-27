@@ -54,9 +54,9 @@ Daily notes function as an "inbox" in Getting Things Done methodology:
 - Process and organize during review
 - Refine valuable insights into permanent notes
 
-### 5. Integrates with Todos
+### 5. Feeds Durable Concepts
 
-Daily notes can be linked to todos, creating a natural connection between your daily capture and actionable tasks.
+Daily notes are a staging area: refine what proves durable into its own concept and link back, so the day's capture becomes part of the graph.
 
 ---
 
@@ -207,28 +207,24 @@ vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily"
 
 ---
 
-## Linking Todos to Daily Notes
+## Refining Daily Captures into Concepts
 
-One of the most powerful features is linking todos to daily notes. This creates a connection between your actionable items and the day you captured them.
-
-### Create a Todo from the Daily Note
-
-```vim
-:OkfwTodo Fix the authentication bug
-```
-
-### Create Todo with Full Options
+A daily note is where a thought lands first; it is not where it should stay. When
+something in today's note turns out to matter, promote it:
 
 ```vim
-:OkfwTodo Fix auth bug --priority high --due 2026-02-15
+:OkfwNote Authentication token lifetime
 ```
 
-### From the Daily Note
+Then link the two directions — the concept back to the daily note it came from,
+and the daily note out to the concept — so the origin of an idea stays
+recoverable.
 
-When reviewing your daily note, you can:
-1. Identify actionable items in the Notes section
-2. Create todos: `:OkfwTodo`
-3. The todo can link back to the daily where the idea originated
+### Suggested rhythm
+
+1. Capture in the daily note: `:OkfwDaily`
+2. Promote durable ideas: `:OkfwNote`
+
 
 ---
 
@@ -274,7 +270,7 @@ okfw daily --list --week
 3. **Create synthesis notes:**
    - Weekly summary note
    - Standalone notes for recurring themes
-4. **Review todos** via `:OkfwTodoList`
+4. **Review drafts and stale concepts** via `:OkfwSearch --status draft` and `:OkfwSearch --stale`
 
 ---
 
@@ -301,7 +297,7 @@ okfw daily --list --month
    - What shipped?
    - What's blocked?
    - What should be abandoned?
-4. **Review completed todos** via `:OkfwTodoList`
+4. **Review what you deprecated** via `:OkfwSearch --status deprecated`
 5. **Set next month's themes**
 
 ---
@@ -356,7 +352,7 @@ Daily notes complement the wider knowledge base:
 | **Capture** | Daily note = primary inbox |
 | **Refined notes** | Extract from daily during review |
 | **Links** | Track in "Links Created" section |
-| **Todos** | Create todos from daily captures |
+| **Promotion** | Refine daily captures into standalone concepts |
 | **Projects** | Daily notes capture project-related thoughts |
 
 ### The Flow
@@ -366,7 +362,7 @@ Daily Note (capture)
     |
 Morning Review (extract)
     |
-Standalone Note (refine)  <->    Todo (actionable)
+Standalone Note (refine)  <->    Linked concepts (the graph)
     |                              |
 Graph (connect)             Done (complete)
 ```
@@ -399,5 +395,4 @@ Graph (connect)             Done (complete)
 ## Related Documentation
 
 - [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - General note-taking workflow
-- [Todo Workflow](/okf-wiki/neovim/todo-workflow/) - Todo management workflow
 - [CLI Commands](/okf-wiki/reference/cli-commands/) - Complete CLI reference

@@ -233,7 +233,7 @@ Templates provide structure for common note types. They save time and ensure con
 
 Use `:OkfwTemplate` without arguments to open a picker showing all templates:
 
-`meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `todo`, `issue`
+`meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`
 
 ### Example: Meeting Notes
 
@@ -391,26 +391,25 @@ Search as you type:
 " Filter by project
 :OkfwSearch --project my-project
 
-" Filter by structured kind (note/todo/daily-note/issue)
-:OkfwSearch --kind todo
+" Filter by structured kind (note/daily-note/issue)
+:OkfwSearch --kind issue
 :OkfwSearch --kind daily-note
 
 " Filter by the free-form OKF type field
 :OkfwSearch --type note
 
-" Filter by status and priority (useful for todos)
-:OkfwSearch --kind todo --status open
-:OkfwSearch --kind todo --priority high
+" Filter by OKF lifecycle status
+:OkfwSearch --status draft
+:OkfwSearch --status deprecated
 
-" Filter by due date
-:OkfwSearch --due-before 2026-03-01
-:OkfwSearch --due-after 2026-02-01
+" Find concepts whose stale_after date has passed
+:OkfwSearch --stale
 
 " Combine flags with a text query
-:OkfwSearch --project my-project --kind todo authentication
+:OkfwSearch --project my-project --kind issue authentication
 
 " Combine flags with live search
-:OkfwSearch! --kind todo
+:OkfwSearch! --kind issue
 
 " Filter by tag
 :OkfwSearch --tag golang --tag api
@@ -495,7 +494,7 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" }
 | Live search | `:OkfwSearch!` | `<leader>z/` |
 | Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on concepts |
 | Toggle backlinks | `\b` (buffer-local) | Auto-mapped on concepts |
-| Set project | `\p` (buffer-local) | Auto-mapped on note/todo |
+| Set project | `\p` (buffer-local) | Auto-mapped on concept files |
 | Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
 | Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 | Generate graph | `:OkfwGraph` | `<leader>zg` |
@@ -514,14 +513,15 @@ Daily notes are the foundation of a sustainable practice. They provide:
 
 **Read:** [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a comprehensive guide to daily, weekly, and monthly review workflows in NeoVim.
 
-### Manage Tasks with Todos
+### Keep Knowledge Current with OKF Metadata
 
-Todos are a special type of concept for actionable tasks. They integrate with daily notes and provide:
-- Status tracking (open, in progress, closed)
-- Due dates and priorities
-- Links to related notes
+okfw is a knowledge format, not a task tracker — there are no todo fields. What
+it does track is whether a concept can still be trusted:
+- Lifecycle status (`draft`, `stable`, `deprecated`)
+- A staleness date, so review becomes a query rather than a memory exercise
+- A verification trail, and provenance for where the knowledge came from
 
-**Read:** [Todo Workflow](/okf-wiki/neovim/todo-workflow/) for the complete todo workflow guide.
+**Read:** [CLI Commands](/okf-wiki/reference/cli-commands/#okf-metadata) for the OKF metadata commands.
 
 ### Master the CLI
 

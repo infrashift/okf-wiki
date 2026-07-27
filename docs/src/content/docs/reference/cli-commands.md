@@ -24,7 +24,7 @@ okfw init
 
 Creates a `.okfw/` directory at the git repository root (or the current
 directory outside git), writes a `.okfw/.gitignore` covering generated
-artifacts (`.index/`, `.graph.db`, `.todos/`, `ephemeral/`), and generates the
+artifacts (`.index/`, `.graph.db`, `ephemeral/`), and generates the
 OKF root `index.md` (with the `okf_version` declaration). Running `okfw init`
 again is a no-op that prints `OKF wiki already initialized at <path>`.
 
@@ -81,6 +81,48 @@ project, or the wiki root when no project is set.
 okfw set-project path/to/note.md my-project
 ```
 
+### Delete a concept
+```bash
+okfw delete ./notes/scratch--019f0494.md
+okfw delete 019f0494 --force        # skip the confirmation
+okfw rm 019f0494 -f                 # alias
+```
+
+Removes the concept's file, its search-index entry, its graph node, and its line
+in the `index.md` listings. Asks for confirmation unless `--force` is given, and
+refuses to prompt when stdin is not a terminal — a script that forgot `--force`
+stops rather than deleting.
+
+Concepts that still link to the deleted one are **reported, not repaired**. OKF
+requires consumers to tolerate a link whose target does not exist, so a dangling
+link is not malformed; rewriting someone's prose to tidy one would destroy
+authored content.
+
+### Move or rename a concept
+```bash
+okfw move 019f0494 archive/                        # into a directory
+okfw move ./scratch--019f0494.md notes/design.md   # new path and name
+okfw rename 019f0494 notes/better-name.md          # alias
+```
+
+The destination works like `mv`: a path ending in `.md` is the concept's new full
+path, anything else is a directory to move into under the current filename. Both
+are bundle-relative and cannot escape the bundle or name one of its internal
+dot-directories.
+
+The concept's `id` does not change, so hierarchies built with `parent` survive.
+Links are repaired at **both** ends, because a move breaks two different sets:
+
+- Other concepts pointing at the old path are retargeted, keeping whichever form
+  they used — a bundle-absolute link stays absolute, a relative one stays relative.
+- The moved concept's own *relative* links are rewritten so they still resolve
+  from the new directory. Bundle-absolute links need no fixing, which is exactly
+  why OKF recommends them.
+
+The moved concept's `timestamp` is bumped, since a concept's OKF identity is its
+path within the bundle. Concepts whose links were merely retargeted are not
+stamped: their knowledge did not change, only the spelling of a pointer.
+
 ---
 
 ## Tags
@@ -97,22 +139,56 @@ Tags are appended to the existing `tags:` list in the concept's YAML frontmatter
 
 ## Validation
 
-### Validate a concept's frontmatter
+There are two different checks, because okfw's schema is deliberately stricter
+than OKF requires (see [Note Format](/okf-wiki/getting-started/note-format/#okf-conformance-and-divergences)).
+
+### Validate a concept against okfw's schema
 ```bash
 okfw validate path/to/note.md
+okfw validate 019f0494                 # by id
 ```
 
-Validates the concept's YAML frontmatter against the CUE schema. Reports any missing or invalid fields.
+Applies the full CUE `#Concept` schema: the six required fields, the declared
+value formats, and no undeclared top-level keys.
 
-### Validate whole-wiki OKF conformance
+### Validate every concept in the wiki
+```bash
+okfw validate --all                 # strict check of the discovered wiki
+okfw validate --all path/to/.okfw/  # ...or an explicit path
+```
+
+The same strict check over the whole bundle, reporting each failure. Exits
+non-zero if any concept is invalid.
+
+### Validate OKF conformance
 ```bash
 okfw validate --okf                 # Validate the discovered wiki
 okfw validate --okf path/to/.okfw/  # Validate an explicit wiki path
 ```
 
-Checks the entire wiki for Open Knowledge Format conformance: every concept
-must have a non-empty `type` field. Broken links are reported as warnings (they
-do not fail validation).
+Checks Open Knowledge Format conformance (spec §11) and nothing more: every
+non-reserved `.md` file has parseable frontmatter with a non-empty `type`.
+Permissive by design, so a bundle okfw did not author can still pass. Broken
+links are reported as warnings — OKF requires consumers to tolerate them.
+
+### Migrate concepts from an older okfw
+```bash
+okfw migrate --dry-run   # report what would change
+okfw migrate             # apply
+```
+
+Rewrites concepts so they satisfy the current schema. okfw removed its
+task-tracking fields, because OKF v0.2 spec'd `status` as the lifecycle field
+and okfw was using it for todo progress. This drops `due`, `completed`,
+`priority` and `kind: todo`, and rewrites a legacy `status`:
+
+| Before | After |
+|---|---|
+| `status: closed` | `status: deprecated` |
+| `status: open` or `status: in_progress` | removed (absent means `stable`) |
+
+Safe to re-run; a second pass reports nothing to do. The free-form `type` is left
+alone, since OKF does not register type values.
 
 ---
 
@@ -172,7 +248,7 @@ okfw index-md path/to/.okfw/     # Explicit path
 
 Generates OKF `index.md` files (directory listings for progressive disclosure)
 in each directory of the wiki. The root `index.md` carries the wiki's
-`okf_version: "0.1"`; all other index files have no frontmatter, and entries
+`okf_version: "0.2"`; all other index files have no frontmatter, and entries
 include each concept's description.
 
 You rarely need to run this by hand: creating or updating a note keeps every
@@ -215,13 +291,12 @@ okfw search -T golang -T testing
 
 ### Filter by structured kind
 ```bash
-okfw search --kind todo
 okfw search --kind daily-note
 okfw search --kind issue
 ```
 
-`--kind` filters the structured `kind` field (`note`/`todo`/`daily-note`/`issue`)
-that drives todo/daily/issue behavior.
+`--kind` filters the structured `kind` field (`note`/`daily-note`/`issue`)
+that drives daily-note and issue behavior.
 
 ### Filter by OKF type
 ```bash
@@ -230,21 +305,23 @@ okfw search -t book
 ```
 
 `--type` filters the free-form OKF `type` field. (Previously `--type` filtered
-note/todo/daily-note/issue — that behavior is now `--kind`.)
+note/daily-note/issue — that behavior is now `--kind`.)
 
-### Filter by status and priority
+### Filter by lifecycle status
 ```bash
-okfw search --status open
-okfw search --priority high
-okfw search --kind todo --status open --priority high
+okfw search --status draft        # not yet reviewed
+okfw search --status deprecated   # superseded, kept for links and history
 ```
 
-### Filter by due date
+Concepts with no `status` are `stable`, and are returned by `--status stable`.
+
+### Find stale concepts
 ```bash
-okfw search --due-before 2026-03-01
-okfw search --due-after 2026-02-01
-okfw search --due-after 2026-02-01 --due-before 2026-02-28  # Date range
+okfw search --stale
 ```
+
+Returns concepts whose `stale_after` date has passed, inclusive of the boundary
+day. Set the date with `okfw set-stale-after`.
 
 ### Limit results
 ```bash
@@ -261,7 +338,7 @@ okfw search "query" --json | jq '.[] | .title'
 ### Combined filters
 ```bash
 okfw search "authentication" --project my-project --tag security
-okfw search --kind todo --status open --project my-project --priority high
+okfw search --kind issue --status draft --project my-project
 ```
 
 ---
@@ -285,9 +362,14 @@ okfw graph . -l 5
 okfw graph . --start infra/my-first-idea--019f0494
 ```
 
-### Control tree depth
+### Control traversal depth
 ```bash
 okfw graph . --depth 3
+```
+
+### Render a plain-text tree
+```bash
+okfw graph --ascii
 ```
 
 ### Sync graph database before querying
@@ -295,7 +377,35 @@ okfw graph . --depth 3
 okfw graph --sync
 ```
 
-The graph command outputs Mermaid flowchart syntax to stdout. When a graph database (`.okfw/.graph.db`) exists, it uses indexed data for faster queries. Use `--sync` to force a fresh sync before querying.
+`okfw graph` writes **Mermaid flowchart syntax** to stdout by default, suitable
+for pasting into markdown; `--ascii` renders a plain-text tree that reads
+directly in a terminal. A summary line (`N nodes, M edges`) goes to stderr, so
+piped output stays clean. When a graph database (`.okfw/.graph.db`) exists, it is
+used for faster queries; `--sync` forces a fresh sync first.
+
+---
+
+## Export
+
+### Export a portable subset of the wiki
+```bash
+okfw export                              # Export from the wiki root
+okfw export path/to/dir                  # Export a specific directory
+okfw export --start 019f0494 --depth 2   # Export a neighbourhood
+okfw export --limit 50
+```
+
+Writes a self-contained copy of a connected subset of concepts into
+`.okfw/ephemeral/`, one file per concept named `<id>.md`, with links rewritten to
+match. Useful for handing a slice of the wiki to something that has no access to
+the bundle. `ephemeral/` is gitignored and safe to delete.
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--start` | - | most connected | Concept id to start from |
+| `--depth` | - | unlimited | Maximum hops from `--start` |
+| `--limit` | `-l` | `10` | Maximum number of concepts |
+| `--help` | `-h` | - | Show help |
 
 ---
 
@@ -366,7 +476,6 @@ Available templates:
 - `user-story` - User story in standard format with acceptance criteria
 - `feature` - Feature specification with requirements and design notes
 - `daily` - Daily note for thoughts, tasks, and reflections
-- `todo` - Actionable task with status tracking
 - `issue` - Issue tracking like GitHub (bug, enhancement, question)
 
 ---
@@ -430,46 +539,65 @@ See [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a compreh
 
 ---
 
-## Todo Management
+## OKF Metadata
 
-### Create a todo
+okfw implements OKF v0.2's lifecycle, trust, and provenance families. Each has a
+writer, so no field is set-able only by hand-editing YAML.
+
+### Lifecycle
 ```bash
-okfw todo "Fix login bug"
-okfw todo "Update docs" --project my-project
+okfw set-lifecycle 019f0494 deprecated   # draft | stable | deprecated
+okfw set-stale-after 019f0494 2026-12-31
+okfw set-stale-after 019f0494 --clear
 ```
 
-### Create with due date and priority
+An absent `status` means `stable`. A concept is stale when today is on or after
+`stale_after` — an absolute date, not a TTL.
+
+### Trust
 ```bash
-okfw todo "Critical fix" --due 2026-02-20 --priority high
-okfw todo "Nice to have" --priority low
+okfw verify 019f0494                              # defaults to human:<your login>
+okfw verify 019f0494 --by process:nightly-audit
+okfw verify 019f0494 --by human:ryan --at 2026-07-20T10:00:00Z
+okfw set-generated 019f0494 --by process:finance-nightly
 ```
 
-### List todos
+`verify` appends to the concept's `verified` list. Consumers derive a trust tier
+from it: no entries means `unverified`, non-human actors mean
+`machine-confirmed`, and any `human:` actor means `human-reviewed`. Running
+`verify` by hand is a human confirmation, hence the default actor.
+
+`generated.at` is not set directly — it mirrors `timestamp`, and okfw keeps the
+two equal.
+
+### Provenance
 ```bash
-okfw todos                        # List open todos
-okfw todos --project my-project   # Filter by project
-okfw todos --overdue              # Overdue todos
-okfw todos --today                # Due today
-okfw todos --this-week            # Due this week
-okfw todos --closed               # Show closed todos
-okfw todos --json                 # JSON output
+okfw add-source 019f0494 --resource https://example.com/schema --id ga4-schema
+okfw add-source 019f0494 --resource "all queries in project X" \
+    --usage-count 412 --usage-window 2026-01-01..2026-06-30
 ```
 
-### Manage todo status
+`--resource` is required, and names either something a consumer can follow or a
+scope descriptor it cannot. `--id` is the join key for `[^id]` body footnotes,
+so a specific claim can cite a specific source.
+
+### The described asset
 ```bash
-okfw set-status 202602131045 closed       # Mark as closed
-okfw set-status 202602131045 in_progress  # Set to in progress
-okfw set-status 202602131045 open         # Reopen a closed todo
+okfw set-resource 019f0494 bigquery://project.dataset.orders
 ```
 
-### Generate todo list markdown
-```bash
-okfw todo-list                    # Generate todo list
-okfw todo-list --project my-project
-okfw todo-list --output my-todos.md
-```
+Sets OKF's `resource` field: a URI identifying the underlying asset this concept
+describes. Absent for concepts about abstract ideas.
 
-See [Todo Workflow](/okf-wiki/neovim/todo-workflow/) for a comprehensive guide to todo workflows.
+See [Note Format](/okf-wiki/getting-started/note-format/) for the full field
+reference.
+
+:::note
+okfw has **no task tracking**. `okfw todo`, `todos`, `todo-list`, and `set-status`
+were removed along with the `todo` kind: OKF v0.2 spec'd `status` as the
+lifecycle field, and okfw is a knowledge format rather than a task tracker. Run
+`okfw migrate` to clean up concepts written before the removal.
+:::
 
 ---
 
@@ -595,12 +723,10 @@ Usage: `okfw root`
 |------|-------|---------|-------------|
 | `--project` | `-p` | - | Filter by project |
 | `--tag` | `-T` | - | Filter by tag (repeatable, AND logic) |
-| `--kind` | - | - | Filter by structured kind (`note`/`todo`/`daily-note`/`issue`) |
+| `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
 | `--type` | `-t` | - | Filter by the free-form OKF `type` field |
-| `--status` | - | - | Filter by status (`open`/`in_progress`/`closed`) |
-| `--priority` | - | - | Filter by priority (`high`/`medium`/`low`) |
-| `--due-before` | - | - | Filter todos due before date (YYYY-MM-DD) |
-| `--due-after` | - | - | Filter todos due after date (YYYY-MM-DD) |
+| `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`) |
+| `--stale` | - | `false` | Only concepts whose `stale_after` date has passed |
 | `--limit` | `-l` | `20` | Maximum number of results |
 | `--json` | - | `false` | Output as JSON |
 | `--help` | `-h` | - | Show help |
@@ -609,6 +735,7 @@ Usage: `okfw root`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--ascii` | - | `false` | Render a plain-text tree instead of Mermaid |
 | `--limit` | `-l` | `10` | Maximum number of nodes to display |
 | `--start` | | - | Start tree from a specific note ID |
 | `--depth` | | `0` (unlimited) | Maximum tree depth |
@@ -652,43 +779,89 @@ Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
 | `--json` | - | `false` | Output as JSON (with --list) |
 | `--help` | `-h` | - | Show help |
 
-### `okfw todo`
+### `okfw delete`
+
+Usage: `okfw delete <id_or_file>` (alias: `rm`)
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--project` | `-p` | - | Optional project metadata (also used as the note's folder) |
-| `--due` | - | - | Due date (YYYY-MM-DD format) |
-| `--priority` | - | - | Priority (`high`, `medium`, `low`) |
+| `--force` | `-f` | `false` | Delete without confirming |
 | `--help` | `-h` | - | Show help |
 
-### `okfw todos`
+### `okfw move`
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--project` | `-p` | - | Filter by project |
-| `--overdue` | - | `false` | Show overdue todos |
-| `--today` | - | `false` | Show todos due today |
-| `--this-week` | - | `false` | Show todos due this week |
-| `--closed` | - | `false` | Show closed todos |
-| `--json` | - | `false` | Output as JSON |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-status`
-
-Usage: `okfw set-status [id_or_file] [status]`
-
-Status must be one of: `open`, `in_progress`, `closed`.
+Usage: `okfw move <id_or_file> <destination>` (aliases: `rename`, `mv`)
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `okfw todo-list`
+### `okfw set-lifecycle`
+
+Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--project` | `-p` | - | Filter by project |
-| `--output` | `-o` | `todos-TIMESTAMP.md` | Output filename |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-stale-after`
+
+Usage: `okfw set-stale-after <id_or_file> [YYYY-MM-DD]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--clear` | - | `false` | Remove `stale_after` instead of setting it |
+| `--help` | `-h` | - | Show help |
+
+### `okfw verify`
+
+Usage: `okfw verify <id_or_file>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--by` | - | `human:<login>` | Actor: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
+| `--at` | - | now | RFC 3339 datetime |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-generated`
+
+Usage: `okfw set-generated <id_or_file>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--by` | - | `human:<login>` | Actor that produced the content |
+| `--help` | `-h` | - | Show help |
+
+### `okfw add-source`
+
+Usage: `okfw add-source <id_or_file> --resource <uri>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--resource` | - | - | URL, bundle-relative path, or scope descriptor (**required**) |
+| `--id` | - | - | Join key for `[^id]` body footnotes |
+| `--title` | - | - | Human-readable label |
+| `--author` | - | - | Actor who produced the source |
+| `--usage-count` | - | - | How often the resource was exercised |
+| `--last-modified` | - | - | When the source itself last changed (YYYY-MM-DD) |
+| `--usage-window` | - | - | Date range framing `--usage-count`, as `FROM..TO` |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-resource`
+
+Usage: `okfw set-resource <id_or_file> <uri>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--help` | `-h` | - | Show help |
+
+### `okfw migrate`
+
+Usage: `okfw migrate [path]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--dry-run` | - | `false` | Report what would change without writing |
 | `--help` | `-h` | - | Show help |
 
 ---
@@ -752,8 +925,7 @@ project is set); `--path <subdir>` overrides that.
 ├── ephemeral/                     # Export scratch dir (gitignored)
 ├── .index/                        # Bleve search index (auto-managed)
 ├── .graph.db                      # Persistent graph database (auto-managed)
-├── .todos/                        # Generated todo lists
-└── .gitignore                     # Ignores .index/, .graph.db, .todos/, ephemeral/
+└── .gitignore                     # Ignores .index/, .graph.db, ephemeral/
 ```
 
 `index.md` and `log.md` are **reserved filenames** carrying no concept
@@ -765,8 +937,11 @@ frontmatter.
 
 `okfw` automatically detects:
 - **The wiki**: Searches upward from the current directory for `.okfw/` (like git finds `.git`)
-- **Git project**: Uses repo name as `project` field
+- **The project root**: `okfw init` places `.okfw/` at the git repository root, or the current directory outside git
 - **Working directory**: For relative paths
+
+`project` is **never** derived from git. It is optional metadata: pass
+`-p/--project` when creating a concept, or set it later with `okfw set-project`.
 
 ---
 

@@ -135,10 +135,9 @@ automatically provides buffer-local keymaps:
 | `<localleader>l` | Insert link |
 | `<localleader>L` | Insert link with title |
 | `<localleader>b` | Toggle backlinks |
-| `<localleader>p` | Set project (note and todo types) |
+| `<localleader>p` | Set project |
 | `<localleader>a` | Add tags (all concept types) |
 | `<localleader>v` | Validate frontmatter (all concept types) |
-| `<localleader>s` | Set todo status (todo-type only) |
 
 ## Help Documentation
 

@@ -47,7 +47,7 @@ okfw log                                  # Generate OKF log.md from git history
 okfw search "authentication"              # Full-text search
 okfw search --project my-project          # Filter by project
 okfw search --tag golang --tag api        # Filter by tags
-okfw search --kind todo                   # Filter by structured kind
+okfw search --kind issue                  # Filter by structured kind
 okfw search --type note                   # Filter by the free-form OKF type
 okfw search "auth" --project my-project   # Combined search
 okfw search --json                        # JSON output for tooling
@@ -75,21 +75,15 @@ okfw daily --yesterday                    # Yesterday (for morning review)
 okfw daily --date 2026-02-10              # Specific date
 okfw daily --list                         # List recent daily notes
 
-# Todo management
-okfw todo "Fix login bug"                 # Create a todo
-okfw todo "Update docs" --due 2026-02-20  # With due date
-okfw todo "Critical fix" --priority high  # With priority
-okfw todos                                # List open todos
-okfw todos --project my-project           # Filter by project
-okfw todos --overdue                      # Show overdue todos
-okfw todos --today                        # Due today
-okfw todos --this-week                    # Due this week
-okfw todos --closed                       # Show closed todos
-okfw set-status 202602131045 closed       # Mark todo as closed
-okfw set-status 202602131045 in_progress  # Set to in progress
-okfw set-status 202602131045 open         # Reopen a todo
-okfw todo-list                            # Generate todo list markdown
-okfw todo-list --project my-project       # Project-specific list
+# OKF metadata (okfw has no task tracking)
+okfw set-lifecycle 019f0494 deprecated    # draft | stable | deprecated
+okfw set-stale-after 019f0494 2026-12-31  # mark a shelf life
+okfw search --status draft                # find unreviewed concepts
+okfw search --stale                       # find concepts past stale_after
+okfw verify 019f0494                      # record that you reviewed it
+okfw add-source 019f0494 --resource https://example.com/spec
+okfw validate --all                       # strict schema check of the wiki
+okfw migrate                              # clean up a pre-0.2 wiki
 
 # Git workflow (dated branches)
 ```
