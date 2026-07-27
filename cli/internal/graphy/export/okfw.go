@@ -315,6 +315,13 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			}
 		}
 		content := renderConcept(prev, it, opts, parentID, commit, time.Now(), body)
+		// renderConcept hand-builds frontmatter, so a bad title, an
+		// undeclared graphy field, or a malformed resource would otherwise
+		// reach the bundle unnoticed and only surface later as an okfw
+		// validation failure on someone else's machine.
+		if err := bundle.ValidateGenerated(content); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.relPath, err)
+		}
 		if err := os.WriteFile(abs, content, 0644); err != nil {
 			return nil, err
 		}
