@@ -49,7 +49,7 @@ func TestMCPHandshakeAndToolList(t *testing.T) {
 
 	resp = s.handleLine(`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
 	result, _ = json.Marshal(resp.Result)
-	for _, tool := range []string{`"search"`, `"create"`, `"read"`, `"update"`, `"graph"`} {
+	for _, tool := range []string{`"okfw_search"`, `"okfw_create"`, `"okfw_read"`, `"okfw_update"`, `"okfw_graph"`} {
 		if !strings.Contains(string(result), tool) {
 			t.Errorf("tools/list missing %s", tool)
 		}
@@ -394,6 +394,121 @@ Points at [Target](/target--00ff.md) and at [Nowhere](/gone-`+fmt.Sprint(i)+`.md
 			}
 			if _, ok := got["total"]; !ok {
 				t.Errorf("%s does not report a total: %s", tc.name, out)
+			}
+		})
+	}
+}
+
+// TestMCPToolNamesAreNamespacedAndAliased: the tools are advertised as okfw_*
+// so they read unambiguously in a client that flattens names across servers —
+// `read` and `search` are not distinctive — while the bare names that shipped
+// first keep dispatching, since breaking a prompt or a saved skill that hard-
+// codes them buys nothing.
+func TestMCPToolNamesAreNamespacedAndAliased(t *testing.T) {
+	s, _ := mcpTestServer(t)
+
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		if !strings.HasPrefix(name, "okfw_") {
+			t.Errorf("tool %q is not namespaced", name)
+		}
+	}
+
+	for _, bare := range []string{"search", "create", "read", "update", "graph"} {
+		res := s.callTool(bare, json.RawMessage(`{}`))
+		if res == nil || len(res.Content) == 0 {
+			t.Fatalf("legacy name %q returned nothing", bare)
+		}
+		if strings.Contains(res.Content[0].Text, "unknown tool") {
+			t.Errorf("legacy name %q no longer dispatches", bare)
+		}
+		// And the namespaced spelling reaches the same handler.
+		ns := s.callTool("okfw_"+bare, json.RawMessage(`{}`))
+		if ns == nil || len(ns.Content) == 0 {
+			t.Fatalf("okfw_%s returned nothing", bare)
+		}
+		if ns.Content[0].Text != res.Content[0].Text {
+			t.Errorf("okfw_%s and %s disagree:\n%s\n%s", bare, bare, ns.Content[0].Text, res.Content[0].Text)
+		}
+	}
+
+	if res := s.callTool("okfw_nonexistent", nil); res == nil || !res.IsError {
+		t.Error("an undeclared tool should error")
+	}
+}
+
+// TestEveryMCPToolIsCappedAndSaysSo is the counterweight on okfw's MCP surface.
+//
+// Every other test here asserts a tool returns some particular thing, so all of
+// them push toward returning more and nothing pushed back — which is how `read`
+// came to return whole files unbounded, and how `graph` came to apply its
+// advertised limit to one action out of four.
+//
+// The tool list is driven from mcpTools(), so a tool added later cannot escape.
+func TestEveryMCPToolIsCappedAndSaysSo(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A bundle big enough that an unbounded tool shows it.
+	var long strings.Builder
+	for i := 0; i < 2000; i++ {
+		fmt.Fprintf(&long, "line %d of a concept nobody wants in full\n", i)
+	}
+	for i := 0; i < 30; i++ {
+		writeConceptFile(t, cfg.RootPath, fmt.Sprintf("bulk%02d--%02d.md", i, i), fmt.Sprintf(`---
+id: "019680f0-7e00-7abc-8def-3000000000%02d"
+title: "Bulk %d"
+type: "note"
+tags:
+  - "bulk"
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+---
+
+# Bulk %d
+
+Links to [Bulk 0](/bulk00--00.md) and [Nowhere](/gone-%d.md).
+
+%s`, i, i, i, i, long.String()))
+	}
+	if _, isErr := callTool(t, s, "okfw_graph", `{"action":"dangling"}`); isErr {
+		t.Fatal("graph sync failed")
+	}
+
+	args := map[string]string{
+		"okfw_search": `{"q":"bulk"}`,
+		"okfw_create": `{"title":"Probe"}`,
+		"okfw_read":   `{"ref":"bulk00--00.md"}`,
+		"okfw_update": `{"ref":"bulk00--00.md","action":"add_tags","value":"probed"}`,
+		"okfw_graph":  `{"action":"tag","ref":"bulk"}`,
+	}
+
+	const maxUncapped = 64 * 1024
+
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		a, ok := args[name]
+		if !ok {
+			t.Errorf("tool %s has no entry in this test; add one so it is bounded too", name)
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			out, isErr := callTool(t, s, name, a)
+			if isErr {
+				t.Fatalf("%s errored: %s", name, out)
+			}
+			if len(out) <= maxUncapped {
+				return
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("%s returned %d bytes of non-JSON with no cap", name, len(out))
+			}
+			if _, ok := got["truncated"]; !ok {
+				t.Errorf("%s returned %d bytes without announcing a cap", name, len(out))
 			}
 		})
 	}

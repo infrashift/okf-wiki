@@ -21,6 +21,17 @@ import (
 )
 
 func main() {
+	if err := rootCmd().Execute(); err != nil {
+		os.Exit(1)
+	}
+}
+
+// rootCmd builds the whole command tree.
+//
+// Extracted from main so tests can enumerate the registered commands. graphy
+// has had this shape from the start, which is why its skill could be checked
+// against the binary and okfw's could not.
+func rootCmd() *cobra.Command {
 	var projectFlag string
 	var tagsFlag []string
 	var limitFlag int
@@ -1370,15 +1381,14 @@ Example client configuration (Claude Code):
 	for _, c := range fileCommands() {
 		rootCmd.AddCommand(c)
 	}
+	rootCmd.AddCommand(newInstallCmd())
 	for _, c := range okfFamilyCommands() {
 		rootCmd.AddCommand(c)
 	}
 	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(validateCmd)
 
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
-	}
+	return rootCmd
 }
 
 // parseConceptForGraph parses a concept file and returns a graph node

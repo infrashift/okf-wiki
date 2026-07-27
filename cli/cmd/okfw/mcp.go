@@ -22,6 +22,8 @@ import (
 	"strings"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graphdb"
@@ -105,7 +107,7 @@ func mcpTools() []map[string]interface{} {
 
 	return []map[string]interface{}{
 		{
-			"name":        "search",
+			"name":        "okfw_search",
 			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,node_id}]}; path is wiki-relative (use with read), node_id crosses back into graphy. Filter kind:\"code\" for graphy's exported entities or kind:\"note\" for hand-written concepts.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
@@ -121,7 +123,7 @@ func mcpTools() []map[string]interface{} {
 			}),
 		},
 		{
-			"name":        "create",
+			"name":        "okfw_create",
 			"description": "Create a concept. Returns {id,path}.",
 			"inputSchema": obj(map[string]interface{}{
 				"kind":        enum("what to create (default note)", "note", "daily"),
@@ -136,7 +138,7 @@ func mcpTools() []map[string]interface{} {
 			}),
 		},
 		{
-			"name":        "read",
+			"name":        "okfw_read",
 			"description": "Read a concept's markdown by id or wiki-relative path. Capped at 200 lines; narrow with section, or page with offset/limit.",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":     str("concept id or path"),
@@ -146,16 +148,16 @@ func mcpTools() []map[string]interface{} {
 			}, "ref"),
 		},
 		{
-			"name":        "update",
-			"description": "Update a concept: metadata, or its markdown body (append / set_body).",
+			"name":        "okfw_update",
+			"description": "Update a concept: metadata, OKF trust/provenance (verify, set_generated, set_resource, add_source), or its markdown body (append / set_body).",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":    str("concept id or path"),
-				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "append", "set_body"),
-				"value":  str("project | draft|stable|deprecated | YYYY-MM-DD | comma-separated tags | markdown (append/set_body)"),
+				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
+				"value":  str("project | draft|stable|deprecated | YYYY-MM-DD | comma-separated tags | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
 			}, "ref", "action", "value"),
 		},
 		{
-			"name":        "graph",
+			"name":        "okfw_graph",
 			"description": "Link-graph queries. backlinks|tag -> {nodes:[{id,title,path}],total}; cluster adds edges; dangling -> {dangling:[{from,from_path,to}],total}. Capped at `limit`; `truncated` means more exist.",
 			"inputSchema": obj(map[string]interface{}{
 				"action": enum("query", "backlinks", "cluster", "tag", "dangling"),
@@ -271,7 +273,11 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
 	if err != nil {
 		return errResult(err)
 	}
-	switch name {
+	// Both spellings dispatch. The tools are advertised as okfw_* so they read
+	// unambiguously in a client that flattens tool names across servers, but
+	// the bare names shipped first and may be baked into a prompt or a saved
+	// skill somewhere, and breaking those buys nothing.
+	switch strings.TrimPrefix(name, "okfw_") {
 	case "search":
 		return s.toolSearch(cfg, args)
 	case "create":
@@ -547,8 +553,13 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
 	}
-	if a.Ref == "" || a.Action == "" || a.Value == "" {
-		return errResult(fmt.Errorf("ref, action, and value are required"))
+	if a.Ref == "" || a.Action == "" {
+		return errResult(fmt.Errorf("ref and action are required"))
+	}
+	// verify and set_generated default their actor, so value is optional for
+	// them; everything else needs one.
+	if a.Value == "" && a.Action != "verify" && a.Action != "set_generated" {
+		return errResult(fmt.Errorf("value is required for %s", a.Action))
 	}
 
 	path, err := resolveRef(cfg, a.Ref)
@@ -597,6 +608,59 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		rebuilt := "---\n" + string(fm) + "\n---\n\n" + strings.TrimRight(a.Value, "\n") + "\n"
 		newContent, err = bundle.UpdateFrontmatter([]byte(rebuilt), nil) // bump timestamp
+
+	// The OKF trust and provenance families. These share their mutators with
+	// the CLI writers rather than reimplementing them, so `update` cannot drift
+	// away from `okfw verify` / `add-source` / `set-resource` / `set-generated`
+	// the way it had by simply not existing.
+	case "verify":
+		actor := a.Value
+		if actor == "" {
+			actor = defaultHumanActor()
+		}
+		newContent, err = applyOKFEdit(content, verifyMutator(actor, time.Now().Format(time.RFC3339)))
+	case "set_generated":
+		actor := a.Value
+		if actor == "" {
+			actor = defaultHumanActor()
+		}
+		newContent, err = applyOKFEdit(content, setGeneratedMutator(actor))
+	case "set_resource":
+		newContent, err = applyOKFEdit(content, setResourceMutator(a.Value))
+	case "add_source":
+		var e sourceEntry
+		// A single resource string is the common case; JSON carries the rest.
+		if strings.HasPrefix(strings.TrimSpace(a.Value), "{") {
+			var in struct {
+				Resource     string `json:"resource"`
+				ID           string `json:"id"`
+				Title        string `json:"title"`
+				Author       string `json:"author"`
+				LastModified string `json:"last_modified"`
+				UsageCount   *int   `json:"usage_count"`
+				UsageWindow  string `json:"usage_window"`
+			}
+			if jerr := json.Unmarshal([]byte(a.Value), &in); jerr != nil {
+				return errResult(fmt.Errorf("add_source value is neither a resource string nor a JSON object: %w", jerr))
+			}
+			from, to, werr := parseUsageWindow(in.UsageWindow)
+			if werr != nil {
+				return errResult(werr)
+			}
+			e = sourceEntry{
+				resource: in.Resource, id: in.ID, title: in.Title, author: in.Author,
+				lastModified: in.LastModified, from: from, to: to,
+			}
+			if in.UsageCount != nil {
+				e.usageCount, e.hasUsage = *in.UsageCount, true
+			}
+		} else {
+			e = sourceEntry{resource: a.Value}
+		}
+		if strings.TrimSpace(e.resource) == "" {
+			return errResult(fmt.Errorf("add_source requires a resource"))
+		}
+		newContent, err = applyOKFEdit(content, addSourceMutator(e))
 	default:
 		return errResult(fmt.Errorf("unknown action %q", a.Action))
 	}
@@ -752,4 +816,29 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		return jsonResult(out)
 	}
 	return errResult(fmt.Errorf("unknown action %q", a.Action))
+}
+
+// applyOKFEdit runs an OKF-family frontmatter mutator, stamping the timestamp
+// and guarding the result the same way the CLI's editConcept does.
+func applyOKFEdit(content []byte, fn func(*yaml.Node) error) ([]byte, error) {
+	out, err := bundle.Edit(content, func(m *yaml.Node) error {
+		if err := fn(m); err != nil {
+			return err
+		}
+		stamp := time.Now().Format(time.RFC3339)
+		bundle.MapSetString(m, "timestamp", stamp)
+		if bundle.MapGet(m, "generated") != nil {
+			if err := bundle.SetPath(m, "generated.at", stamp); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := bundle.GuardMutation(content, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }

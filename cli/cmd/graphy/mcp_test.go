@@ -589,3 +589,63 @@ func TestMCPRationaleMatchesTheCLI(t *testing.T) {
 		}
 	}
 }
+
+// TestEveryMCPToolIsCappedAndSaysSo is the counterweight on the MCP surface.
+//
+// TestExportStaysWithinItsTokenBudget exists because every other export test
+// asserts something is *present*, so all of them push toward rendering more and
+// nothing pushed back. The MCP surface had no such counterweight — which is why
+// graphy_query, the tool whose description tells agents to prefer it over
+// reading files, returned 200KB uncapped, and why file_nodes and report were
+// unbounded too.
+//
+// The tool list is driven from mcpTools(), so a tool added later cannot escape.
+func TestEveryMCPToolIsCappedAndSaysSo(t *testing.T) {
+	s := mcpTestServer(t)
+
+	// Minimal arguments per tool: enough to reach the handler, nothing that
+	// narrows the result.
+	args := map[string]string{
+		"graphy_query":      `{"question":"run"}`,
+		"graphy_path":       `{"from":"run","to":"Helper"}`,
+		"graphy_explain":    `{"entity":"Helper"}`,
+		"graphy_neighbors":  `{"entity":"Helper"}`,
+		"graphy_callers":    `{"entity":"Helper"}`,
+		"graphy_file_nodes": `{"file":"util/util.go"}`,
+		"graphy_concept":    `{"entity":"Helper"}`,
+		"graphy_community":  `{"community":"util"}`,
+		"graphy_rationale":  `{"entity":"run"}`,
+		"graphy_report":     `{}`,
+		"graphy_update":     `{}`,
+	}
+
+	// maxUncapped is what a response may weigh without carrying a truncation
+	// marker. Generous: the point is to catch an unbounded traversal, not to
+	// police a few hundred bytes.
+	const maxUncapped = 64 * 1024
+
+	for _, tool := range mcpTools() {
+		name, _ := tool["name"].(string)
+		a, ok := args[name]
+		if !ok {
+			t.Errorf("tool %s has no entry in this test; add one so it is bounded too", name)
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			out, isErr := callTool(t, s, name, a)
+			if isErr {
+				t.Skipf("tool errored on the fixture (not a size question): %s", out)
+			}
+			if len(out) <= maxUncapped {
+				return
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("%s returned %d bytes of non-JSON with no cap", name, len(out))
+			}
+			if _, ok := got["truncated"]; !ok {
+				t.Errorf("%s returned %d bytes without announcing a cap", name, len(out))
+			}
+		})
+	}
+}

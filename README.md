@@ -109,14 +109,17 @@ artifacts are gitignored.
 
 Two complementary integration points:
 
-- **MCP server** — `okfw mcp` serves five consolidated tools (`search`,
-  `create`, `read`, `update`, `graph`) over stdio with compact JSON responses
-  (< 3 KB of tool schemas). Register with `claude mcp add okfw -- okfw mcp`,
-  launched from the project directory.
-- **Agent skill** — copy [`skills/okfw.md`](skills/okfw.md) into your
-  project's `.claude/skills/` to teach agents the wiki's conventions (linking
-  syntax, atomic notes, capture → refine → link workflow). The skill covers
-  the *why and when*; the MCP tools and `okfw --help` cover the mechanics.
+- **MCP server** — `okfw mcp` serves five consolidated tools (`okfw_search`,
+  `okfw_create`, `okfw_read`, `okfw_update`, `okfw_graph`) over stdio with
+  compact JSON responses (< 3 KB of tool schemas). Register with
+  `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
+  unprefixed names still dispatch, for configurations that predate the prefix.
+- **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
+  skill and a managed CLAUDE.md/GEMINI.md/AGENTS.md block teaching agents the
+  wiki's conventions (linking syntax, atomic notes, capture → refine → link).
+  Re-running it is idempotent, and the block is namespaced so graphy can keep
+  one in the same file. The skill covers the *why and when*; the MCP tools and
+  `okfw --help` cover the mechanics.
 
 ---
 

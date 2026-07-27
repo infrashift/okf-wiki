@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
+	"okfw/cli/internal/okfwskills"
 )
 
 // resolveRefArg turns a concept id or path argument into an absolute file path.
@@ -63,7 +65,11 @@ func editConcept(ref string, fn func(m *yaml.Node) error) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := bundle.ValidateGenerated(out); err != nil {
+	// Guarded, not unconditional: an edit must not break a valid concept, but
+	// these writers must still be able to repair an already-broken one. Holding
+	// them to ValidateGenerated meant `okfw set-lifecycle` on a malformed file
+	// refused, so the CLI had no way to fix it.
+	if err := bundle.GuardMutation(content, out); err != nil {
 		return "", err
 	}
 	if err := os.WriteFile(path, out, 0644); err != nil {
@@ -194,22 +200,7 @@ Examples:
 				return fmt.Errorf("invalid --at %q: want an RFC 3339 datetime", stamp)
 			}
 
-			path, err := editConcept(args[0], func(m *yaml.Node) error {
-				entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-				bundle.MapSet(entry, "by", bundle.QuotedScalar(actor))
-				bundle.MapSet(entry, "at", bundle.QuotedScalar(stamp))
-				// A pre-existing bare mapping has to become a list before we can
-				// append to it — OKF section 5.2 permits the single-entry
-				// shorthand, so files in the wild carry both shapes.
-				if cur := bundle.MapGet(m, "verified"); cur != nil && cur.Kind == yaml.MappingNode {
-					bundle.MapSet(m, "verified", &yaml.Node{
-						Kind: yaml.SequenceNode, Tag: "!!seq",
-						Content: []*yaml.Node{cur, entry},
-					})
-					return nil
-				}
-				return bundle.AppendToSeq(m, "verified", entry)
-			})
+			path, err := editConcept(args[0], verifyMutator(actor, stamp))
 			if err != nil {
 				return err
 			}
@@ -247,18 +238,9 @@ Examples:
 			if strings.TrimSpace(resource) == "" {
 				return fmt.Errorf("--resource is required within a source entry")
 			}
-			var from, to string
-			if usageWindow != "" {
-				parts := strings.SplitN(usageWindow, "..", 2)
-				if len(parts) != 2 {
-					return fmt.Errorf("invalid --usage-window %q: want FROM..TO", usageWindow)
-				}
-				from, to = parts[0], parts[1]
-				for _, d := range []string{from, to} {
-					if _, err := time.Parse("2006-01-02", d); err != nil {
-						return fmt.Errorf("invalid --usage-window date %q: want YYYY-MM-DD", d)
-					}
-				}
+			from, to, err := parseUsageWindow(usageWindow)
+			if err != nil {
+				return err
 			}
 			if lastModified != "" {
 				if _, err := time.Parse("2006-01-02", lastModified); err != nil {
@@ -266,30 +248,12 @@ Examples:
 				}
 			}
 
-			path, err := editConcept(args[0], func(m *yaml.Node) error {
-				entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-				bundle.MapSet(entry, "resource", bundle.QuotedScalar(resource))
-				for _, kv := range []struct{ k, v string }{
-					{"id", id}, {"title", title}, {"author", author},
-					{"last_modified", lastModified},
-				} {
-					if kv.v != "" {
-						bundle.MapSet(entry, kv.k, bundle.QuotedScalar(kv.v))
-					}
-				}
-				if cmd.Flags().Changed("usage-count") {
-					bundle.MapSet(entry, "usage_count", &yaml.Node{
-						Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(usageCount),
-					})
-				}
-				if from != "" {
-					win := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-					bundle.MapSet(win, "from", bundle.QuotedScalar(from))
-					bundle.MapSet(win, "to", bundle.QuotedScalar(to))
-					bundle.MapSet(entry, "usage_window", win)
-				}
-				return bundle.AppendToSeq(m, "sources", entry)
-			})
+			path, err := editConcept(args[0], addSourceMutator(sourceEntry{
+				resource: resource, id: id, title: title, author: author,
+				lastModified: lastModified,
+				usageCount:   usageCount, hasUsage: cmd.Flags().Changed("usage-count"),
+				from:         from, to: to,
+			}))
 			if err != nil {
 				return err
 			}
@@ -320,10 +284,7 @@ Examples:
   okfw set-resource 019680f0 https://example.com/api/v2`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path, err := editConcept(args[0], func(m *yaml.Node) error {
-				bundle.MapSetString(m, "resource", args[1])
-				return nil
-			})
+			path, err := editConcept(args[0], setResourceMutator(args[1]))
 			if err != nil {
 				return err
 			}
@@ -355,9 +316,7 @@ Examples:
 			if actor == "" {
 				actor = defaultHumanActor()
 			}
-			path, err := editConcept(args[0], func(m *yaml.Node) error {
-				return bundle.SetPath(m, "generated.by", actor)
-			})
+			path, err := editConcept(args[0], setGeneratedMutator(actor))
 			if err != nil {
 				return err
 			}
@@ -379,4 +338,155 @@ func okfFamilyCommands() []*cobra.Command {
 		newSetResourceCmd(),
 		newSetGeneratedCmd(),
 	}
+}
+
+// The OKF-family mutators, extracted so the MCP `update` tool applies the same
+// frontmatter edits as the CLI writers.
+//
+// CLAUDE.md states that `update` stays at parity with the CLI writers, and it
+// did not: verify, add-source, set-resource and set-generated had no MCP
+// action, so two of the three OKF v0.2 metadata families — trust and
+// provenance — were unreachable to an agent. Two implementations of the same
+// edit is how the two would drift again, so there is one.
+
+// verifyMutator appends a verification entry (OKF section 5.2).
+func verifyMutator(actor, stamp string) func(*yaml.Node) error {
+	return func(m *yaml.Node) error {
+		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		bundle.MapSet(entry, "by", bundle.QuotedScalar(actor))
+		bundle.MapSet(entry, "at", bundle.QuotedScalar(stamp))
+		// A pre-existing bare mapping has to become a list before we can append
+		// to it — OKF section 5.2 permits the single-entry shorthand, so files
+		// in the wild carry both shapes.
+		if cur := bundle.MapGet(m, "verified"); cur != nil && cur.Kind == yaml.MappingNode {
+			bundle.MapSet(m, "verified", &yaml.Node{
+				Kind: yaml.SequenceNode, Tag: "!!seq",
+				Content: []*yaml.Node{cur, entry},
+			})
+			return nil
+		}
+		return bundle.AppendToSeq(m, "verified", entry)
+	}
+}
+
+// sourceEntry is one provenance source (OKF section 5.1).
+type sourceEntry struct {
+	resource     string
+	id           string
+	title        string
+	author       string
+	lastModified string
+	usageCount   int
+	hasUsage     bool
+	from, to     string
+}
+
+// addSourceMutator appends a provenance source.
+func addSourceMutator(e sourceEntry) func(*yaml.Node) error {
+	return func(m *yaml.Node) error {
+		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		bundle.MapSet(entry, "resource", bundle.QuotedScalar(e.resource))
+		for _, kv := range []struct{ k, v string }{
+			{"id", e.id}, {"title", e.title}, {"author", e.author},
+			{"last_modified", e.lastModified},
+		} {
+			if kv.v != "" {
+				bundle.MapSet(entry, kv.k, bundle.QuotedScalar(kv.v))
+			}
+		}
+		if e.hasUsage {
+			bundle.MapSet(entry, "usage_count", &yaml.Node{
+				Kind: yaml.ScalarNode, Tag: "!!int", Value: strconv.Itoa(e.usageCount),
+			})
+		}
+		if e.from != "" {
+			win := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+			bundle.MapSet(win, "from", bundle.QuotedScalar(e.from))
+			bundle.MapSet(win, "to", bundle.QuotedScalar(e.to))
+			bundle.MapSet(entry, "usage_window", win)
+		}
+		return bundle.AppendToSeq(m, "sources", entry)
+	}
+}
+
+// setResourceMutator sets the URI of the asset a concept describes.
+func setResourceMutator(uri string) func(*yaml.Node) error {
+	return func(m *yaml.Node) error {
+		bundle.MapSetString(m, "resource", uri)
+		return nil
+	}
+}
+
+// setGeneratedMutator records who produced the concept's content.
+// generated.at is kept equal to timestamp by editConcept, not set here.
+func setGeneratedMutator(actor string) func(*yaml.Node) error {
+	return func(m *yaml.Node) error {
+		return bundle.SetPath(m, "generated.by", actor)
+	}
+}
+
+// parseUsageWindow splits a FROM..TO window and validates both dates.
+func parseUsageWindow(s string) (from, to string, err error) {
+	if s == "" {
+		return "", "", nil
+	}
+	parts := strings.SplitN(s, "..", 2)
+	if len(parts) != 2 {
+		return "", "", fmt.Errorf("invalid usage window %q: want FROM..TO", s)
+	}
+	from, to = parts[0], parts[1]
+	for _, d := range []string{from, to} {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
+			return "", "", fmt.Errorf("invalid usage window date %q: want YYYY-MM-DD", d)
+		}
+	}
+	return from, to, nil
+}
+
+// newInstallCmd registers okfw with an agent platform.
+//
+// The skill used to be a loose file at the repo root that README told the
+// reader to copy by hand, with no CLAUDE.md block and no drift test — so an
+// agent given the okfw MCP server got five tool schemas and none of the
+// conventions that make the wiki worth having.
+func newInstallCmd() *cobra.Command {
+	var platform string
+	var force bool
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "Install the okfw skill for an AI coding assistant",
+		Long: `Registers okfw with an agent platform so it captures and links project
+knowledge in the wiki instead of scattering notes. Supported platforms: claude
+(Claude Code: skill + CLAUDE.md block), gemini (GEMINI.md block), codex
+(AGENTS.md block). Managed marker blocks keep re-installs idempotent, and the
+block is namespaced, so okfw and graphy can both maintain one in the same file.
+
+Run from anywhere inside the project; the wiki's parent directory is the root.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Discover("")
+			if err != nil {
+				return err
+			}
+			// The bundle is <root>/.okfw, so the project root is its parent.
+			root := filepath.Dir(cfg.RootPath)
+			res, err := okfwskills.Install(okfwskills.Options{
+				Root:     root,
+				Platform: platform,
+				Force:    force,
+			})
+			if err != nil {
+				return err
+			}
+			for _, f := range res.Written {
+				fmt.Println("Wrote", f)
+			}
+			for _, n := range res.Notes {
+				fmt.Println("Note:", n)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&platform, "platform", "claude", "agent platform: claude, gemini, or codex")
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing skill file")
+	return cmd
 }

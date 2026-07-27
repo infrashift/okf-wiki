@@ -117,9 +117,15 @@ func ValidateGenerated(content []byte) error {
 	return nil
 }
 
-// guardMutation rejects an edit that would break a concept that validated
+// GuardMutation rejects an edit that would break a concept that validated
 // before. It returns nil when the result is valid, and also when the original
-// was already invalid.
+// was already invalid — otherwise the CLI could never repair a broken file,
+// which is exactly what the OKF-family writers could not do while they held
+// their output to the unconditional ValidateGenerated standard.
+func GuardMutation(before, after []byte) error {
+	return guardMutation(before, after)
+}
+
 func guardMutation(before, after []byte) error {
 	if _, err := config.ParseAndValidate(after); err == nil {
 		return nil

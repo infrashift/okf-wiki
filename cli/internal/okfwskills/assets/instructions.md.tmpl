@@ -1,0 +1,26 @@
+## Project knowledge base (okfw)
+
+{{ .Repo }} keeps a local-first OKF wiki in `.okfw/`: markdown concepts with
+YAML frontmatter, linked to each other. Search, the link graph and the
+generated `index.md` listings are maintained on every change.
+
+- **Search before you write.** `okfw search "<query>"` / `okfw_search`, so a
+  new concept links to what already exists instead of duplicating it.
+- **Link actively** — `[Title](/dir/file.md)` from the wiki root, or
+  `./file.md`. Links are what makes the wiki more than a folder.
+- **One idea per concept**, with a one-sentence `description`.
+- **Use `okfw move` / `okfw delete`, never `mv` / `rm`.** They keep the file,
+  the search index, the graph node and the listings in step; the shell
+  commands strand three of the four.
+- **`status` is the OKF lifecycle field** (`draft`/`stable`/`deprecated`), not
+  task state. Mark superseded knowledge rather than deleting it.
+- **Custom metadata goes under `x:`** — the schema is closed and rejects any
+  other unrecognized key.
+- Don't edit `index.md` or `log.md`; okfw generates them.
+
+Results are capped and say so: `truncated`, or `… N more`, means you did not
+see everything — raise the limit or page with `--offset`/`"offset"`.
+
+If the wiki holds a graphy code-graph export, `--kind code` selects those
+entities and `--kind note` selects hand-written concepts; without a filter you
+get both. `okfw mcp` serves all of this as MCP stdio tools named `okfw_*`.

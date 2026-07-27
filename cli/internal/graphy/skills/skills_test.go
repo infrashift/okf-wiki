@@ -27,7 +27,7 @@ func TestInstallClaude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(md), beginMarker) || !strings.Contains(string(md), "graphy update") {
+	if !strings.Contains(string(md), "<!-- BEGIN graphy -->") || !strings.Contains(string(md), "graphy update") {
 		t.Errorf("CLAUDE.md block missing:\n%s", md)
 	}
 
@@ -86,7 +86,7 @@ func TestInstallIsIdempotent(t *testing.T) {
 		}
 	}
 	md, _ := os.ReadFile(filepath.Join(root, "CLAUDE.md"))
-	if strings.Count(string(md), beginMarker) != 1 {
+	if strings.Count(string(md), "<!-- BEGIN graphy -->") != 1 {
 		t.Errorf("duplicated blocks:\n%s", md)
 	}
 	raw, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
@@ -103,7 +103,7 @@ func TestInstallGeminiAndCodex(t *testing.T) {
 			t.Fatalf("%s: %v", platform, err)
 		}
 		md, err := os.ReadFile(filepath.Join(root, file))
-		if err != nil || !strings.Contains(string(md), beginMarker) {
+		if err != nil || !strings.Contains(string(md), "<!-- BEGIN graphy -->") {
 			t.Errorf("%s: %s missing block: %v", platform, file, err)
 		}
 		if len(res.Notes) == 0 {
