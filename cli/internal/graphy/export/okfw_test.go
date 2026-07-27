@@ -11,6 +11,7 @@ import (
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graphy/model"
+	"okfw/cli/internal/graphy/query"
 	"okfw/cli/internal/graphy/store"
 )
 
@@ -88,14 +89,14 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ToOkfw: %v", err)
 	}
-	// 1 community + Alpha + Beta (Tiny is below threshold).
-	if res.Created != 3 {
-		t.Errorf("Created = %d, want 3", res.Created)
+	// Graph overview + 1 community + Alpha + Beta (Tiny is below threshold).
+	if res.Created != 4 {
+		t.Errorf("Created = %d, want 4", res.Created)
 	}
 
 	files := conceptFiles(t, cfg, res.Dir)
-	if len(files) != 3 {
-		t.Fatalf("concept files = %d (%v), want 3", len(files), files)
+	if len(files) != 4 {
+		t.Fatalf("concept files = %d (%v), want 4", len(files), files)
 	}
 	var sawAlpha, sawCommunity bool
 	for name, content := range files {
@@ -123,8 +124,10 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 			if z.Graphy.NodeID != "go:function:a.go#Alpha" || z.Graphy.Entity != "function" || z.Graphy.Language != "go" {
 				t.Errorf("Alpha graphy block = %+v", z.Graphy)
 			}
-			if !strings.Contains(text, "calls [Beta](./beta--") {
-				t.Errorf("Alpha body lacks link to Beta:\n%s", text)
+			// Edges are grouped under a per-relation heading carrying the full
+			// count, so a truncated list still says how much it stands for.
+			if !strings.Contains(text, "### calls (1)") || !strings.Contains(text, "- [Beta](./beta--") {
+				t.Errorf("Alpha body lacks the grouped link to Beta:\n%s", text)
 			}
 			if z.Description != "Alpha does things." {
 				t.Errorf("Alpha description = %q", z.Description)
@@ -235,8 +238,10 @@ func TestExportRewritesOnMeaningfulChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Updated != 1 || res.Unchanged != 2 {
-		t.Errorf("updated=%d unchanged=%d, want 1/2", res.Updated, res.Unchanged)
+	// Only Alpha's doc changed; the overview, the community and Beta are
+	// byte-identical and must not be rewritten.
+	if res.Updated != 1 || res.Unchanged != 3 {
+		t.Errorf("updated=%d unchanged=%d, want 1/3", res.Updated, res.Unchanged)
 	}
 	for name, content := range conceptFiles(t, cfg, "graphy/myproj") {
 		if strings.HasPrefix(name, "alpha--") && !strings.Contains(string(content), "MORE things") {
@@ -875,6 +880,11 @@ func TestExportMigratesLegacyCommunityKeys(t *testing.T) {
 
 	// Rewrite the export record under the old integer-keyed scheme.
 	newKey := communityKey("core")
+	beforeRec, err := s.GetExport(newKey)
+	if err != nil || beforeRec == nil {
+		t.Fatalf("community export record missing: %v", err)
+	}
+	beforePath := beforeRec.RelPath
 	rec, err := s.GetExport(newKey)
 	if err != nil || rec == nil {
 		t.Fatalf("community export record missing: %v", err)
@@ -893,8 +903,8 @@ func TestExportMigratesLegacyCommunityKeys(t *testing.T) {
 	if second.Created != 0 || second.Deleted != 0 {
 		t.Errorf("legacy key was not migrated in place: %+v", second)
 	}
-	if second.Recovered != 1 {
-		t.Errorf("Recovered = %d, want 1 (the re-keyed community)", second.Recovered)
+	if second.Rekeyed != 1 {
+		t.Errorf("Rekeyed = %d, want 1 (the re-keyed community)", second.Rekeyed)
 	}
 	after := conceptIDsByTitle(t, conceptFiles(t, cfg, second.Dir))
 	if after["Community: core"] != communityID {
@@ -906,8 +916,72 @@ func TestExportMigratesLegacyCommunityKeys(t *testing.T) {
 	if old, err := s.GetExport(communityKeyPrefix + "0"); err != nil || old != nil {
 		t.Errorf("legacy export record survived migration: %+v", old)
 	}
-	if got, err := s.GetExport(newKey); err != nil || got == nil {
-		t.Errorf("new key not written: %v", err)
+	got, err := s.GetExport(newKey)
+	if err != nil || got == nil {
+		t.Fatalf("new key not written: %v", err)
+	}
+	// "Re-keyed in place" has to mean the file too. The title is identical by
+	// construction here, so renameToTitle must recognise the current filename as
+	// already encoding it — the guard it replaced compared against
+	// bundle.NoteFilename, which skips names that exist on disk and so always
+	// proposed a longer shortid, renaming every migrated community.
+	if got.RelPath != beforePath {
+		t.Errorf("concept file renamed during an in-place re-key: %q → %q", beforePath, got.RelPath)
+	}
+}
+
+// TestExportCommunitySplitDoesNotStealALivePlacement pins the ordering that
+// makes adoption safe: a record backing a community resolved from its own live
+// export record must be off limits to every other community's adoption.
+//
+// Here "alpha" keeps its label — and so its key, and so its live record — while
+// shedding most of its members to a new "beta". beta's membership still overlaps
+// alpha's *recorded* membership by two thirds, so the overlap matcher used to
+// hand beta the record alpha was already placed on: it renamed alpha's file and
+// deleted alpha's record, and the render pass then died reading a path that no
+// longer existed, after both writes had landed.
+func TestExportCommunitySplitDoesNotStealALivePlacement(t *testing.T) {
+	s, cfg := partitionFixture(t, 6)
+	opts := OkfwOptions{Bundle: cfg, CommunitiesOnly: true}
+
+	partition(t, s, map[string][]int{"alpha": {0, 1, 2, 3, 4, 5}})
+	if _, err := ToOkfw("/repo/myproj", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	alphaKey := communityKey("alpha")
+	before, err := s.GetExport(alphaKey)
+	if err != nil || before == nil {
+		t.Fatalf("alpha community record missing: %v", err)
+	}
+
+	// beta takes {2,3,4,5}: 4 of the 6 alpha used to hold, over a union of 6 —
+	// 0.667, comfortably past the threshold.
+	partition(t, s, map[string][]int{"alpha": {0, 1}, "beta": {2, 3, 4, 5}})
+	second, err := ToOkfw("/repo/myproj", s, opts)
+	if err != nil {
+		t.Fatalf("export after community split: %v", err)
+	}
+
+	after, err := s.GetExport(alphaKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after == nil {
+		t.Fatal("alpha's live record was consumed by beta's adoption")
+	}
+	if after.RelPath != before.RelPath {
+		t.Errorf("alpha's concept was renamed out from under its live placement: %q → %q",
+			before.RelPath, after.RelPath)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(after.RelPath))); err != nil {
+		t.Errorf("alpha's concept file is gone: %v", err)
+	}
+	titles := communityConcepts(t, cfg, second.Dir)
+	if titles["Community: alpha"] == "" || titles["Community: beta"] == "" {
+		t.Errorf("want both communities present, got %v", titles)
+	}
+	if second.Rekeyed != 0 || second.Created != 1 {
+		t.Errorf("beta should have been created fresh, not adopted: %+v", second)
 	}
 }
 
@@ -1022,8 +1096,8 @@ func TestExportMigratesCollidingLegacyCommunities(t *testing.T) {
 	if second.Created != 0 || second.Deleted != 0 {
 		t.Errorf("colliding legacy communities churned: %+v", second)
 	}
-	if second.Recovered != 2 {
-		t.Errorf("Recovered = %d, want 2 (both same-titled communities)", second.Recovered)
+	if second.Rekeyed != 2 {
+		t.Errorf("Rekeyed = %d, want 2 (both same-titled communities)", second.Rekeyed)
 	}
 	if after := conceptFiles(t, cfg, second.Dir); len(after) != len(before) {
 		t.Errorf("file count changed: %d → %d", len(before), len(after))
@@ -1138,8 +1212,8 @@ func TestExportCommunitySurvivesLabelChange(t *testing.T) {
 	if second.Created != 0 || second.Deleted != 0 {
 		t.Errorf("relabelling churned the bundle: %+v", second)
 	}
-	if second.Recovered != 1 {
-		t.Errorf("Recovered = %d, want 1 (adopted via membership)", second.Recovered)
+	if second.Rekeyed != 1 {
+		t.Errorf("Rekeyed = %d, want 1 (adopted via membership)", second.Rekeyed)
 	}
 	after := communityConcepts(t, cfg, second.Dir)
 	if after["Community: renamed"] != id {
@@ -1172,8 +1246,8 @@ func TestExportCommunityNotAdoptedWhenMembershipReplaced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Recovered != 0 {
-		t.Errorf("Recovered = %d: a disjoint community must not adopt", second.Recovered)
+	if second.Rekeyed != 0 {
+		t.Errorf("Rekeyed = %d: a disjoint community must not adopt", second.Rekeyed)
 	}
 	if second.Created != 1 || second.Deleted != 1 {
 		t.Errorf("want 1 created + 1 deleted, got %+v", second)
@@ -1195,8 +1269,8 @@ func TestExportCommunitySplitEvenly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Recovered != 0 {
-		t.Errorf("Recovered = %d: an even split has no majority successor", second.Recovered)
+	if second.Rekeyed != 0 {
+		t.Errorf("Rekeyed = %d: an even split has no majority successor", second.Rekeyed)
 	}
 	if second.Created != 2 || second.Deleted != 1 {
 		t.Errorf("want 2 created + 1 deleted, got %+v", second)
@@ -1222,8 +1296,8 @@ func TestExportCommunitySplitUnevenly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Recovered != 1 {
-		t.Errorf("Recovered = %d, want exactly 1", second.Recovered)
+	if second.Rekeyed != 1 {
+		t.Errorf("Rekeyed = %d, want exactly 1", second.Rekeyed)
 	}
 	if second.Created != 1 || second.Deleted != 0 {
 		t.Errorf("want 1 created + 0 deleted, got %+v", second)
@@ -1273,7 +1347,7 @@ func TestExportCommunityMembershipRefreshedOnEveryExport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Recovered != 1 || third.Created != 0 || third.Deleted != 0 {
+	if third.Rekeyed != 1 || third.Created != 0 || third.Deleted != 0 {
 		t.Errorf("relabelling after growth churned: %+v", third)
 	}
 	if communityConcepts(t, cfg, third.Dir)["Community: renamed"] != id {
@@ -1372,8 +1446,8 @@ func TestExportBackfillsLegacyEmptyDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Recovered != 1 {
-		t.Errorf("Recovered = %d, want 1 (adopted via the backfilled digest)", third.Recovered)
+	if third.Rekeyed != 1 {
+		t.Errorf("Rekeyed = %d, want 1 (adopted via the backfilled digest)", third.Rekeyed)
 	}
 	if got := communityConcepts(t, cfg, third.Dir)["Community: renamed"]; got != id {
 		t.Errorf("concept id changed after relabel: %q → %q", id, got)
@@ -1517,8 +1591,8 @@ func TestExportCommunitiesOnlyRemovesNodeConcepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(conceptFiles(t, cfg, res.Dir)) != 3 {
-		t.Fatalf("expected 3 concepts before narrowing, got %d", len(conceptFiles(t, cfg, res.Dir)))
+	if len(conceptFiles(t, cfg, res.Dir)) != 4 {
+		t.Fatalf("expected 4 concepts before narrowing, got %d", len(conceptFiles(t, cfg, res.Dir)))
 	}
 
 	res, err = ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3, CommunitiesOnly: true})
@@ -1528,7 +1602,7 @@ func TestExportCommunitiesOnlyRemovesNodeConcepts(t *testing.T) {
 	if res.Deleted != 2 {
 		t.Errorf("CommunitiesOnly should sweep the 2 node concepts, got Deleted = %d", res.Deleted)
 	}
-	if n := len(conceptFiles(t, cfg, res.Dir)); n != 1 {
+	if n := len(conceptFiles(t, cfg, res.Dir)); n != 2 { // overview + community
 		t.Errorf("concepts remaining = %d, want 1 (the community)", n)
 	}
 }
@@ -1540,4 +1614,362 @@ func hasRationaleConcept(t *testing.T, cfg *config.Config, dir string) bool {
 	t.Helper()
 	name, _, _ := findByNodeID(t, conceptFiles(t, cfg, dir), whyNodeID)
 	return name != ""
+}
+
+// TestExportRefusesAChangedProjectDirectory: --project selects the output
+// directory, but live export records keep pointing into the old one. linkTo
+// emits a bare "./<file>.md" for every link, so a split across two directories
+// silently resolves every cross-directory reference to nothing.
+func TestExportRefusesAChangedProjectDirectory(t *testing.T) {
+	s, cfg := fixture(t)
+	if _, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3, Project: "renamed"})
+	if err == nil {
+		t.Fatal("want an error when the export directory moves out from under live concepts")
+	}
+	if !strings.Contains(err.Error(), "graphy/myproj") || !strings.Contains(err.Error(), "graphy/renamed") {
+		t.Errorf("error should name both directories, got: %v", err)
+	}
+}
+
+// TestFilenameEncodes covers the guard that keeps an in-place re-key in place.
+func TestFilenameEncodes(t *testing.T) {
+	const id = "019fa49e-b948-7000-8000-000000000001"
+	cases := []struct {
+		name, title string
+		want        bool
+	}{
+		{"community-core--019fa49eb948.md", "Community: core", true},
+		{"community-core--019fa49eb9487000.md", "Community: core", true}, // a longer shortid still encodes it
+		{"community-core--019fa49eb948.md", "Community: other", false},
+		{"community-other--019fa49eb948.md", "Community: core", false},
+		{"community-core--deadbeef1234.md", "Community: core", false}, // different concept
+		{"community-core.md", "Community: core", false},
+		{"community-core--019fa49eb948.txt", "Community: core", false},
+	}
+	for _, c := range cases {
+		if got := filenameEncodes(c.name, c.title, id); got != c.want {
+			t.Errorf("filenameEncodes(%q, %q) = %v, want %v", c.name, c.title, got, c.want)
+		}
+	}
+}
+
+// docFixture builds a store holding a markdown document whose section
+// references a code entity, plus the file and heading nodes that never become
+// concepts of their own.
+func docFixture(t *testing.T) (*store.Store, *config.Config) {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	nodes := []model.Node{
+		{ID: "go:file:a.go#", Label: "a.go", Kind: model.KindFile, Language: "go", File: "a.go",
+			Span: model.Span{StartLine: 1}, Degree: 4},
+		{ID: "go:function:a.go#Alpha", Label: "Alpha", Kind: model.KindFunction, Language: "go",
+			File: "a.go", Span: model.Span{StartLine: 3}, Degree: 4},
+		{ID: "markdown:doc:docs/guide.md#", Label: "docs/guide.md", Kind: model.KindDoc,
+			Language: "markdown", File: "docs/guide.md", Span: model.Span{StartLine: 1},
+			Doc: "Guide", Degree: 4},
+		{ID: "markdown:heading:docs/guide.md#usage", Label: "Usage", Kind: model.KindHeading,
+			Language: "markdown", File: "docs/guide.md", Span: model.Span{StartLine: 5}, Degree: 2},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges([]model.Edge{
+		// Structural noise: a file containing its function, a doc containing
+		// its heading. Neither endpoint is ever a concept.
+		{Source: "go:file:a.go#", Target: "go:function:a.go#Alpha",
+			Relation: model.RelContains, Confidence: model.ConfExtracted},
+		{Source: "markdown:doc:docs/guide.md#", Target: "markdown:heading:docs/guide.md#usage",
+			Relation: model.RelContains, Confidence: model.ConfExtracted},
+		// The link that matters: a documentation section describing code.
+		{Source: "markdown:heading:docs/guide.md#usage", Target: "go:function:a.go#Alpha",
+			Relation: model.RelReferences, Confidence: model.ConfInferred},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetCommunities(
+		map[string]int{"go:function:a.go#Alpha": 0, "markdown:doc:docs/guide.md#": 0},
+		map[int]string{0: "core"}); err != nil {
+		t.Fatal(err)
+	}
+	bundleRoot := filepath.Join(t.TempDir(), ".okfw")
+	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return s, config.ConfigFor(bundleRoot)
+}
+
+// bodyOfTitle returns the rendered concept whose frontmatter title matches.
+func bodyOfTitle(t *testing.T, cfg *config.Config, dir, title string) string {
+	t.Helper()
+	for name, content := range conceptFiles(t, cfg, dir) {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatalf("%s fails validation: %v", name, err)
+		}
+		if z.Title == title {
+			return string(content)
+		}
+	}
+	t.Fatalf("no concept titled %q in %s", title, dir)
+	return ""
+}
+
+// TestExportDropsStructuralDeadEnds: file and heading nodes never become
+// concepts, so `contains` edges naming them rendered as unlinked text that
+// restated resource: and the outline. On this repository they were a fifth of
+// every bullet the export produced.
+func TestExportDropsStructuralDeadEnds(t *testing.T) {
+	s, cfg := docFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha := bodyOfTitle(t, cfg, res.Dir, "Alpha")
+	if strings.Contains(alpha, "contains") {
+		t.Errorf("Alpha still lists a contains edge to its file:\n%s", alpha)
+	}
+	// The reference from a documentation section survives, redirected to the
+	// document concept — the heading itself is not a concept to link to.
+	if !strings.Contains(alpha, "### references (1)") {
+		t.Errorf("Alpha lost its incoming doc reference:\n%s", alpha)
+	}
+	if !strings.Contains(alpha, "[Usage](./docs-guide-md--") {
+		t.Errorf("doc reference should link to the containing document:\n%s", alpha)
+	}
+}
+
+// TestExportRendersDocOutline: headings hold a document's references but are
+// never exported, so without an outline a doc concept showed a flat list of
+// unlinked heading names and no sign of what any section was about.
+func TestExportRendersDocOutline(t *testing.T) {
+	s, cfg := docFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := bodyOfTitle(t, cfg, res.Dir, "docs/guide.md")
+	if !strings.Contains(doc, "## Outline") {
+		t.Errorf("doc concept has no outline:\n%s", doc)
+	}
+	if !strings.Contains(doc, "- Usage — [Alpha](./alpha--") {
+		t.Errorf("outline should say which section describes which entity:\n%s", doc)
+	}
+}
+
+// TestExportOverviewIsTheBundleEntryPoint pins the front door: without it an
+// agent arriving at graphy/<project>/ finds a thousand sibling concepts and no
+// starting point, and the clustering settings every community concept depends
+// on are unrecoverable from the bundle.
+func TestExportOverviewIsTheBundleEntryPoint(t *testing.T) {
+	s, cfg := fixture(t)
+	// A real build records this; the bundle is the only place it survives.
+	if err := s.PutClusterMeta(store.ClusterMeta{Algorithm: "leiden", Resolution: 1, Seed: 1}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bodyOfTitle(t, cfg, res.Dir, "Code graph: myproj")
+	for _, want := range []string{
+		"## Subsystems (1)",
+		"[core](./community-core--",
+		"## Entry points",
+		"3 nodes, 2 edges",
+		"Clustering: leiden",
+		"--min-degree 3",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("overview missing %q:\n%s", want, body)
+		}
+	}
+
+	// Communities parent to the overview, so the bundle is a tree rather than
+	// a thousand siblings.
+	var overviewID, communityParent string
+	for _, content := range conceptFiles(t, cfg, res.Dir) {
+		z, err := config.ParseAndValidate(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch z.Type {
+		case "code-graph":
+			overviewID = z.ID
+		case "code-community":
+			communityParent = z.Parent
+		}
+	}
+	if overviewID == "" || communityParent != overviewID {
+		t.Errorf("community parent = %q, want the overview id %q", communityParent, overviewID)
+	}
+}
+
+// TestExportCapsEdgeGroups: a hub's edge list is the difference between a
+// concept an agent can afford to read and one it cannot. Truncation has to be
+// visible and has to say how to get the rest.
+func TestExportCapsEdgeGroups(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	nodes := []model.Node{{ID: "go:function:hub.go#Hub", Label: "Hub", Kind: model.KindFunction,
+		Language: "go", File: "hub.go", Span: model.Span{StartLine: 1}, Degree: 12}}
+	var edges []model.Edge
+	for i := 0; i < 12; i++ {
+		id := fmt.Sprintf("go:function:c%d.go#Callee%d", i, i)
+		nodes = append(nodes, model.Node{ID: id, Label: fmt.Sprintf("Callee%d", i),
+			Kind: model.KindFunction, Language: "go", File: fmt.Sprintf("c%d.go", i),
+			Span: model.Span{StartLine: 1}, Degree: 3})
+		edges = append(edges, model.Edge{Source: "go:function:hub.go#Hub", Target: id,
+			Relation: model.RelCalls, Confidence: model.ConfExtracted})
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges(edges); err != nil {
+		t.Fatal(err)
+	}
+	bundleRoot := filepath.Join(t.TempDir(), ".okfw")
+	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.ConfigFor(bundleRoot)
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3, MaxEdges: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub := bodyOfTitle(t, cfg, res.Dir, "Hub")
+	// The heading carries the true count even though the list is cut.
+	if !strings.Contains(hub, "### calls (12)") {
+		t.Errorf("relation heading should carry the full count:\n%s", hub)
+	}
+	if n := strings.Count(hub, "- [Callee"); n != 5 {
+		t.Errorf("listed %d callees, want 5 (the cap)", n)
+	}
+	if !strings.Contains(hub, "… 7 more — `graphy neighbors <entity> --rel calls`") {
+		t.Errorf("truncation must be reported with the query that returns the rest:\n%s", hub)
+	}
+}
+
+// TestExportSegregatesAmbiguousEdges: mixed into the list an unresolved edge
+// reads exactly like a resolved one while being the least trustworthy thing on
+// the page.
+func TestExportSegregatesAmbiguousEdges(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	nodes := []model.Node{
+		{ID: "go:function:a.go#Caller", Label: "Caller", Kind: model.KindFunction, Language: "go",
+			File: "a.go", Span: model.Span{StartLine: 1}, Degree: 3},
+		{ID: "go:function:b.go#Sure", Label: "Sure", Kind: model.KindFunction, Language: "go",
+			File: "b.go", Span: model.Span{StartLine: 1}, Degree: 3},
+		{ID: "go:function:c.go#Maybe", Label: "Maybe", Kind: model.KindFunction, Language: "go",
+			File: "c.go", Span: model.Span{StartLine: 1}, Degree: 3},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges([]model.Edge{
+		{Source: nodes[0].ID, Target: nodes[1].ID, Relation: model.RelCalls, Confidence: model.ConfExtracted},
+		{Source: nodes[0].ID, Target: nodes[2].ID, Relation: model.RelCalls, Confidence: model.ConfAmbiguous},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bundleRoot := filepath.Join(t.TempDir(), ".okfw")
+	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.ConfigFor(bundleRoot)
+
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := bodyOfTitle(t, cfg, res.Dir, "Caller")
+	if !strings.Contains(body, "- [Sure](./sure--") {
+		t.Errorf("resolved edge should be an ordinary bullet:\n%s", body)
+	}
+	if !strings.Contains(body, "- Ambiguous (unresolved between several targets): [Maybe](./maybe--") {
+		t.Errorf("ambiguous edge should be segregated:\n%s", body)
+	}
+}
+
+// TestExportRecordsTheBundleAndBridgesToConcepts pins the node→concept mapping
+// that lets the two tools name the same entity.
+//
+// The mapping was always persisted and never readable: an export record holds a
+// *bundle-relative* path and nothing identified the bundle, so even having found
+// the record there was no path to open.
+func TestExportRecordsTheBundleAndBridgesToConcepts(t *testing.T) {
+	s, cfg := fixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetMeta(store.MetaBundleKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != cfg.RootPath {
+		t.Errorf("recorded bundle = %q, want %q", got, cfg.RootPath)
+	}
+
+	c, err := query.ConceptFor(s, "go:function:a.go#Alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c == nil {
+		t.Fatal("Alpha has no concept mapping")
+	}
+	if !strings.HasPrefix(c.RelPath, res.Dir+"/alpha--") {
+		t.Errorf("concept path = %q, want one under %s", c.RelPath, res.Dir)
+	}
+	// The absolute path has to be openable, not merely well-formed.
+	if _, err := os.Stat(c.Path); err != nil {
+		t.Errorf("concept abs path is not readable: %v", err)
+	}
+	// And the record's concept id must match what the file actually carries.
+	content, err := os.ReadFile(c.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := config.ParseAndValidate(content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.ID != c.ConceptID {
+		t.Errorf("mapping says %q, file says %q", c.ConceptID, z.ID)
+	}
+	if z.Graphy == nil || z.Graphy.NodeID != c.NodeID {
+		t.Errorf("concept does not carry its node id back: %+v", z.Graphy)
+	}
+
+	// An entity below --min-degree was never exported, which is a nil mapping
+	// rather than an error.
+	if c, err := query.ConceptFor(s, "go:function:c.go#Tiny"); err != nil || c != nil {
+		t.Errorf("unexported entity should map to nothing, got %+v (%v)", c, err)
+	}
+
+	idx, err := query.ConceptIndex(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := idx["go:function:a.go#Alpha"]; !ok {
+		t.Errorf("ConceptIndex missing Alpha: %v", idx)
+	}
 }

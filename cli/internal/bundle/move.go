@@ -133,6 +133,22 @@ type DeleteResult struct {
 // not-yet-written knowledge" — so rewriting other concepts' prose would destroy
 // authored content to fix something the spec says is not broken.
 func DeleteConcept(cfg *config.Config, absPath string) (*DeleteResult, error) {
+	res, err := DeleteConceptFile(cfg, absPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := WriteIndexFiles(cfg, cfg.RootPath); err != nil {
+		return nil, fmt.Errorf("failed to refresh index.md files: %w", err)
+	}
+	return res, nil
+}
+
+// DeleteConceptFile is DeleteConcept without the index.md refresh, for callers
+// deleting in bulk: WriteIndexFiles walks the whole bundle, so running it once
+// per deletion turns a sweep into quadratic work. Every such caller must refresh
+// the listings itself afterwards, or a generated index.md keeps advertising a
+// concept that is gone.
+func DeleteConceptFile(cfg *config.Config, absPath string) (*DeleteResult, error) {
 	rel, err := relSlash(cfg.RootPath, absPath)
 	if err != nil {
 		return nil, err
@@ -167,9 +183,6 @@ func DeleteConcept(cfg *config.Config, absPath string) (*DeleteResult, error) {
 		if err := purgeFromGraph(cfg, res.ID); err != nil {
 			return nil, err
 		}
-	}
-	if _, err := WriteIndexFiles(cfg, cfg.RootPath); err != nil {
-		return nil, fmt.Errorf("failed to refresh index.md files: %w", err)
 	}
 	return res, nil
 }

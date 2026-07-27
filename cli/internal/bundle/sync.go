@@ -53,6 +53,9 @@ func IndexFile(idx Indexer, filePath string) error {
 		Status:      z.LifecycleStatus(),
 		StaleAfter:  z.StaleAfter,
 	}
+	if z.Graphy != nil {
+		doc.GraphyNodeID = z.Graphy.NodeID
+	}
 
 	return idx.Index(z.ID, doc)
 }

@@ -72,6 +72,12 @@ type ClusterMeta struct {
 // MetaClusterKey is the meta bucket key holding the JSON ClusterMeta.
 const MetaClusterKey = "cluster"
 
+// MetaBundleKey holds the absolute path of the bundle the graph was last
+// exported into. Export records store a *bundle-relative* concept path, which
+// on its own does not say which bundle — so without this the node→concept
+// mapping cannot be turned into a path anyone can open.
+const MetaBundleKey = "okfw_bundle"
+
 // ExportRecord maps a graph node to the okfw concept it was exported as.
 type ExportRecord struct {
 	ConceptID string `json:"concept_id"`

@@ -336,7 +336,7 @@ func exportCmd() *cobra.Command {
 
 func exportOkfwCmd() *cobra.Command {
 	var bundlePath, project, repoURL string
-	var minDegree int
+	var minDegree, maxEdges int
 	var communitiesOnly, keepStale, noRationale bool
 	var rationaleMarkers []string
 	cmd := &cobra.Command{
@@ -374,6 +374,7 @@ idempotent: concept ids and filenames stay stable across runs.`,
 				Bundle:          cfg,
 				Project:         project,
 				MinDegree:       minDegree,
+				MaxEdges:        maxEdges,
 				CommunitiesOnly: communitiesOnly,
 				KeepStale:       keepStale,
 				RepoURL:         repoURL,
@@ -385,21 +386,47 @@ idempotent: concept ids and filenames stay stable across runs.`,
 			if err != nil {
 				return err
 			}
-			extra := ""
+			fmt.Printf("Exported to %s/%s: %d created, %d updated, %d unchanged, %d deleted\n",
+				cfg.RootPath, res.Dir, res.Created, res.Updated, res.Unchanged, res.Deleted)
+			// Adoptions are how a concept was *placed*, not whether it was
+			// written, so they are reported on their own line rather than added
+			// into the counts above.
+			var adopted []string
 			if res.Renamed > 0 {
-				extra += fmt.Sprintf(", %d renamed", res.Renamed)
+				adopted = append(adopted, fmt.Sprintf("%d renamed", res.Renamed))
+			}
+			if res.Rekeyed > 0 {
+				adopted = append(adopted, fmt.Sprintf("%d re-keyed", res.Rekeyed))
 			}
 			if res.Recovered > 0 {
-				extra += fmt.Sprintf(", %d recovered", res.Recovered)
+				adopted = append(adopted, fmt.Sprintf("%d recovered", res.Recovered))
 			}
-			fmt.Printf("Exported to %s/%s: %d created, %d updated, %d unchanged%s, %d deleted\n",
-				cfg.RootPath, res.Dir, res.Created, res.Updated, res.Unchanged, extra, res.Deleted)
+			if len(adopted) > 0 {
+				fmt.Printf("Adopted existing concepts: %s\n", strings.Join(adopted, ", "))
+			}
+			// Say what the filters left out, so a thin export reads as a setting
+			// rather than as a broken build.
+			if sk := res.Skipped; sk.Any() {
+				var parts []string
+				if sk.LowDegree > 0 {
+					parts = append(parts, fmt.Sprintf("%d below --min-degree %d", sk.LowDegree, minDegree))
+				}
+				if sk.RationaleMaker > 0 {
+					parts = append(parts, fmt.Sprintf("%d rationale outside --rationale-markers", sk.RationaleMaker))
+				}
+				if sk.SmallCommunity > 0 {
+					parts = append(parts, fmt.Sprintf("%d communities under 2 members", sk.SmallCommunity))
+				}
+				fmt.Printf("Skipped: %s\n", strings.Join(parts, ", "))
+			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&bundlePath, "bundle", "", "bundle location (default: discover .okfw from cwd)")
 	cmd.Flags().StringVar(&project, "project", "", "project folder under graphy/ (default: repo dir name)")
 	cmd.Flags().IntVar(&minDegree, "min-degree", 3, "minimum degree for a node to become a concept (does not apply to rationale)")
+	cmd.Flags().IntVar(&maxEdges, "max-edges", export.DefaultMaxEdges,
+		"maximum edges of one relation listed per direction in a concept body (the rest are reported, not hidden)")
 	cmd.Flags().BoolVar(&communitiesOnly, "communities-only", false, "export only community concepts")
 	cmd.Flags().BoolVar(&keepStale, "keep-stale", false, "keep concepts whose graph nodes vanished")
 	cmd.Flags().StringVar(&repoURL, "repo-url", "", "web base URL (e.g. https://github.com/org/repo) — turns resource into a commit-pinned permalink")

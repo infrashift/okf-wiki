@@ -399,3 +399,64 @@ func TestWriteIndexFilesKeepsTheRootListing(t *testing.T) {
 		t.Errorf("the root listing must always exist: %v", err)
 	}
 }
+
+// TestIndexFileCarriesTheGraphyNodeID: a generated concept records the code
+// entity it documents, and indexing it as a keyword is what makes the reverse
+// bridge (concept → graph node) a lookup rather than a full-text guess.
+func TestIndexFileCarriesTheGraphyNodeID(t *testing.T) {
+	root := t.TempDir()
+	p := writeConcept(t, root, "graphy/proj/alpha--019fa4c27a5d.md", `---
+id: "019fa4c2-7a5d-7851-9c72-372f3a48473f"
+title: "Alpha"
+type: "code-function"
+tags:
+  - "graphy"
+created: "2026-07-27T00:00:00Z"
+timestamp: "2026-07-27T00:00:00Z"
+graphy:
+  node_id: "go:function:a.go#Alpha"
+  entity: "function"
+---
+
+# Alpha
+`)
+	f := &fakeIndexer{}
+	if err := IndexFile(f, p); err != nil {
+		t.Fatal(err)
+	}
+	doc := f.docs["019fa4c2-7a5d-7851-9c72-372f3a48473f"]
+	if doc == nil {
+		t.Fatalf("concept was not indexed: %#v", f.docs)
+	}
+	if doc.GraphyNodeID != "go:function:a.go#Alpha" {
+		t.Errorf("GraphyNodeID = %q, want the node id from frontmatter", doc.GraphyNodeID)
+	}
+}
+
+// TestIndexFileLeavesGraphyNodeIDEmptyForHandWrittenConcepts: the field is an
+// extension, and an ordinary concept must not acquire one.
+func TestIndexFileLeavesGraphyNodeIDEmptyForHandWrittenConcepts(t *testing.T) {
+	root := t.TempDir()
+	p := writeConcept(t, root, "note.md", `---
+id: "019fa4c2-7a5d-7851-9c72-372f3a48473e"
+title: "Hand written"
+type: "note"
+tags: []
+created: "2026-07-27T00:00:00Z"
+timestamp: "2026-07-27T00:00:00Z"
+---
+
+# Hand written
+`)
+	f := &fakeIndexer{}
+	if err := IndexFile(f, p); err != nil {
+		t.Fatal(err)
+	}
+	doc := f.docs["019fa4c2-7a5d-7851-9c72-372f3a48473e"]
+	if doc == nil {
+		t.Fatalf("concept was not indexed: %#v", f.docs)
+	}
+	if doc.GraphyNodeID != "" {
+		t.Errorf("GraphyNodeID = %q, want empty", doc.GraphyNodeID)
+	}
+}

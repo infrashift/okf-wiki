@@ -16,6 +16,7 @@ import (
 	"hash/fnv"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -28,18 +29,24 @@ import (
 	"okfw/cli/internal/graphdb"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
-	"okfw/cli/internal/index"
 )
 
 // OkfwOptions configures an export into a bundle.
 type OkfwOptions struct {
-	Bundle          *config.Config
-	Project         string // top folder under graphy/ (default: repo dir name)
-	MinDegree       int    // node significance threshold (default 3)
+	Bundle  *config.Config
+	Project string // top folder under graphy/ (default: repo dir name)
+	// MinDegree is the node significance threshold; 0 exports every eligible
+	// node. The CLI defaults it to 3 — the zero value is honoured rather than
+	// silently rewritten, so "export everything" is expressible.
+	MinDegree       int
 	CommunitiesOnly bool   // skip per-node concepts
 	KeepStale       bool   // keep concepts whose graph nodes vanished
 	RepoURL         string // optional web base (e.g. https://github.com/org/repo) for clickable resource permalinks
 	Generator       string // stamped into the graphy frontmatter block (e.g. "graphy 0.1.0")
+	// MaxEdges caps how many edges of one relation a concept body lists in each
+	// direction; 0 uses DefaultMaxEdges. The remainder is reported with the
+	// query that returns it, never silently dropped.
+	MaxEdges int
 	// NoRationale skips rationale concepts entirely.
 	NoRationale bool
 	// RationaleMarkers selects which markers reach the bundle. Defaults to
@@ -52,20 +59,55 @@ type OkfwOptions struct {
 // DefaultRationaleMarkers are the markers exported as concepts by default.
 var DefaultRationaleMarkers = []string{"WHY", "RATIONALE", "DECISION", "ADR"}
 
+// DefaultMaxEdges caps each relation group in a concept body.
+const DefaultMaxEdges = 25
+
 // OkfwResult summarizes an export.
+//
+// The counters answer two independent questions and must not be added together.
+// How each concept was *placed*: Created, Renamed, Recovered, Rekeyed, or none
+// of these (it was already where the exports bucket said). Whether pass 2 then
+// *wrote* it: Updated or Unchanged. An adopted concept is therefore counted once
+// under Renamed and once under Updated — which is why Updated used to look
+// inflated: it also counted the freshly created ones.
 type OkfwResult struct {
-	Created   int
-	Updated   int
+	Created   int // new concept files
+	Updated   int // existing concepts rewritten because their content changed
 	Unchanged int // skipped: rendered content identical to what's on disk
 	Renamed   int // adopted from a vanished node via rename/move detection
-	Recovered int // adopted from markers after a lost exports mapping
+	Recovered int // re-attached from body markers after a lost exports mapping
+	Rekeyed   int // community concept adopted under a new exports key or label
 	Deleted   int
 	Dir       string // bundle-relative concept directory
+	// Skipped counts eligible graph nodes the filters excluded, so a thin
+	// export is legible as a filter setting rather than as a broken build.
+	Skipped SkipCounts
+}
+
+// SkipCounts breaks down what selectItems left out, by reason.
+type SkipCounts struct {
+	LowDegree      int // below MinDegree
+	RationaleMaker int // rationale whose marker is not in RationaleMarkers
+	SmallCommunity int // fewer than two members, or no label
+}
+
+// Any reports whether anything was skipped.
+func (s SkipCounts) Any() bool {
+	return s.LowDegree > 0 || s.RationaleMaker > 0 || s.SmallCommunity > 0
 }
 
 // communityKeyPrefix namespaces community entries in the exports bucket so
 // they cannot collide with node ids.
 const communityKeyPrefix = "\x00community:"
+
+// overviewKey is the exports-bucket key for the graph overview concept. Like
+// the community prefix it starts with NUL so no node id can collide with it.
+const overviewKey = "\x00graph"
+
+// overview marks the graph overview item. It carries no data of its own — its
+// body is assembled from the store at render time — but it has to be a distinct
+// type so the item switch cannot confuse it with a node or a community.
+type overview struct{}
 
 // item is one concept to emit (a community or a node).
 type item struct {
@@ -77,8 +119,9 @@ type item struct {
 	language    string
 	entity      string // node kind or "community"
 	tags        []string
-	node        *model.Node      // nil for communities
-	community   *store.Community // nil for nodes
+	node        *model.Node      // nil for communities and the overview
+	community   *store.Community // nil for nodes and the overview
+	overview    *overview        // non-nil only for the graph overview concept
 	// parentKey overrides the community parent with another item's key. A
 	// rationale prefers to hang off the entity it explains.
 	parentKey string
@@ -90,8 +133,11 @@ var markerRe = regexp.MustCompile(`<!-- graphy:node (\S+) -->`)
 
 // ToOkfw exports the graph into the bundle.
 func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) {
-	if opts.MinDegree <= 0 {
-		opts.MinDegree = 3
+	if opts.MinDegree < 0 {
+		opts.MinDegree = 0
+	}
+	if opts.MaxEdges <= 0 {
+		opts.MaxEdges = DefaultMaxEdges
 	}
 	if opts.Project == "" {
 		opts.Project = filepath.Base(root)
@@ -109,10 +155,11 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	}
 
 	commit := gitCommit(root)
-	items, nodeCommunity, err := selectItems(s, nodes, opts)
+	items, nodeCommunity, skipped, err := selectItems(s, nodes, opts)
 	if err != nil {
 		return nil, err
 	}
+	res.Skipped = skipped
 
 	// Membership digests feed both the adoption matching in pass 1 and the
 	// refresh that follows it.
@@ -123,39 +170,81 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		}
 	}
 
-	// Pass 1: ensure every item has a concept file; collect key → placement.
-	// Resolution order for an item with no live export record:
+	// Pass 1a: resolve every item that already has a live concept file, before
+	// anything is allowed to adopt. Doing this up front is what keeps adoption
+	// safe — see newCommunityAdopter: a record backing a live placement must be
+	// off limits, or a second community can adopt a file the first one is
+	// already sitting on, renaming it out from under the placement and deleting
+	// its record.
+	placed := map[string]placement{}
+	upToDate := map[string]bool{} // community records already holding the current digest
+	live := map[string]bool{}     // exports keys resolved from a live record
+	liveRel := map[string]bool{}  // and the files they resolved to
+	for _, it := range items {
+		rec, err := s.GetExport(it.key)
+		if err != nil {
+			return nil, err
+		}
+		if rec == nil {
+			continue
+		}
+		abs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
+		content, err := os.ReadFile(abs)
+		if os.IsNotExist(err) {
+			continue // adoption/recovery/creation will handle it below
+		}
+		if err != nil {
+			return nil, err
+		}
+		// The record's concept id is a cache of what the file says, and the file
+		// is authoritative: a hand edit or a restore-from-git with .graphy/ intact
+		// can leave them disagreeing, and children would then get a `parent:`
+		// pointing at a concept id that exists nowhere. renderConcept writes the
+		// file's own id, so trust that and repair the record.
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			return nil, fmt.Errorf("parsing %s: %w", rec.RelPath, err)
+		}
+		if z.ID != "" && z.ID != rec.ConceptID {
+			rec.ConceptID = z.ID
+			if err := s.PutExport(it.key, *rec); err != nil {
+				return nil, err
+			}
+		}
+		placed[it.key] = placement{rec.ConceptID, rec.RelPath}
+		live[it.key] = true
+		liveRel[rec.RelPath] = true
+		if it.community != nil && bytes.Equal(rec.MemberDigest, digests[it.key]) {
+			upToDate[it.key] = true
+		}
+	}
+
+	if err := checkProjectDir(placed, dir); err != nil {
+		return nil, err
+	}
+
+	// Pass 1b: place the rest. Resolution order for an item with no live export
+	// record:
 	//   1. community adoption — an older key scheme, or a changed label
 	//   2. recovery scan — the mapping was lost (.graphy/ deleted) but the
 	//      concept exists with the same embedded node identity
 	//   3. rename/move adoption — a vanished node's concept carries over so
 	//      refactors keep their concept id (and history)
 	//   4. create a fresh concept
-	placed := map[string]placement{}
-	upToDate := map[string]bool{}      // community records already holding the current digest
 	var recovered map[string]placement // rid → placement; scanned lazily
 	var adopter *communityAdopter      // community re-key/relabel matching; loaded lazily
 	var pending []int                  // item indices still needing a concept
 	for i, it := range items {
-		rec, err := s.GetExport(it.key)
-		if err != nil {
-			return nil, err
+		if live[it.key] {
+			continue
 		}
-		if rec != nil {
-			if _, statErr := os.Stat(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))); statErr == nil {
-				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
-				if it.community != nil && bytes.Equal(rec.MemberDigest, digests[it.key]) {
-					upToDate[it.key] = true
-				}
-				continue
-			}
-		}
+		var err error
 		// A community whose key no longer matches — an older key scheme, or a
 		// changed label — adopts its own concept rather than letting the stale
 		// sweep delete it and creating a duplicate alongside.
 		if it.community != nil {
 			if adopter == nil {
-				if adopter, err = newCommunityAdopter(cfg, s); err != nil {
+				if adopter, err = newCommunityAdopter(cfg, s, live, liveRel); err != nil {
 					return nil, err
 				}
 			}
@@ -172,12 +261,14 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 				// The record itself is (re)written by the membership refresh
 				// below, which runs for every community.
 				placed[it.key] = placement{rec.ConceptID, rec.RelPath}
-				res.Recovered++
+				res.Rekeyed++
 				continue
 			}
 		}
 		if recovered == nil {
-			recovered = scanExisting(cfg, dir)
+			if recovered, err = scanExisting(cfg, dir); err != nil {
+				return nil, err
+			}
 		}
 		if p, ok := recovered[it.rid]; ok {
 			if err := s.PutExport(it.key, store.ExportRecord{ConceptID: p.conceptID, RelPath: p.relPath}); err != nil {
@@ -264,6 +355,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		}
 		return ""
 	}
+	rOpts := renderOpts{linkTo: linkTo, maxEdges: opts.MaxEdges}
 	var touched []string
 	for _, it := range items {
 		p := placed[it.key]
@@ -296,12 +388,17 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		}
 		var body string
 		switch {
+		case it.overview != nil:
+			body, err = overviewBody(s, nodes, items, opts, rOpts)
 		case it.community != nil:
-			body = communityBody(it, nodes, linkTo)
+			body = communityBody(it, nodes, rOpts)
 		case it.node != nil && it.node.Kind == model.KindRationale:
-			body = rationaleBody(s, it, nodes, linkTo)
+			body, err = rationaleBody(s, it, nodes, rOpts)
 		default:
-			body = nodeBody(s, it, nodes, linkTo)
+			body, err = nodeBody(s, it, nodes, rOpts)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("rendering %s: %w", p.relPath, err)
 		}
 		if !prev.Timestamp.IsZero() {
 			prevCommit := commit
@@ -326,6 +423,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			return nil, err
 		}
 		touched = append(touched, p.relPath)
+		// Created counts the file coming into existence; Updated counts an
+		// existing concept's content changing. Counting both for a concept
+		// created moments ago in the same run double-reports it.
 		if !created[p.relPath] {
 			res.Updated++
 		}
@@ -369,6 +469,13 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		}
 	}
 
+	// Record which bundle this graph was exported into, so the node→concept
+	// mapping resolves to a path a reader can actually open. Export records
+	// hold a bundle-relative path and nothing else identifies the bundle.
+	if err := s.PutMeta(store.MetaBundleKey, cfg.RootPath); err != nil {
+		return nil, err
+	}
+
 	if err := syncBundle(cfg, touched); err != nil {
 		return nil, err
 	}
@@ -377,18 +484,36 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 // selectItems picks the communities and significant nodes to export, ordered
 // deterministically (communities first).
-func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]string, error) {
+func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) ([]item, map[string]string, SkipCounts, error) {
 	var items []item
+	var skipped SkipCounts
 	nodeCommunity := map[string]string{}
+
+	// The overview goes first so every community can parent to it. Without a
+	// root the bundle is a thousand sibling concepts and an agent arriving at
+	// graphy/<project>/ has nowhere to start; with one the export is a tree —
+	// graph, then subsystems, then entities.
+	items = append(items, item{
+		key:         overviewKey,
+		rid:         "graph:" + bundle.Slugify(opts.Project),
+		title:       "Code graph: " + opts.Project,
+		conceptType: "code-graph",
+		description: "Entry point for the " + opts.Project + " code graph.",
+		entity:      "graph",
+		tags:        []string{"graphy", "graphy/graph"},
+		overview:    &overview{},
+	})
 
 	var comms []store.Community
 	if err := s.EachCommunity(func(c store.Community) error {
 		if len(c.NodeIDs) >= 2 && c.Label != "" {
 			comms = append(comms, c)
+		} else {
+			skipped.SmallCommunity++
 		}
 		return nil
 	}); err != nil {
-		return nil, nil, err
+		return nil, nil, skipped, err
 	}
 	sort.Slice(comms, func(i, j int) bool { return comms[i].ID < comms[j].ID })
 	usedSlugs := map[string]bool{}
@@ -408,6 +533,7 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 			entity:      "community",
 			tags:        []string{"graphy", "graphy/community"},
 			community:   &c,
+			parentKey:   overviewKey,
 		})
 	}
 
@@ -423,9 +549,11 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 				// rationale it is meaningless (always ~2). Marker selection
 				// takes its place.
 				if opts.NoRationale || !wantMarker(n.ID) {
+					skipped.RationaleMaker++
 					continue
 				}
 			} else if n.Degree < opts.MinDegree {
+				skipped.LowDegree++
 				continue
 			}
 			selected = append(selected, n)
@@ -434,7 +562,11 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 		for i := range selected {
 			n := selected[i]
 			if n.Kind == model.KindRationale {
-				items = append(items, rationaleItem(s, n))
+				it, err := rationaleItem(s, n)
+				if err != nil {
+					return nil, nil, skipped, err
+				}
+				items = append(items, it)
 				continue
 			}
 			desc := n.Doc
@@ -449,12 +581,24 @@ func selectItems(s *store.Store, nodes map[string]model.Node, opts OkfwOptions) 
 				description: desc,
 				language:    n.Language,
 				entity:      string(n.Kind),
-				tags:        []string{"graphy", "graphy/" + n.Language, "graphy/" + string(n.Kind)},
+				tags:        langTags(n.Language, string(n.Kind)),
 				node:        &n,
 			})
 		}
 	}
-	return items, nodeCommunity, nil
+	return items, nodeCommunity, skipped, nil
+}
+
+// langTags builds a node's tag set, omitting the language facet when the node
+// has no language — synthetic module nodes otherwise picked up a bare "graphy/"
+// tag, which the schema accepts and nothing can usefully filter on.
+func langTags(language, kind string, extra ...string) []string {
+	tags := []string{"graphy"}
+	if language != "" {
+		tags = append(tags, "graphy/"+language)
+	}
+	tags = append(tags, "graphy/"+kind)
+	return append(tags, extra...)
 }
 
 // markerFilter reports whether a rationale node id carries an exported marker.
@@ -479,23 +623,25 @@ func markerFilter(opts OkfwOptions) func(nodeID string) bool {
 // entity the rationale explains when that entity was itself exported, falling
 // back to the community parent otherwise (which is what ADRs, explaining many
 // entities, always do).
-func rationaleItem(s *store.Store, n model.Node) item {
+func rationaleItem(s *store.Store, n model.Node) (item, error) {
 	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
 	title := marker + ": " + truncateTitle(n.Doc)
 	if marker == "ADR" {
 		title = "ADR: " + truncateTitle(n.Doc)
 	}
 	parentKey := ""
-	if out, err := s.OutEdges(n.ID); err == nil {
-		var owners []string
-		for _, e := range out {
-			if e.Relation == model.RelExplains {
-				owners = append(owners, e.Target)
-			}
+	out, err := s.OutEdges(n.ID)
+	if err != nil {
+		return item{}, err
+	}
+	var owners []string
+	for _, e := range out {
+		if e.Relation == model.RelExplains {
+			owners = append(owners, e.Target)
 		}
-		if len(owners) == 1 {
-			parentKey = owners[0]
-		}
+	}
+	if len(owners) == 1 {
+		parentKey = owners[0]
 	}
 	return item{
 		key:         n.ID,
@@ -505,11 +651,10 @@ func rationaleItem(s *store.Store, n model.Node) item {
 		description: n.Doc,
 		language:    n.Language,
 		entity:      string(model.KindRationale),
-		tags: []string{"graphy", "graphy/" + n.Language, "graphy/rationale",
-			"graphy/rationale/" + strings.ToLower(marker)},
-		node:      &n,
-		parentKey: parentKey,
-	}
+		tags:        langTags(n.Language, "rationale", "graphy/rationale/"+strings.ToLower(marker)),
+		node:        &n,
+		parentKey:   parentKey,
+	}, nil
 }
 
 // maxTitleRunes caps a rationale title. bundle.Slugify has no length cap and
@@ -548,22 +693,33 @@ type communityAdopter struct {
 	consumed map[string]bool
 }
 
-// newCommunityAdopter loads every community export record whose concept file
-// still exists. Records for vanished files are skipped; the stale sweep cleans
-// them up.
-func newCommunityAdopter(cfg *config.Config, s *store.Store) (*communityAdopter, error) {
+// newCommunityAdopter loads the community export records eligible for adoption:
+// those whose concept file still exists and that no live placement is already
+// using. Records for vanished files are skipped; the stale sweep cleans them up.
+//
+// The live exclusion is load-bearing, not defensive. Both matchers below can
+// select a record another item resolved directly — a community that splits
+// leaves a successor whose membership still overlaps the original by more than
+// half, and two communities can carry byte-identical titles. Adopting such a
+// record renames the file the live item is already placed at and deletes the
+// other community's record, so pass 2 then fails reading a path that no longer
+// exists, after those writes have landed.
+func newCommunityAdopter(cfg *config.Config, s *store.Store, live, liveRel map[string]bool) (*communityAdopter, error) {
 	a := &communityAdopter{consumed: map[string]bool{}}
 	err := s.EachExport(func(key string, rec store.ExportRecord) error {
-		if !strings.HasPrefix(key, communityKeyPrefix) {
+		if !strings.HasPrefix(key, communityKeyPrefix) || live[key] || liveRel[rec.RelPath] {
 			return nil
 		}
 		content, err := os.ReadFile(filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath)))
-		if err != nil {
+		if os.IsNotExist(err) {
 			return nil
+		}
+		if err != nil {
+			return err
 		}
 		z, err := config.ParseFrontmatter(content)
 		if err != nil {
-			return nil
+			return nil // an unparseable concept is not a candidate, but not fatal either
 		}
 		a.records = append(a.records, communityRecord{
 			key: key, rec: rec, title: z.Title, members: digestSet(rec.MemberDigest),
@@ -944,7 +1100,16 @@ func adoptRenames(cfg *config.Config, s *store.Store, items []item, pending []in
 			if it.node == nil || it.node.Kind == model.KindRationale {
 				return "\x00none-" + it.key
 			}
-			return it.language + "\x00" + it.entity + "\x00" + it.node.File
+			// The file comes from the node id, matching how the stale side is
+			// decomposed. Node.File is empty for synthetic nodes (internal
+			// package modules, ansible roles, terraform local modules), so
+			// reading it here made their group key unmatchable and rule 2 could
+			// never fire for them.
+			_, _, file, _, ok := parseNodeID(it.rid)
+			if !ok {
+				return "\x00none-" + it.key
+			}
+			return it.language + "\x00" + it.entity + "\x00" + file
 		},
 	)
 	if err := apply(renames); err != nil {
@@ -974,18 +1139,64 @@ func adoptOne(cfg *config.Config, s *store.Store, sc *staleConcept, it item, pla
 // title it now carries, keeping the concept id (and so the shortid suffix)
 // unchanged. Without this an adopted concept keeps a filename describing what
 // it used to be, which reads as a bug long after the fact.
+//
+// The move goes through bundle.MoveConcept rather than os.Rename so inbound
+// links are repaired: a hand-authored concept pointing at a graphy concept would
+// otherwise dangle the moment that concept is adopted. Renames are rare by
+// construction (an unchanged title returns early), so MoveConcept's bundle walk
+// is not on any hot path.
 func renameToTitle(cfg *config.Config, rec store.ExportRecord, title string) (store.ExportRecord, error) {
 	oldAbs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
-	newDir := filepath.Dir(oldAbs)
-	newName := bundle.NoteFilename(newDir, title, rec.ConceptID)
-	if newName == filepath.Base(oldAbs) {
+	if filenameEncodes(filepath.Base(oldAbs), title, rec.ConceptID) {
 		return rec, nil
 	}
-	if err := os.Rename(oldAbs, filepath.Join(newDir, newName)); err != nil {
+	newDir := filepath.Dir(oldAbs)
+	newName := bundle.NoteFilename(newDir, title, rec.ConceptID)
+	if _, err := bundle.MoveConcept(cfg, oldAbs, filepath.Join(newDir, newName)); err != nil {
 		return rec, fmt.Errorf("renaming %s: %w", rec.RelPath, err)
 	}
 	rec.RelPath = filepath.ToSlash(filepath.Join(filepath.Dir(rec.RelPath), newName))
 	return rec, nil
+}
+
+// filenameEncodes reports whether name is already the "slug--shortid.md" form
+// for this title and concept id, i.e. renaming would be a no-op.
+//
+// This cannot be answered by comparing against bundle.NoteFilename, which was
+// the original guard and never fired: NoteFilename skips candidate names that
+// exist on disk, and the file being renamed is itself on disk, so it always
+// returned the *next* shortid length and every adoption renamed — including the
+// legacy community re-key, which is supposed to happen in place.
+func filenameEncodes(name, title, conceptID string) bool {
+	base, ok := strings.CutSuffix(name, ".md")
+	if !ok {
+		return false
+	}
+	slug, short, ok := strings.Cut(base, "--")
+	if !ok || slug != bundle.Slugify(title) || short == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ReplaceAll(conceptID, "-", ""), short)
+}
+
+// checkProjectDir refuses an export whose live concepts live somewhere other
+// than the directory this run would write to.
+//
+// Changing --project (or the repo directory name that defaults it) moves the
+// output directory, but live export records keep pointing into the old one. The
+// two halves then render into separate directories while linkTo emits a bare
+// "./<file>.md" for every link, so every cross-directory reference silently
+// resolves to nothing. Failing with the old name is more useful than half an
+// export.
+func checkProjectDir(placed map[string]placement, dir string) error {
+	for _, p := range placed {
+		if old := bundle.RelDir(p.relPath); old != dir {
+			return fmt.Errorf("this bundle's graphy concepts are in %s but this export targets %s: "+
+				"re-run with --project matching %s, or delete %s to re-export from scratch",
+				old, dir, path.Base(old), old)
+		}
+	}
+	return nil
 }
 
 // parseNodeID decomposes "<lang>:<kind>:<file>#<qual>" node ids; ok=false for
@@ -1006,25 +1217,32 @@ func parseNodeID(id string) (lang, kind, file, qual string, ok bool) {
 // scanExisting rebuilds rid → placement from the concepts already in the
 // export directory, using the frontmatter graphy block (marker comment as
 // fallback). This is the recovery path for a lost .graphy/graph.db.
-func scanExisting(cfg *config.Config, dir string) map[string]placement {
+//
+// A file that is not a recoverable concept is skipped, but an I/O failure is
+// returned: recovery that silently degrades into "found nothing" creates a
+// duplicate concept for every entity in the bundle.
+func scanExisting(cfg *config.Config, dir string) (map[string]placement, error) {
 	out := map[string]placement{}
 	root := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
 	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return out, nil // nothing exported here yet
+	}
 	if err != nil {
-		return out
+		return nil, err
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") || name == "index.md" {
+		if e.IsDir() || !strings.HasSuffix(name, ".md") || bundle.IsReservedBase(name) {
 			continue
 		}
 		content, err := os.ReadFile(filepath.Join(root, name))
 		if err != nil {
-			continue
+			return nil, err
 		}
 		z, err := config.ParseFrontmatter(content)
 		if err != nil || z.ID == "" {
-			continue
+			continue // not a concept we can recover from
 		}
 		rid := ""
 		if z.Graphy != nil {
@@ -1040,11 +1258,11 @@ func scanExisting(cfg *config.Config, dir string) map[string]placement {
 		}
 		out[rid] = placement{conceptID: z.ID, relPath: dir + "/" + name}
 	}
-	return out
+	return out, nil
 }
 
 // nodeBody renders a node concept's entity card.
-func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(string) string) string {
+func nodeBody(s *store.Store, it item, nodes map[string]model.Node, opts renderOpts) (string, error) {
 	n := *it.node
 	var b strings.Builder
 	if n.Doc != "" {
@@ -1057,47 +1275,254 @@ func nodeBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(
 	if n.File != "" {
 		fmt.Fprintf(&b, "- Location: `%s:%d`\n", n.File, n.Span.StartLine)
 	}
+	if n.Test {
+		b.WriteString("- Test code\n")
+	}
 	fmt.Fprintf(&b, "- Degree: %d\n", n.Degree)
-	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
-	return b.String()
+	if len(n.Members) > 0 {
+		fmt.Fprintf(&b, "- Methods: %s\n", strings.Join(n.Members, ", "))
+	}
+	if n.Kind == model.KindDoc {
+		if err := writeOutline(&b, s, n, nodes, opts); err != nil {
+			return "", err
+		}
+	}
+	if err := writeEdgeSections(&b, s, n.ID, nodes, opts); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// writeOutline renders a document concept's headings, each with what that
+// section refers to.
+//
+// Headings never become concepts of their own — one concept per H2 would bury
+// the document it belongs to — but they are where a document's references
+// actually hang, so without this a doc concept showed a flat list of unlinked
+// heading names and no sign of what any section was about. As an outline the
+// same data becomes a table of contents that says which section describes which
+// entity, which is the cheapest possible way for an agent to decide what to read.
+func writeOutline(b *strings.Builder, s *store.Store, doc model.Node, nodes map[string]model.Node, opts renderOpts) error {
+	contains, err := s.OutEdges(doc.ID)
+	if err != nil {
+		return err
+	}
+	type section struct {
+		node  model.Node
+		links []string
+	}
+	var sections []section
+	for _, e := range contains {
+		h, ok := nodes[e.Target]
+		if !ok || e.Relation != model.RelContains || h.Kind != model.KindHeading {
+			continue
+		}
+		refs, err := s.OutEdges(h.ID)
+		if err != nil {
+			return err
+		}
+		sec := section{node: h}
+		for _, r := range refs {
+			linkID, label, keep := endpoint(r, true, nodes)
+			if !keep {
+				continue
+			}
+			if href := opts.linkTo(linkID); href != "" {
+				label = fmt.Sprintf("[%s](%s)", label, href)
+			}
+			sec.links = append(sec.links, label)
+		}
+		sort.Strings(sec.links)
+		if len(sec.links) > opts.maxEdges {
+			sec.links = append(sec.links[:opts.maxEdges],
+				fmt.Sprintf("… %d more", len(sec.links)-opts.maxEdges))
+		}
+		sections = append(sections, sec)
+	}
+	if len(sections) == 0 {
+		return nil
+	}
+	sort.Slice(sections, func(i, j int) bool {
+		return sections[i].node.Span.StartLine < sections[j].node.Span.StartLine
+	})
+	b.WriteString("\n## Outline\n\n")
+	for _, sec := range sections {
+		fmt.Fprintf(b, "- %s", sec.node.Label)
+		if len(sec.links) > 0 {
+			fmt.Fprintf(b, " — %s", strings.Join(sec.links, ", "))
+		}
+		b.WriteString("\n")
+	}
+	return nil
 }
 
 // writeEdgeSections appends the Outgoing and Incoming edge lists for a node.
-func writeEdgeSections(b *strings.Builder, s *store.Store, nodeID string, nodes map[string]model.Node, linkTo func(string) string) {
-	out, _ := s.OutEdges(nodeID)
-	in, _ := s.InEdges(nodeID)
-	writeEdges := func(title string, edges []model.Edge, forward bool) {
-		if len(edges) == 0 {
-			return
+// A store read failure is returned rather than dropped: swallowing it rendered
+// a concept with no edges at all, which is indistinguishable from a leaf node
+// and would then be written to disk as the new truth.
+//
+// Three things keep this readable rather than exhaustive, because a concept
+// nobody can afford to read is not documentation:
+//
+//   - Structural edges to kinds that never become concepts are dropped, not
+//     rendered as dead text. A `contains` edge from the file a function lives in
+//     restates `resource:`, and on this repository those alone accounted for a
+//     fifth of every bullet the export produced.
+//   - Edges are grouped by relation and capped, so one hub relation cannot
+//     crowd out the rest. Truncation is reported and points at the command that
+//     returns the full set.
+//   - AMBIGUOUS edges are segregated. Mixed into the list they read exactly like
+//     resolved ones while being the least trustworthy thing on the page.
+func writeEdgeSections(b *strings.Builder, s *store.Store, nodeID string, nodes map[string]model.Node, opts renderOpts) error {
+	out, err := s.OutEdges(nodeID)
+	if err != nil {
+		return err
+	}
+	in, err := s.InEdges(nodeID)
+	if err != nil {
+		return err
+	}
+	writeEdgeList(b, "Outgoing", out, true, nodes, opts)
+	writeEdgeList(b, "Incoming", in, false, nodes, opts)
+	return nil
+}
+
+// renderOpts carries what body rendering needs beyond the graph itself.
+type renderOpts struct {
+	// linkTo maps an exports key to a relative href, "" when not exported.
+	linkTo func(string) string
+	// maxEdges caps each relation group within a direction.
+	maxEdges int
+}
+
+// endpoint resolves the other end of an edge to what should be shown for it:
+// the node it should link to (redirecting where the real endpoint is never a
+// concept), the text to display, and whether to render it at all.
+func endpoint(e model.Edge, forward bool, nodes map[string]model.Node) (linkID, label string, keep bool) {
+	id := e.Target
+	if !forward {
+		id = e.Source
+	}
+	n, known := nodes[id]
+	if !known {
+		return id, id, true
+	}
+	switch n.Kind {
+	case model.KindFile:
+		// `contains` from a file restates the concept's own resource: field.
+		// Other relations (a file importing a module) still carry information,
+		// so they stay as plain text naming the file.
+		if e.Relation == model.RelContains {
+			return "", "", false
 		}
-		sort.Slice(edges, func(i, j int) bool {
-			if edges[i].Relation != edges[j].Relation {
-				return edges[i].Relation < edges[j].Relation
+		return "", n.Label, true
+	case model.KindHeading:
+		// A heading is never a concept, but the document holding it is, and it
+		// is what a reader wants to open. Redirect to the doc and keep the
+		// heading as the label — this is what makes a doc→code reference
+		// navigable from the code side rather than a dead mention.
+		if e.Relation == model.RelContains {
+			return "", "", false // the doc renders its own outline
+		}
+		return model.NodeID("markdown", model.KindDoc, n.File, ""), n.Label, true
+	}
+	return id, n.Label, true
+}
+
+// writeEdgeList renders one direction, grouped by relation and capped.
+func writeEdgeList(b *strings.Builder, title string, edges []model.Edge, forward bool, nodes map[string]model.Node, opts renderOpts) {
+	type bullet struct {
+		relation   model.Relation
+		text       string
+		confidence model.Confidence
+		degree     int
+	}
+	groups := map[model.Relation][]bullet{}
+	for _, e := range edges {
+		linkID, label, keep := endpoint(e, forward, nodes)
+		if !keep {
+			continue
+		}
+		other := nodes[linkID]
+		var text string
+		switch href := opts.linkTo(linkID); {
+		case href != "":
+			text = fmt.Sprintf("[%s](%s)", label, href)
+		case other.File != "":
+			text = fmt.Sprintf("%s — `%s:%d`", label, other.File, other.Span.StartLine)
+		default:
+			text = label
+		}
+		groups[e.Relation] = append(groups[e.Relation], bullet{e.Relation, text, e.Confidence, other.Degree})
+	}
+	if len(groups) == 0 {
+		return
+	}
+
+	rels := make([]model.Relation, 0, len(groups))
+	for r := range groups {
+		rels = append(rels, r)
+	}
+	sort.Slice(rels, func(i, j int) bool { return rels[i] < rels[j] })
+
+	b.WriteString("\n## " + title + "\n")
+	for _, rel := range rels {
+		list := groups[rel]
+		// Most trustworthy first, then most connected: a truncated list should
+		// keep the entries a reader would have wanted.
+		sort.SliceStable(list, func(i, j int) bool {
+			if ci, cj := confRank(list[i].confidence), confRank(list[j].confidence); ci != cj {
+				return ci > cj
 			}
-			return edges[i].Source+edges[i].Target < edges[j].Source+edges[j].Target
+			if list[i].degree != list[j].degree {
+				return list[i].degree > list[j].degree
+			}
+			return list[i].text < list[j].text
 		})
-		b.WriteString("\n## " + title + "\n\n")
-		for _, e := range edges {
-			otherID := e.Target
-			if !forward {
-				otherID = e.Source
-			}
-			other, ok := nodes[otherID]
-			label := otherID
-			if ok {
-				label = other.Label
-			}
-			if href := linkTo(otherID); href != "" {
-				fmt.Fprintf(b, "- %s [%s](%s) (%s)\n", e.Relation, label, href, e.Confidence)
-			} else if ok && other.File != "" {
-				fmt.Fprintf(b, "- %s %s — `%s:%d` (%s)\n", e.Relation, label, other.File, other.Span.StartLine, e.Confidence)
+		var solid, ambiguous []bullet
+		for _, x := range list {
+			if x.confidence == model.ConfAmbiguous {
+				ambiguous = append(ambiguous, x)
 			} else {
-				fmt.Fprintf(b, "- %s %s (%s)\n", e.Relation, label, e.Confidence)
+				solid = append(solid, x)
 			}
+		}
+		fmt.Fprintf(b, "\n### %s (%d)\n\n", rel, len(list))
+		shown, hidden := solid, 0
+		if len(shown) > opts.maxEdges {
+			hidden = len(shown) - opts.maxEdges
+			shown = shown[:opts.maxEdges]
+		}
+		for _, x := range shown {
+			fmt.Fprintf(b, "- %s (%s)\n", x.text, x.confidence)
+		}
+		if hidden > 0 {
+			fmt.Fprintf(b, "- … %d more — `graphy neighbors <entity> --rel %s`\n", hidden, rel)
+		}
+		if len(ambiguous) > 0 {
+			names := make([]string, 0, len(ambiguous))
+			for _, x := range ambiguous {
+				names = append(names, x.text)
+			}
+			if len(names) > opts.maxEdges {
+				names = append(names[:opts.maxEdges], fmt.Sprintf("… %d more", len(ambiguous)-opts.maxEdges))
+			}
+			fmt.Fprintf(b, "- Ambiguous (unresolved between several targets): %s\n", strings.Join(names, ", "))
 		}
 	}
-	writeEdges("Outgoing", out, true)
-	writeEdges("Incoming", in, false)
+	return
+}
+
+// confRank orders confidences most-trustworthy first.
+func confRank(c model.Confidence) int {
+	switch c {
+	case model.ConfExtracted:
+		return 3
+	case model.ConfInferred:
+		return 2
+	default:
+		return 1
+	}
 }
 
 // rationaleBody renders a rationale concept: the recorded reasoning, where it
@@ -1105,7 +1530,7 @@ func writeEdgeSections(b *strings.Builder, s *store.Store, nodeID string, nodes 
 //
 // Deliberately no Degree bullet — it is meaningless for a rationale, and it
 // would rewrite the concept whenever an unrelated edge count shifted.
-func rationaleBody(s *store.Store, it item, nodes map[string]model.Node, linkTo func(string) string) string {
+func rationaleBody(s *store.Store, it item, nodes map[string]model.Node, opts renderOpts) (string, error) {
 	n := *it.node
 	_, marker, _, _ := model.ParseRationaleQual(qualOfNodeID(n.ID))
 	var b strings.Builder
@@ -1118,18 +1543,173 @@ func rationaleBody(s *store.Store, it item, nodes map[string]model.Node, linkTo 
 	if n.File != "" {
 		fmt.Fprintf(&b, "- Source: `%s:%d`\n", n.File, n.Span.StartLine)
 	}
-	writeEdgeSections(&b, s, n.ID, nodes, linkTo)
-	return b.String()
+	if err := writeEdgeSections(&b, s, n.ID, nodes, opts); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
-// communityBody renders a community concept: a member table linking the
-// exported members.
-func communityBody(it item, nodes map[string]model.Node, linkTo func(string) string) string {
+// maxOverviewHubs is how many entry-point entities the overview names.
+const maxOverviewHubs = 15
+
+// overviewBody renders the bundle's front door: how the graph was built, the
+// subsystems it found, and where to start reading.
+//
+// It also carries the one thing about an exported bundle that was previously
+// unrecoverable from it — the clustering algorithm, resolution and seed. Every
+// community concept is a product of those settings, so a bundle that does not
+// state them cannot be reproduced or argued with.
+func overviewBody(s *store.Store, nodes map[string]model.Node, items []item, opts OkfwOptions, rOpts renderOpts) (string, error) {
+	nodeCount, edgeCount, err := s.Counts()
+	if err != nil {
+		return "", err
+	}
+	meta, err := s.GetClusterMeta()
+	if err != nil {
+		return "", err
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Generated code graph for **%s**. Start here, then follow a subsystem down to the entities it holds.\n\n", opts.Project)
+
+	byKind := map[model.Kind]int{}
+	byLang := map[string]int{}
+	tests := 0
+	for _, n := range nodes {
+		byKind[n.Kind]++
+		if n.Language != "" {
+			byLang[n.Language]++
+		}
+		if n.Test {
+			tests++
+		}
+	}
+	fmt.Fprintf(&b, "- Graph: %d nodes, %d edges\n", nodeCount, edgeCount)
+	fmt.Fprintf(&b, "- Languages: %s\n", countList(byLang))
+	fmt.Fprintf(&b, "- Entities: %s\n", countList(kindCounts(byKind)))
+	if tests > 0 {
+		fmt.Fprintf(&b, "- Test code: %d of %d nodes\n", tests, nodeCount)
+	}
+	if meta.Algorithm != "" {
+		fmt.Fprintf(&b, "- Clustering: %s, resolution %g, seed %d\n", meta.Algorithm, meta.Resolution, meta.Seed)
+	}
+	fmt.Fprintf(&b, "- Exported with `--min-degree %d`", opts.MinDegree)
+	if opts.CommunitiesOnly {
+		b.WriteString(", communities only")
+	}
+	if opts.Generator != "" {
+		fmt.Fprintf(&b, " by %s", opts.Generator)
+	}
+	b.WriteString("\n")
+
+	var comms []item
+	for _, it := range items {
+		if it.community != nil {
+			comms = append(comms, it)
+		}
+	}
+	sort.Slice(comms, func(i, j int) bool {
+		if a, z := len(comms[i].community.NodeIDs), len(comms[j].community.NodeIDs); a != z {
+			return a > z
+		}
+		return comms[i].title < comms[j].title
+	})
+	if len(comms) > 0 {
+		fmt.Fprintf(&b, "\n## Subsystems (%d)\n\nLargest first.\n\n", len(comms))
+		for _, it := range comms {
+			label := cell(it.community.Label)
+			if href := rOpts.linkTo(it.key); href != "" {
+				label = fmt.Sprintf("[%s](%s)", label, href)
+			}
+			fmt.Fprintf(&b, "- %s — %d entities\n", label, len(it.community.NodeIDs))
+		}
+	}
+
+	// Entry points are the highest-degree exported entities: whatever else a
+	// reader is looking for, these are what the rest of the graph hangs off.
+	var hubs []item
+	for _, it := range items {
+		if it.node != nil && it.node.Kind != model.KindRationale && !it.node.Test {
+			hubs = append(hubs, it)
+		}
+	}
+	sort.Slice(hubs, func(i, j int) bool {
+		if a, z := hubs[i].node.Degree, hubs[j].node.Degree; a != z {
+			return a > z
+		}
+		return hubs[i].node.ID < hubs[j].node.ID
+	})
+	if len(hubs) > maxOverviewHubs {
+		hubs = hubs[:maxOverviewHubs]
+	}
+	if len(hubs) > 0 {
+		b.WriteString("\n## Entry points\n\nThe most connected entities.\n\n")
+		b.WriteString("| Entity | Kind | Degree | Location |\n|---|---|---:|---|\n")
+		for _, it := range hubs {
+			n := *it.node
+			label := cell(n.Label)
+			if href := rOpts.linkTo(it.key); href != "" {
+				label = fmt.Sprintf("[%s](%s)", label, href)
+			}
+			loc := ""
+			if n.File != "" {
+				loc = fmt.Sprintf("`%s:%d`", cell(n.File), n.Span.StartLine)
+			}
+			fmt.Fprintf(&b, "| %s | %s | %d | %s |\n", label, n.Kind, n.Degree, loc)
+		}
+	}
+	return b.String(), nil
+}
+
+// kindCounts re-keys a kind tally as strings for countList.
+func kindCounts(byKind map[model.Kind]int) map[string]int {
+	out := make(map[string]int, len(byKind))
+	for k, v := range byKind {
+		out[string(k)] = v
+	}
+	return out
+}
+
+// countList renders a tally as "12 go, 4 python", largest first.
+func countList(counts map[string]int) string {
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if counts[keys[i]] != counts[keys[j]] {
+			return counts[keys[i]] > counts[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("%d %s", counts[k], k))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// maxCommunityRows caps a community concept's member table. Communities are
+// whole subsystems — the largest in this repository holds over two hundred
+// entities — and a table that long is a listing, not an orientation. The counts
+// line above it keeps the shape of the rest visible, and the full membership is
+// a query away.
+const maxCommunityRows = 40
+
+// communityBody renders a community concept: what it is made of, then its most
+// connected members.
+func communityBody(it item, nodes map[string]model.Node, opts renderOpts) string {
 	c := *it.community
 	members := make([]model.Node, 0, len(c.NodeIDs))
+	byKind := map[model.Kind]int{}
+	tests := 0
 	for _, id := range c.NodeIDs {
 		if n, ok := nodes[id]; ok {
 			members = append(members, n)
+			byKind[n.Kind]++
+			if n.Test {
+				tests++
+			}
 		}
 	}
 	sort.Slice(members, func(i, j int) bool {
@@ -1141,40 +1721,68 @@ func communityBody(it item, nodes map[string]model.Node, linkTo func(string) str
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "A subsystem detected by community clustering: %d entities.\n\n", len(members))
+
+	kinds := make([]model.Kind, 0, len(byKind))
+	for k := range byKind {
+		kinds = append(kinds, k)
+	}
+	sort.Slice(kinds, func(i, j int) bool {
+		if byKind[kinds[i]] != byKind[kinds[j]] {
+			return byKind[kinds[i]] > byKind[kinds[j]]
+		}
+		return kinds[i] < kinds[j]
+	})
+	parts := make([]string, 0, len(kinds))
+	for _, k := range kinds {
+		parts = append(parts, fmt.Sprintf("%d %s", byKind[k], k))
+	}
+	fmt.Fprintf(&b, "- Composition: %s\n", strings.Join(parts, ", "))
+	if tests > 0 {
+		fmt.Fprintf(&b, "- Test code: %d of %d entities\n", tests, len(members))
+	}
+
+	shown := members
+	if len(shown) > maxCommunityRows {
+		shown = shown[:maxCommunityRows]
+	}
+	fmt.Fprintf(&b, "\n## Members\n\nMost connected first.\n\n")
 	b.WriteString("| Entity | Kind | Degree | Location |\n|---|---|---:|---|\n")
-	for _, n := range members {
-		label := n.Label
-		if href := linkTo(n.ID); href != "" {
-			label = fmt.Sprintf("[%s](%s)", n.Label, href)
+	for _, n := range shown {
+		label := cell(n.Label)
+		if href := opts.linkTo(n.ID); href != "" {
+			label = fmt.Sprintf("[%s](%s)", label, href)
 		}
 		loc := ""
 		if n.File != "" {
-			loc = fmt.Sprintf("`%s:%d`", n.File, n.Span.StartLine)
+			loc = fmt.Sprintf("`%s:%d`", cell(n.File), n.Span.StartLine)
 		}
 		fmt.Fprintf(&b, "| %s | %s | %d | %s |\n", label, n.Kind, n.Degree, loc)
+	}
+	if rest := len(members) - len(shown); rest > 0 {
+		fmt.Fprintf(&b, "\n… %d more entities — `graphy explain %q`\n", rest, "Community: "+c.Label)
 	}
 	return b.String()
 }
 
+// cell escapes a value for a markdown table cell. Rationale nodes are community
+// members and their labels are raw comment prose, so an unescaped pipe silently
+// splits the row into extra columns.
+func cell(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", " "), "|", "\\|")
+}
+
 // removeConcept deletes a stale concept file and evicts it from the bundle's
-// search index and graph database.
+// search index and graph database, via the shared write path so a failure to
+// evict is reported rather than swallowed. The index.md refresh is deferred to
+// the caller's single syncBundle pass — DeleteConcept would walk the whole
+// bundle once per deleted concept.
 func removeConcept(cfg *config.Config, rec store.ExportRecord) error {
 	abs := filepath.Join(cfg.RootPath, filepath.FromSlash(rec.RelPath))
-	if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
-		return err
+	if _, err := os.Stat(abs); os.IsNotExist(err) {
+		return nil // already gone; the record is dropped by the caller
 	}
-	if idx, err := index.OpenOrCreateIndex(cfg.IndexPath); err == nil {
-		_ = idx.Delete(rec.ConceptID)
-		idx.Close()
-	}
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err == nil {
-		if gdb, err := graphdb.Open(dbPath); err == nil {
-			_ = gdb.PurgeNode(rec.ConceptID)
-			gdb.Close()
-		}
-	}
-	return nil
+	_, err := bundle.DeleteConceptFile(cfg, abs)
+	return err
 }
 
 // syncBundle batch-indexes the touched concepts: per-file search indexing,
