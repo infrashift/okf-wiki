@@ -169,3 +169,41 @@ func TestBinarySniff(t *testing.T) {
 		t.Errorf("binary file not excluded: %v", paths(files))
 	}
 }
+
+// TestIgnoreSetAnchorsBuildOutputToTheRoot: "build", "dist" and "target" are
+// ordinary words that name real source packages. Matching them at any depth
+// deleted this repo's own cli/internal/graphy/build package from the graph, and
+// silently — detect not listing a file is indistinguishable from the file not
+// existing, so it was then purged by the delete diff as though it had left.
+func TestIgnoreSetAnchorsBuildOutputToTheRoot(t *testing.T) {
+	set := newIgnoreSet()
+	ignored := []string{
+		"build/main.js",
+		"dist/bundle.js",
+		"target/debug/foo.rs",
+		"out/app.js",
+		"node_modules/left-pad/index.js",
+		"web/node_modules/left-pad/index.js", // dependencies nest legitimately
+		"vendor/github.com/x/y.go",
+		"cli/vendor/github.com/x/y.go",
+	}
+	for _, p := range ignored {
+		if !set.Match(p) {
+			t.Errorf("Match(%q) = false, want true", p)
+		}
+	}
+	kept := []string{
+		"cli/internal/graphy/build/build.go",
+		"cli/internal/graphy/build/build_test.go",
+		"src/build/pipeline.py",
+		"pkg/target/resolver.go",
+		"lib/dist/histogram.ts",
+		"internal/out/writer.go",
+		"buildinfo/version.go", // a prefix is not a directory segment
+	}
+	for _, p := range kept {
+		if set.Match(p) {
+			t.Errorf("Match(%q) = true, want false", p)
+		}
+	}
+}

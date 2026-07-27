@@ -54,14 +54,33 @@ var langByExt = map[string]string{
 // dot-directory rule below and are named here anyway, because "graphy must
 // never read its own output" is a rule worth stating where someone will look
 // for it.
+//
+// These match at any depth, which is right for them: a nested
+// "web/node_modules" is still dependencies, and a nested "vendor" is still
+// vendored code. It is emphatically NOT right for build-output directory names
+// — see defaultIgnoreAtRoot.
 var defaultIgnorePatterns = []string{
 	".graphy/",
 	".okfw/",
 	"node_modules/",
 	"vendor/",
-	"dist/",
-	"build/",
-	"target/",
+}
+
+// defaultIgnoreAtRoot are build-output directories, anchored to the repository
+// root because their names are ordinary words that legitimately name source
+// packages further down a tree.
+//
+// Matching them at any depth silently deleted real code from the graph: this
+// repo's own cli/internal/graphy/build package matched "build/" and was never
+// extracted, so graphy could not see the package that builds its graphs — and
+// nothing reported it, because a file detect never lists is not a file that
+// failed to extract. It is simply absent, and then purged by the delete diff on
+// the next run as though it had left the repo.
+var defaultIgnoreAtRoot = []string{
+	"/dist/",
+	"/build/",
+	"/target/",
+	"/out/",
 }
 
 // hasDotDirSegment reports whether any *directory* component of a
@@ -199,9 +218,10 @@ func walkFiles(root string, ignore *ignoreSet) ([]string, error) {
 // filepath.Match globs.
 type ignoreSet struct{ patterns []string }
 
-// newIgnoreSet returns a set seeded with defaultIgnorePatterns.
+// newIgnoreSet returns a set seeded with the built-in patterns.
 func newIgnoreSet() *ignoreSet {
-	return &ignoreSet{patterns: append([]string(nil), defaultIgnorePatterns...)}
+	p := append([]string(nil), defaultIgnorePatterns...)
+	return &ignoreSet{patterns: append(p, defaultIgnoreAtRoot...)}
 }
 
 func loadIgnore(path string) (*ignoreSet, error) {
@@ -228,6 +248,13 @@ func (s *ignoreSet) Match(rel string) bool {
 	base := rel[strings.LastIndex(rel, "/")+1:]
 	for _, p := range s.patterns {
 		switch {
+		case strings.HasPrefix(p, "/") && strings.HasSuffix(p, "/") && len(p) > 1:
+			// Anchored directory: only at the repository root. Checked ahead of
+			// the any-depth case, which would otherwise claim it.
+			dir := strings.Trim(p, "/")
+			if rel == dir || strings.HasPrefix(rel, dir+"/") {
+				return true
+			}
 		case strings.HasSuffix(p, "/"):
 			// Matches the directory itself at any depth, and anything under
 			// it. The trailing HasSuffix case is what lets walkFiles prune a
