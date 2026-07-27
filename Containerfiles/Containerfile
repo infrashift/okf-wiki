@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------
-# Stage 1: Build the Go binary
+# Stage 1: Build both binaries
 # --------------------------------------------------------------------------
 FROM docker.io/library/golang:1.24 AS builder
 
@@ -9,7 +9,15 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+
+# okfw stays pure Go — CGO_ENABLED=0 is the guarantee, not an optimization.
 RUN CGO_ENABLED=0 go build -o okfw ./cli/cmd/okfw
+
+# graphy binds tree-sitter grammars, so it needs CGo and a C toolchain (the
+# golang image supplies gcc). The result links only against libc and requires
+# GLIBC_2.34, which the Fedora runtime below is well past — the reverse
+# direction is what breaks, so keep the runtime no older than the builder.
+RUN CGO_ENABLED=1 go build -o graphy ./cli/cmd/graphy
 
 # --------------------------------------------------------------------------
 # Stage 2: Final image — headless devcontainer
@@ -92,8 +100,17 @@ RUN MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
 # ── 13. Pre-install LazyVim plugins (mason tools already in PATH) ──────
 RUN nvim --headless "+Lazy! sync" +qa 2>&1 || true
 
-# ── 14. Copy okfw binary from builder ────────────────────────────────────
-COPY --from=builder --chown=user:0 /src/okfw /home/user/.local/bin/okfw
+# ── 14. Copy both binaries from builder ──────────────────────────────────
+COPY --from=builder --chown=user:0 /src/okfw   /home/user/.local/bin/okfw
+COPY --from=builder --chown=user:0 /src/graphy /home/user/.local/bin/graphy
+
+# Fail the build rather than ship a graphy that cannot start: it is the only
+# dynamically linked binary here, so a runtime/builder glibc mismatch would
+# otherwise surface as a confusing error on first use inside the container.
+RUN okfw --help >/dev/null && graphy version
+
+# `graphy install` registers the skill and CLAUDE.md block *per project*, so it
+# is deliberately not run here — it belongs in whichever repository you open.
 
 # ── 15. Environment ─────────────────────────────────────────────────────
 ENV TERM=xterm-256color

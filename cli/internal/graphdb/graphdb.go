@@ -545,7 +545,6 @@ func parseConceptFile(filePath, bundleRoot string) (*NodeRecord, error) {
 	}, nil
 }
 
-
 // hasPrefix checks if a byte slice has the given prefix.
 func hasPrefix(s, prefix []byte) bool {
 	if len(s) < len(prefix) {

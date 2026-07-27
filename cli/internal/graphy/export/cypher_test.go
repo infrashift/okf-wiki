@@ -240,7 +240,7 @@ func TestCypherIndexesEveryEmittedLabel(t *testing.T) {
 	if idx < 0 {
 		t.Fatal("no index block")
 	}
-	block := out[idx:strings.Index(out[idx:], "\n")+idx]
+	block := out[idx : strings.Index(out[idx:], "\n")+idx]
 	for _, label := range []string{"External", "Function", "Rationale"} {
 		if !strings.Contains(block, "'"+label+"'") {
 			t.Errorf("label %s is created but never indexed: %s", label, block)
