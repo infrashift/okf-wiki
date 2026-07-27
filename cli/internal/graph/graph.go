@@ -497,17 +497,38 @@ func NormalizeTarget(href, fromDir string) string {
 // RewriteLinks applies rewrite to the target of every internal markdown link in
 // body. rewrite receives the raw href and returns a replacement href; returning
 // "" or the same value leaves the link unchanged.
+//
+// The replacement is spliced at the capture group's own offsets rather than by
+// substring substitution: when a link's text equals its target —
+// "[/dir/a.md](/dir/a.md)", which is exactly what the plugin's link-insert
+// keymap produces — replacing the first occurrence of the href rewrote the
+// visible text and left the actual target untouched.
 func RewriteLinks(body string, rewrite func(href string) string) string {
-	return mdLinkPattern.ReplaceAllStringFunc(body, func(match string) string {
-		sub := mdLinkPattern.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
+	matches := mdLinkPattern.FindAllStringSubmatchIndex(body, -1)
+	if len(matches) == 0 {
+		return body
+	}
+
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		// m[2]:m[3] bounds capture group 1, the href.
+		start, end := m[2], m[3]
+		if start < 0 {
+			continue
 		}
-		href := sub[1]
+		href := body[start:end]
 		nh := rewrite(href)
 		if nh == "" || nh == href {
-			return match
+			continue
 		}
-		return strings.Replace(match, href, nh, 1)
-	})
+		b.WriteString(body[last:start])
+		b.WriteString(nh)
+		last = end
+	}
+	if last == 0 {
+		return body
+	}
+	b.WriteString(body[last:])
+	return b.String()
 }

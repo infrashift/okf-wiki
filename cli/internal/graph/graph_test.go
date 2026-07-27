@@ -401,7 +401,6 @@ func TestGenerateMermaid_DeterministicOutput(t *testing.T) {
 	}
 }
 
-
 // --- Markdown link helpers (OKF) ---
 
 func TestExtractLinkTargets(t *testing.T) {
@@ -460,4 +459,60 @@ func nodeIDs(nodes []*Node) map[string]bool {
 		ids[n.ID] = true
 	}
 	return ids
+}
+
+// A link whose visible text equals its target is what the plugin's link-insert
+// keymap produces. Replacing the first occurrence of the href rewrote the text
+// and left the real target behind.
+func TestRewriteLinksWhenTextEqualsTarget(t *testing.T) {
+	body := "See [/dir/a.md](/dir/a.md) for details."
+	out := RewriteLinks(body, func(href string) string {
+		if href == "/dir/a.md" {
+			return "/moved/a.md"
+		}
+		return ""
+	})
+	want := "See [/dir/a.md](/moved/a.md) for details."
+	if out != want {
+		t.Errorf("RewriteLinks = %q, want %q", out, want)
+	}
+}
+
+func TestRewriteLinksRewritesEveryOccurrence(t *testing.T) {
+	body := "[one](/a.md) then [two](/a.md) and [other](/b.md)"
+	out := RewriteLinks(body, func(href string) string {
+		if href == "/a.md" {
+			return "/z.md"
+		}
+		return ""
+	})
+	want := "[one](/z.md) then [two](/z.md) and [other](/b.md)"
+	if out != want {
+		t.Errorf("RewriteLinks = %q, want %q", out, want)
+	}
+}
+
+func TestRewriteLinksPreservesAnchorsAndSurroundings(t *testing.T) {
+	body := "before [A](/dir/a.md#section) after"
+	out := RewriteLinks(body, func(href string) string {
+		if href == "/dir/a.md" {
+			return "/moved/a.md"
+		}
+		return ""
+	})
+	// The anchor sits outside the capture group, so it must survive untouched.
+	want := "before [A](/moved/a.md#section) after"
+	if out != want {
+		t.Errorf("RewriteLinks = %q, want %q", out, want)
+	}
+}
+
+func TestRewriteLinksNoOpReturnsInputUnchanged(t *testing.T) {
+	body := "[A](/a.md) and [B](./b.md)"
+	if out := RewriteLinks(body, func(string) string { return "" }); out != body {
+		t.Errorf("RewriteLinks = %q, want it unchanged", out)
+	}
+	if out := RewriteLinks("no links here", func(string) string { return "x" }); out != "no links here" {
+		t.Errorf("RewriteLinks on link-free text = %q", out)
+	}
 }
