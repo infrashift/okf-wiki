@@ -9,10 +9,13 @@ import (
 	"strings"
 	"testing"
 
+	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
+	"okfw/cli/internal/graphdb"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/query"
 	"okfw/cli/internal/graphy/store"
+	"okfw/cli/internal/index"
 )
 
 // fixture builds a store with one community and three nodes (two significant,
@@ -2097,4 +2100,165 @@ func hubFixture(t *testing.T) (*store.Store, *config.Config) {
 		t.Fatal(err)
 	}
 	return s, config.ConfigFor(bundleRoot)
+}
+
+// TestExportRebuildsALostSearchIndex is the defect in its purest form: a no-op
+// export used to write nothing, and syncBundle keyed only off what it wrote,
+// so a bundle whose .index was deleted stayed unindexed and
+// `okfw search --node-id` — the wiki→graph half of the bridge — returned zero
+// hits forever.
+func TestExportRebuildsALostSearchIndex(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1}
+
+	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(cfg.IndexPath); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := ToOkfw("/repo/demo", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The point is that it repaired the index *without* rewriting a concept.
+	if res.Created != 0 || res.Updated != 0 {
+		t.Errorf("re-export wrote concepts: %d created, %d updated", res.Created, res.Updated)
+	}
+	assertNodeIDResolves(t, cfg, "go:function:a.go#Alpha")
+}
+
+// TestExportIndexesConceptsMissingFromAPartialIndex: the same reconciliation,
+// for one dropped document rather than a whole lost index.
+func TestExportIndexesConceptsMissingFromAPartialIndex(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1}
+	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, err := bundle.IndexedIDs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) == 0 {
+		t.Fatal("first export indexed nothing")
+	}
+	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dropped string
+	for id := range ids {
+		dropped = id
+		break
+	}
+	if err := index.DeleteDocument(idx, dropped); err != nil {
+		t.Fatal(err)
+	}
+	idx.Close()
+
+	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
+		t.Fatal(err)
+	}
+	after, err := bundle.IndexedIDs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after[dropped] {
+		t.Errorf("concept %s was not re-indexed by the no-op export", dropped)
+	}
+}
+
+// TestExportCreatesAndPopulatesTheGraphDatabase: the export used to stat the
+// graph db and skip when absent, so the whole exported tree — one `parent:`
+// edge per concept — was invisible to okfw graph/backlinks/graph-query until
+// the reader ran a graph-sync nothing had told them about.
+func TestExportCreatesAndPopulatesTheGraphDatabase(t *testing.T) {
+	s, cfg := fixture(t)
+	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
+	if _, err := os.Stat(dbPath); err == nil {
+		t.Fatal("fixture already has a graph database")
+	}
+
+	res, err := ToOkfw("/repo/demo", s, OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.GraphCreated {
+		t.Error("creating the graph database was not reported")
+	}
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("graph database was not created: %v", err)
+	}
+
+	// Scoped, so the handle is released before the second export below: bolt
+	// takes an exclusive file lock.
+	func() {
+		gdb, err := graphdb.Open(dbPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer gdb.Close()
+		n, err := gdb.NodeCount()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 0 {
+			t.Error("graph database is empty after the export that created it")
+		}
+
+		// The overview concept parents every community, which is the edge that
+		// makes the export a tree rather than a thousand siblings.
+		overviewID := conceptIDWithNodeID(t, cfg, res.Dir, "graph:demo")
+		back, err := gdb.GetBacklinks(overviewID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(back) == 0 {
+			t.Error("no concept links to the overview: the parent spine never reached the graph")
+		}
+	}()
+
+	// A second export must not report creating it again.
+	res2, err := ToOkfw("/repo/demo", s, OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.GraphCreated {
+		t.Error("second export reported creating an existing graph database")
+	}
+}
+
+func assertNodeIDResolves(t *testing.T, cfg *config.Config, nodeID string) {
+	t.Helper()
+	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+	hits, _, err := index.Search(idx, index.SearchOptions{GraphyNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Errorf("okfw search --node-id %s found nothing: the bridge is dead", nodeID)
+	}
+}
+
+// conceptIDWithNodeID finds the concept documenting a graphy node id.
+func conceptIDWithNodeID(t *testing.T, cfg *config.Config, dir, nodeID string) string {
+	t.Helper()
+	for name, content := range conceptFiles(t, cfg, dir) {
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		if z.Graphy != nil && z.Graphy.NodeID == nodeID {
+			return z.ID
+		}
+	}
+	t.Fatalf("no concept carries node id %s", nodeID)
+	return ""
 }

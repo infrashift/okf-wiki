@@ -2,8 +2,10 @@ package graphdb
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -268,4 +270,40 @@ func TestExportJSON(t *testing.T) {
 	if len(buf.Nodes) != 1 {
 		t.Errorf("expected 1 node, got %d", len(buf.Nodes))
 	}
+}
+
+// TestOpenExistingDoesNotCreateTheDatabase pins the real mechanism behind the
+// graph-query defect: bolt.Open creates the file, so one read-only query on a
+// bundle that had never run graph-sync left an empty store behind, and every
+// command that chooses between the store and a filesystem scan by whether that
+// file exists then answered from the empty store, permanently.
+func TestOpenExistingDoesNotCreateTheDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "graph.db")
+
+	s, err := OpenExisting(path)
+	if err == nil {
+		s.Close()
+		t.Fatal("OpenExisting succeeded on a database that does not exist")
+	}
+	if !errors.Is(err, ErrNoStore) {
+		t.Errorf("error is not ErrNoStore: %v", err)
+	}
+	if !strings.Contains(err.Error(), "graph-sync") {
+		t.Errorf("error does not say how to fix it: %v", err)
+	}
+	if _, err := os.Stat(path); err == nil {
+		t.Fatal("OpenExisting created the database")
+	}
+
+	// And it opens one that does exist.
+	created, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created.Close()
+	s, err = OpenExisting(path)
+	if err != nil {
+		t.Fatalf("OpenExisting failed on an existing database: %v", err)
+	}
+	s.Close()
 }

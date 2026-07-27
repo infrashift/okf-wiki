@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -458,5 +459,48 @@ timestamp: "2026-07-27T00:00:00Z"
 	}
 	if doc.GraphyNodeID != "" {
 		t.Errorf("GraphyNodeID = %q, want empty", doc.GraphyNodeID)
+	}
+}
+
+// TestIndexFilesIndexesEveryFileInOnePass: the bulk path a large export needs,
+// where AutoIndex would reopen Bleve once per concept.
+func TestIndexFilesIndexesEveryFileInOnePass(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
+	var abs, want []string
+	for i := 0; i < 5; i++ {
+		id := fmt.Sprintf("019680f0-7e00-7abc-8def-10000000000%d", i)
+		abs = append(abs, writeConcept(t, root, fmt.Sprintf("c%d--000%d.md", i, i),
+			GenerateBasicNote(id, fmt.Sprintf("Concept %d", i), "", nil)))
+		want = append(want, id)
+	}
+	if err := IndexFiles(cfg, abs); err != nil {
+		t.Fatal(err)
+	}
+	got, err := IndexedIDs(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range want {
+		if !got[id] {
+			t.Errorf("concept %s was not indexed", id)
+		}
+	}
+}
+
+// TestIndexedIDsOnABundleWithNoIndexIsEmptyNotAnError: a reconciling caller
+// must read "nothing is indexed", and must not create the index on the way
+// past — that is the same defect as opening a graph database to read it.
+func TestIndexedIDsOnABundleWithNoIndexIsEmptyNotAnError(t *testing.T) {
+	cfg := config.ConfigFor(t.TempDir())
+	got, err := IndexedIDs(cfg)
+	if err != nil {
+		t.Fatalf("IndexedIDs on an unindexed bundle errored: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected an empty set, got %d ids", len(got))
+	}
+	if _, err := os.Stat(cfg.IndexPath); err == nil {
+		t.Error("IndexedIDs created the search index it was only meant to read")
 	}
 }

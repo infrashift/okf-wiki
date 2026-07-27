@@ -79,6 +79,9 @@ type OkfwResult struct {
 	Rekeyed   int // community concept adopted under a new exports key or label
 	Deleted   int
 	Dir       string // bundle-relative concept directory
+	// GraphCreated reports that this export built the bundle's graph database,
+	// which changes how every later okfw graph command answers.
+	GraphCreated bool
 	// Skipped counts eligible graph nodes the filters excluded, so a thin
 	// export is legible as a filter setting rather than as a broken build.
 	Skipped SkipCounts
@@ -476,9 +479,20 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		return nil, err
 	}
 
-	if err := syncBundle(cfg, touched); err != nil {
+	// Every concept this export owns, changed or not. syncBundle needs the
+	// unchanged ones too: the bundle's derived state can be missing for reasons
+	// the export knows nothing about.
+	all := make([]conceptRef, 0, len(placed))
+	for _, p := range placed {
+		all = append(all, conceptRef{rel: p.relPath, id: p.conceptID})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].rel < all[j].rel })
+
+	graphCreated, err := syncBundle(cfg, touched, all)
+	if err != nil {
 		return nil, err
 	}
+	res.GraphCreated = graphCreated
 	return res, nil
 }
 
@@ -1785,41 +1799,99 @@ func removeConcept(cfg *config.Config, rec store.ExportRecord) error {
 	return err
 }
 
-// syncBundle batch-indexes the touched concepts: per-file search indexing,
-// one index.md regeneration, and per-file graph sync when a graph db exists.
-// (bundle.AutoSync per file would regenerate index.md n times.)
-func syncBundle(cfg *config.Config, relPaths []string) error {
-	if len(relPaths) == 0 {
-		if _, err := bundle.WriteIndexFiles(cfg, cfg.RootPath); err != nil {
-			return err
+// conceptRef is a concept this export is responsible for: where it lives, and
+// the id both the search index and the graph store key on.
+type conceptRef struct {
+	rel string
+	id  string
+}
+
+// syncBundle reconciles the bundle's derived state — the Bleve index, the
+// index.md listings, and the graph database — with the concepts this export
+// owns. It reports whether it had to create the graph database.
+//
+// `touched` is what this run wrote; `all` is every concept it placed, changed
+// or not. Both matter, because the derived state can be missing for reasons the
+// export cannot see. Replaying only `touched` meant that after `.okfw/.index`
+// was lost, a re-export found every concept byte-identical, wrote nothing,
+// indexed nothing, and left `okfw search --node-id` — the wiki→graph half of
+// the bridge — returning zero hits for good.
+func syncBundle(cfg *config.Config, touched []string, all []conceptRef) (bool, error) {
+	need := map[string]bool{}
+	for _, rel := range touched {
+		need[rel] = true
+	}
+
+	indexed, err := bundle.IndexedIDs(cfg)
+	if err != nil {
+		return false, err
+	}
+	for _, c := range all {
+		if c.id != "" && !indexed[c.id] {
+			need[c.rel] = true
 		}
-		return nil
 	}
-	for _, rel := range relPaths {
-		abs := filepath.Join(cfg.RootPath, filepath.FromSlash(rel))
-		if err := bundle.AutoIndex(cfg, abs); err != nil {
-			return fmt.Errorf("indexing %s: %w", rel, err)
-		}
-	}
-	if _, err := bundle.WriteIndexFiles(cfg, cfg.RootPath); err != nil {
-		return err
-	}
+
+	// The bundle's graph database, created if this export is the first thing to
+	// want one. `parent:` is the spine of the exported tree — one edge per
+	// concept — and with no database none of it reached okfw's link graph, so
+	// `okfw graph`, `okfw backlinks` and `okfw graph-query` answered nothing
+	// about the export and nothing told the reader to run `okfw graph-sync`.
 	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil
-	}
+	_, statErr := os.Stat(dbPath)
+	freshDB := os.IsNotExist(statErr)
 	gdb, err := graphdb.Open(dbPath)
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer gdb.Close()
-	for _, rel := range relPaths {
-		abs := filepath.Join(cfg.RootPath, filepath.FromSlash(rel))
-		if err := gdb.SyncFile(abs, cfg.RootPath); err != nil {
-			return fmt.Errorf("graph-syncing %s: %w", rel, err)
+	if !freshDB {
+		for _, c := range all {
+			if need[c.rel] || c.id == "" {
+				continue
+			}
+			n, err := gdb.GetNode(c.id)
+			if err != nil {
+				return false, err
+			}
+			if n == nil {
+				need[c.rel] = true
+			}
 		}
 	}
-	return nil
+
+	rels := make([]string, 0, len(need))
+	for rel := range need {
+		rels = append(rels, rel)
+	}
+	sort.Strings(rels)
+	abs := make([]string, len(rels))
+	for i, rel := range rels {
+		abs[i] = filepath.Join(cfg.RootPath, filepath.FromSlash(rel))
+	}
+
+	if err := bundle.IndexFiles(cfg, abs); err != nil {
+		return false, err
+	}
+	if _, err := bundle.WriteIndexFiles(cfg, cfg.RootPath); err != nil {
+		return false, err
+	}
+
+	if freshDB {
+		// One walk rather than N SyncFile calls, and it takes in the
+		// hand-written concepts already in the bundle too, so the graph is
+		// never a partial view of it from the moment it starts existing.
+		if _, err := gdb.Sync(cfg.RootPath); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	for i, rel := range rels {
+		if err := gdb.SyncFile(abs[i], cfg.RootPath); err != nil {
+			return false, fmt.Errorf("graph-syncing %s: %w", rel, err)
+		}
+	}
+	return false, nil
 }
 
 // qualOfNodeID returns just the qualified-name half of a node id.

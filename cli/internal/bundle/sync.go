@@ -71,6 +71,57 @@ func AutoIndex(cfg *config.Config, filePath string) error {
 	return IndexFile(idx, filePath)
 }
 
+// IndexFiles indexes several concept files in one open/close of the search
+// index.
+//
+// AutoIndex reopens Bleve per file, which a bulk writer pays once per concept —
+// `graphy export okfw` places thousands in a single run.
+func IndexFiles(cfg *config.Config, absPaths []string) error {
+	if len(absPaths) == 0 {
+		return nil
+	}
+	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	if err != nil {
+		return err
+	}
+	defer idx.Close()
+
+	for _, p := range absPaths {
+		if err := IndexFile(idx, p); err != nil {
+			return fmt.Errorf("indexing %s: %w", p, err)
+		}
+	}
+	return nil
+}
+
+// IndexedIDs returns the concept ids currently present in the bundle's search
+// index.
+//
+// A bundle with no index yields an empty set rather than an error, so a caller
+// reconciling against it treats every concept as unindexed — which is exactly
+// what a deleted .index means. It must not create the index on the way past:
+// that is the same mistake as opening a graph database to read it.
+func IndexedIDs(cfg *config.Config) (map[string]bool, error) {
+	if _, err := os.Stat(cfg.IndexPath); err != nil {
+		return map[string]bool{}, nil
+	}
+	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	if err != nil {
+		return nil, err
+	}
+	defer idx.Close()
+
+	ids, err := index.AllDocIDs(idx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out, nil
+}
+
 // AutoSync updates the search index and, when a graph database exists, the
 // persistent graph for a single created or updated file (best-effort).
 func AutoSync(cfg *config.Config, filePath string) error {

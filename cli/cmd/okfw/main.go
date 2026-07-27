@@ -1167,7 +1167,7 @@ Examples:
 			}
 
 			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.Open(dbPath)
+			store, err := graphdb.OpenExisting(dbPath)
 			if err != nil {
 				return err
 			}
@@ -1206,7 +1206,7 @@ Examples:
 			}
 
 			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.Open(dbPath)
+			store, err := graphdb.OpenExisting(dbPath)
 			if err != nil {
 				return err
 			}
@@ -1247,7 +1247,7 @@ Examples:
 			}
 
 			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.Open(dbPath)
+			store, err := graphdb.OpenExisting(dbPath)
 			if err != nil {
 				return err
 			}
@@ -1286,7 +1286,7 @@ Examples:
 			}
 
 			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.Open(dbPath)
+			store, err := graphdb.OpenExisting(dbPath)
 			if err != nil {
 				return err
 			}

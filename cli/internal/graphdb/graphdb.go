@@ -4,6 +4,7 @@ package graphdb
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,6 +104,25 @@ func Open(path string) (*Store, error) {
 	}
 
 	return &Store{db: db, path: path}, nil
+}
+
+// ErrNoStore reports that a bundle has no graph database.
+var ErrNoStore = errors.New("no graph database in this bundle")
+
+// OpenExisting opens a graph database that must already exist.
+//
+// Open creates the file, which is right for graph-sync and wrong for a
+// read-only query. One `okfw graph-query dangling` on a bundle that had never
+// run graph-sync left an *empty* store behind — and every command that decides
+// between the store and a filesystem scan by whether that file exists then took
+// the store branch and returned nothing, permanently. The advice lives in the
+// error so callers stay at a bare `return err`.
+func OpenExisting(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, fmt.Errorf("%w: %s — run `okfw graph-sync` to build it",
+			ErrNoStore, path)
+	}
+	return Open(path)
 }
 
 // Close closes the underlying bbolt database.

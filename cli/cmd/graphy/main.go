@@ -406,6 +406,12 @@ idempotent: concept ids and filenames stay stable across runs.`,
 			if len(adopted) > 0 {
 				fmt.Printf("Adopted existing concepts: %s\n", strings.Join(adopted, ", "))
 			}
+			// Creating this file changes how every later okfw graph command
+			// answers, so say it rather than doing it silently.
+			if res.GraphCreated {
+				fmt.Printf("Built the bundle's link graph (%s/%s) — okfw graph, backlinks and graph-query now answer for this export.\n",
+					cfg.RootPath, cfg.GraphPath)
+			}
 			// Say what the filters left out, so a thin export reads as a setting
 			// rather than as a broken build.
 			if sk := res.Skipped; sk.Any() {
