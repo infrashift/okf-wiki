@@ -44,21 +44,17 @@ local function build_search_args(opts, query)
             table.insert(args, tag)
         end
     end
+    if opts.kind and opts.kind ~= "" then
+        table.insert(args, "--kind")
+        table.insert(args, opts.kind)
+    end
+    -- OKF lifecycle status: draft | stable | deprecated
     if opts.status and opts.status ~= "" then
         table.insert(args, "--status")
         table.insert(args, opts.status)
     end
-    if opts.priority and opts.priority ~= "" then
-        table.insert(args, "--priority")
-        table.insert(args, opts.priority)
-    end
-    if opts.due_before and opts.due_before ~= "" then
-        table.insert(args, "--due-before")
-        table.insert(args, opts.due_before)
-    end
-    if opts.due_after and opts.due_after ~= "" then
-        table.insert(args, "--due-after")
-        table.insert(args, opts.due_after)
+    if opts.stale then
+        table.insert(args, "--stale")
     end
 
     if opts.limit then

@@ -33,6 +33,12 @@ local plenary_path = "/tmp/nvim-test-plugins/plenary.nvim/lua"
 vim.opt.runtimepath:append(vim.fn.getcwd())
 vim.opt.runtimepath:append("/tmp/nvim-test-plugins/plenary.nvim")
 
+-- `nvim -u NONE` implies --noplugin, so plugin/okfw.lua is not sourced and the
+-- :Okfw* user commands would be invisible to this suite. Source it explicitly
+-- rather than switching to -u NORC, which would load whatever the developer
+-- happens to have installed and make the run non-hermetic.
+vim.cmd("runtime plugin/okfw.lua")
+
 -- Wikis are per-project (.okfw/ discovered from the cwd), so the CLI tests
 -- below are isolated inside a dedicated temp project — no HOME juggling needed.
 
@@ -559,6 +565,92 @@ if plenary_ok then
     assert_eq(code, 0, "okfw search --kind note exits 0")
     local ok2, _ = pcall(vim.json.decode, out)
     assert_true(ok2, "search --kind JSON is valid")
+end
+
+-- Test 31: user commands are registered by plugin/okfw.lua
+log("")
+log("Test 31: user commands registered")
+do
+    local cmds = vim.api.nvim_get_commands({})
+    for _, name in ipairs({
+        "OkfwInit", "OkfwNote", "OkfwSearch", "OkfwGraph",
+        "OkfwExport", "OkfwIndex", "OkfwDelete", "OkfwMove",
+    }) do
+        assert_true(cmds[name] ~= nil, name .. " is registered")
+    end
+end
+
+-- Test 32: :OkfwMove relocates the concept, moves the buffer with it, and
+-- repairs the inbound link in another concept.
+log("")
+log("Test 32: OkfwMove")
+if plenary_ok then
+    local code = run_okfw({ "create", "Movable Subject", "--path", "notes" })
+    assert_eq(code, 0, "created a concept to move")
+    local matches = vim.fn.glob(test_project .. "/.okfw/notes/movable-subject--*.md", false, true)
+    assert_eq(#matches, 1, "found the created concept")
+
+    if #matches == 1 then
+        local target_rel = "/notes/" .. vim.fn.fnamemodify(matches[1], ":t")
+        local lcode = run_okfw({ "create", "Mover Linker", "--body", "See [M](" .. target_rel .. ")." })
+        assert_eq(lcode, 0, "created a linking concept")
+
+        vim.cmd("edit " .. vim.fn.fnameescape(matches[1]))
+        okfw.move_note(nil, "archive/")
+        vim.wait(8000, function() return vim.fn.expand("%:p"):match("archive") ~= nil end)
+
+        assert_true(vim.fn.expand("%:p"):match("archive") ~= nil, "buffer followed the concept to its new path")
+        assert_true(vim.fn.filereadable(vim.fn.expand("%:p")) == 1, "the concept exists at its new path")
+        assert_eq(vim.fn.filereadable(matches[1]), 0, "the old file is gone")
+
+        -- The inbound link must now name the new location.
+        local linkers = vim.fn.glob(test_project .. "/.okfw/mover-linker--*.md", false, true)
+        if #linkers == 1 then
+            local body = table.concat(vim.fn.readfile(linkers[1]), "\n")
+            assert_true(body:find("/archive/", 1, true) ~= nil, "inbound link was retargeted to archive/")
+        end
+        -- Nothing may be left dangling.
+        local vcode, vout = run_okfw({ "validate", "--okf" })
+        assert_eq(vcode, 0, "bundle still conformant after the move")
+        assert_true(vout:find("0 broken link", 1, true) ~= nil, "no broken links after the move")
+    end
+end
+
+-- Test 33: :OkfwDelete confirms first, then removes the concept and its buffer.
+log("")
+log("Test 33: OkfwDelete")
+if plenary_ok then
+    local code = run_okfw({ "create", "Deletable Subject" })
+    assert_eq(code, 0, "created a concept to delete")
+    local matches = vim.fn.glob(test_project .. "/.okfw/deletable-subject--*.md", false, true)
+    assert_eq(#matches, 1, "found the created concept")
+
+    if #matches == 1 then
+        local real_confirm = vim.fn.confirm
+        vim.cmd("edit " .. vim.fn.fnameescape(matches[1]))
+
+        -- Declining must leave the file alone: the destructive path is opt-in.
+        vim.fn.confirm = function() return 1 end -- "&No"
+        vim.cmd("OkfwDelete")
+        vim.wait(600)
+        assert_eq(vim.fn.filereadable(matches[1]), 1, "declining the prompt keeps the file")
+
+        -- Confirming removes it.
+        vim.fn.confirm = function() return 2 end -- "&Yes"
+        vim.cmd("OkfwDelete")
+        vim.wait(8000, function() return vim.fn.filereadable(matches[1]) == 0 end)
+        assert_eq(vim.fn.filereadable(matches[1]), 0, "confirming the prompt deletes the file")
+
+        vim.fn.confirm = real_confirm
+
+        -- And it is gone from the search index, not merely from disk.
+        local scode, sout = run_okfw({ "search", "Deletable", "--json" })
+        assert_eq(scode, 0, "search runs after the delete")
+        local ok2, hits = pcall(vim.json.decode, sout)
+        if ok2 and type(hits) == "table" then
+            assert_eq(#hits, 0, "deleted concept is gone from the search index")
+        end
+    end
 end
 
 -- Summary

@@ -176,18 +176,15 @@ local function create_commands()
             elseif arg == "--type" and args_list[i + 1] then
                 search_opts.type = args_list[i + 1]
                 i = i + 2
+            elseif arg == "--kind" and args_list[i + 1] then
+                search_opts.kind = args_list[i + 1]
+                i = i + 2
             elseif arg == "--status" and args_list[i + 1] then
                 search_opts.status = args_list[i + 1]
                 i = i + 2
-            elseif arg == "--priority" and args_list[i + 1] then
-                search_opts.priority = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--due-before" and args_list[i + 1] then
-                search_opts.due_before = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--due-after" and args_list[i + 1] then
-                search_opts.due_after = args_list[i + 1]
-                i = i + 2
+            elseif arg == "--stale" then
+                search_opts.stale = true
+                i = i + 1
             elseif arg == "--tag" and args_list[i + 1] then
                 search_opts.tags = search_opts.tags or {}
                 table.insert(search_opts.tags, args_list[i + 1])
@@ -225,15 +222,15 @@ local function create_commands()
 
             -- Complete values after flags
             if prev == "--type" then
-                return { "note", "todo", "daily-note", "issue" }
+                return { "note", "daily-note", "issue" }
             end
             if prev == "--status" then
-                return { "open", "in_progress", "closed" }
+                return { "draft", "stable", "deprecated" }
             end
-            if prev == "--priority" then
-                return { "high", "medium", "low" }
+            if prev == "--kind" then
+                return { "note", "daily-note", "issue" }
             end
-            if prev == "--project" or prev == "--due-before" or prev == "--due-after" or prev == "--tag" then
+            if prev == "--project" or prev == "--tag" then
                 return {}
             end
 
@@ -243,7 +240,10 @@ local function create_commands()
                 used[a] = true
             end
             local completions = {}
-            for _, flag in ipairs({ "--project", "--type", "--status", "--priority", "--due-before", "--due-after", "--tag" }) do
+            local flags = {
+                "--project", "--type", "--kind", "--status", "--stale", "--tag",
+            }
+            for _, flag in ipairs(flags) do
                 if not used[flag] then
                     table.insert(completions, flag)
                 end
@@ -375,6 +375,35 @@ local function create_commands()
         desc = "Index concepts",
     })
 
+    -- Delete / move
+    vim.api.nvim_create_user_command("OkfwDelete", function(opts)
+        local okfw = require("okfw")
+        -- No argument means the concept in the current buffer.
+        okfw.delete_note(opts.args ~= "" and vim.fn.fnamemodify(opts.args, ":p") or nil)
+    end, {
+        nargs = "?",
+        complete = "file",
+        desc = "Delete the current concept (asks first) and its index/graph entries",
+    })
+
+    vim.api.nvim_create_user_command("OkfwMove", function(opts)
+        local okfw = require("okfw")
+        local args = vim.split(vim.trim(opts.args), "%s+", { trimempty = true })
+        if #args == 0 then
+            -- Prompt for a destination for the current buffer's concept.
+            okfw.move_note(nil, nil)
+        elseif #args == 1 then
+            -- One argument is the destination; the source is the current buffer.
+            okfw.move_note(nil, args[1])
+        else
+            okfw.move_note(vim.fn.fnamemodify(args[1], ":p"), args[2])
+        end
+    end, {
+        nargs = "*",
+        complete = "file",
+        desc = "Move/rename the current concept, repairing links (:OkfwMove [src] dest)",
+    })
+
     -- Tags
     vim.api.nvim_create_user_command("OkfwRefreshTags", function()
         require("okfw").refresh_tags()
@@ -382,91 +411,6 @@ local function create_commands()
         desc = "Refresh tag cache",
     })
 
-    -- Todo commands
-    vim.api.nvim_create_user_command("OkfwTodo", function(opts)
-        local okfw = require("okfw")
-        local args_parsed = {}
-
-        -- Parse args for --due, --priority, --project
-        local args_list = vim.split(opts.args, "%s+")
-        local i = 1
-        local title_parts = {}
-        while i <= #args_list do
-            local arg = args_list[i]
-            if arg == "--due" and args_list[i + 1] then
-                args_parsed.due = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--priority" and args_list[i + 1] then
-                args_parsed.priority = args_list[i + 1]
-                i = i + 2
-            elseif arg == "--project" and args_list[i + 1] then
-                args_parsed.project = args_list[i + 1]
-                i = i + 2
-            else
-                table.insert(title_parts, arg)
-                i = i + 1
-            end
-        end
-
-        if #title_parts > 0 then
-            args_parsed.title = table.concat(title_parts, " ")
-        end
-
-        okfw.todo(args_parsed)
-    end, {
-        nargs = "*",
-        complete = function(_, line)
-            local args = vim.split(line, "%s+")
-            local prev = args[#args - 1] or ""
-
-            -- Complete values after flags
-            if prev == "--priority" then
-                return { "high", "medium", "low" }
-            end
-            if prev == "--due" or prev == "--project" then
-                return {}
-            end
-
-            -- Complete flags (filter out already-used ones)
-            local used = {}
-            for _, a in ipairs(args) do
-                used[a] = true
-            end
-            local completions = {}
-            if not used["--due"] then
-                table.insert(completions, "--due")
-            end
-            if not used["--priority"] then
-                table.insert(completions, "--priority")
-            end
-            if not used["--project"] then
-                table.insert(completions, "--project")
-            end
-            return completions
-        end,
-        desc = "Create new todo (--due DATE --priority high/medium/low --project NAME)",
-    })
-
-    vim.api.nvim_create_user_command("OkfwTodoList", function(opts)
-        local okfw = require("okfw")
-        local list_opts = {}
-
-        if opts.args == "today" then
-            list_opts.today = true
-        elseif opts.args == "week" then
-            list_opts.this_week = true
-        elseif opts.args ~= "" then
-            list_opts.project = opts.args
-        end
-
-        okfw.todo_list(list_opts)
-    end, {
-        nargs = "?",
-        complete = function()
-            return { "today", "week" }
-        end,
-        desc = "Generate todo list markdown",
-    })
 end
 
 -- Create commands when plugin loads

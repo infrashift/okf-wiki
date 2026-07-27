@@ -7,13 +7,10 @@ M.setup = function(opts)
 end
 
 M.create_note = function(opts_or_project, project)
-    local opts = {}
-
     -- Handle legacy call signature: create_note(_, project)
+    local opts
     if type(opts_or_project) == "string" then
-        opts = {
-            project = project,
-        }
+        opts = { project = project }
     else
         opts = opts_or_project or {}
     end
@@ -228,214 +225,6 @@ M.daily_picker = function(opts)
     })
 end
 
--- Todo management functions
-
--- Create a new todo
-M.todo = function(opts)
-    opts = opts or {}
-
-    local title = opts.title
-    if not title or title == "" then
-        title = vim.fn.input("Todo: ")
-        if title == "" then return end
-    end
-
-    local args = { "todo", title }
-
-    if opts.project and opts.project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, opts.project)
-    end
-
-    if opts.due and opts.due ~= "" then
-        table.insert(args, "--due")
-        table.insert(args, opts.due)
-    end
-
-    if opts.priority and opts.priority ~= "" then
-        table.insert(args, "--priority")
-        table.insert(args, opts.priority)
-    end
-
-    local created_file = ""
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = args,
-        on_stdout = function(_, data)
-            local match = data:match("File: (.+)")
-            if match then
-                created_file = match
-            end
-        end,
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    print("Todo created: " .. title)
-                    if created_file ~= "" and vim.fn.filereadable(created_file) == 1 then
-                        vim.cmd("edit " .. vim.fn.fnameescape(created_file))
-                    end
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    if err ~= "" then
-                        vim.notify("Failed to create todo: " .. err, vim.log.levels.ERROR)
-                    else
-                        vim.notify("Failed to create todo", vim.log.levels.ERROR)
-                    end
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
--- Set the status of a todo (open, in_progress, closed)
-M.set_status = function(status, file_path)
-    file_path = file_path or vim.fn.expand("%:p")
-    if file_path == "" then
-        print("No todo specified")
-        return
-    end
-
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = { "set-status", file_path, status },
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    local result = table.concat(j:result(), "\n")
-                    print(result)
-                    -- Reload current buffer if it's the todo
-                    if vim.fn.expand("%:p") == file_path or vim.fn.expand("%:p"):match(file_path) then
-                        vim.cmd("edit!")
-                    end
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    print("Failed to set status: " .. err)
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
--- Add tags to a concept
-M.add_tags = function(tags, file_path)
-    file_path = file_path or vim.fn.expand("%:p")
-    if file_path == "" then
-        print("No concept specified")
-        return
-    end
-    if type(tags) == "string" then
-        tags = vim.split(tags, "%s+", { trimempty = true })
-    end
-    if #tags == 0 then
-        print("No tags specified")
-        return
-    end
-
-    local args = { "add-tags", file_path }
-    for _, t in ipairs(tags) do
-        table.insert(args, t)
-    end
-
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = args,
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    local result = table.concat(j:result(), "\n")
-                    print(result)
-                    if vim.fn.expand("%:p") == file_path or vim.fn.expand("%:p"):match(file_path) then
-                        vim.cmd("edit!")
-                    end
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    print("Failed to add tags: " .. err)
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
--- Validate a concept's frontmatter against the CUE schema
-M.validate = function(file_path)
-    file_path = file_path or vim.fn.expand("%:p")
-    if file_path == "" then
-        print("No concept specified")
-        return
-    end
-
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = { "validate", file_path },
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    local result = table.concat(j:result(), "\n")
-                    print(result)
-                else
-                    local err = table.concat(j:stderr_result(), "\n")
-                    print("Validation failed: " .. err)
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
--- Generate todo list markdown file
-M.todo_list = function(opts)
-    opts = opts or {}
-
-    local args = { "todo-list" }
-
-    if opts.project and opts.project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, opts.project)
-    end
-
-    if opts.today then
-        table.insert(args, "--today")
-    end
-
-    if opts.this_week then
-        table.insert(args, "--this-week")
-    end
-
-    if opts.output and opts.output ~= "" then
-        table.insert(args, "--output")
-        table.insert(args, opts.output)
-    end
-
-    local output_file = ""
-    local job = require('plenary.job'):new({
-        command = M.config.bin,
-        args = args,
-        on_stdout = function(_, data)
-            local match = data:match("Output: (.+)")
-            if match then
-                output_file = match
-            end
-        end,
-        on_exit = function(j, return_val)
-            vim.schedule(function()
-                if return_val == 0 then
-                    local result = table.concat(j:result(), "\n")
-                    print(result)
-                    if output_file ~= "" and vim.fn.filereadable(output_file) == 1 then
-                        vim.cmd("vsplit " .. vim.fn.fnameescape(output_file))
-                    end
-                else
-                    print("Failed to generate todo list")
-                end
-            end)
-        end,
-    })
-    job:start()
-end
-
 -- Template definitions matching CLI
 M.templates = {
     {
@@ -465,11 +254,6 @@ M.templates = {
     {
         name = "daily",
         description = "Daily note for thoughts, tasks, and reflections",
-    },
-    {
-        name = "todo",
-        description = "Actionable task with status tracking",
-        type = "todo",
     },
     {
         name = "issue",
@@ -663,6 +447,110 @@ M.set_project = function(file_path, project)
                 else
                     local err = table.concat(j:stderr_result(), "\n")
                     print("Failed to set project: " .. err)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Delete a concept: the file plus its search-index entry, graph node, and
+-- index.md line.
+--
+-- The confirmation happens here rather than in the CLI. plenary.job hands the
+-- child a pipe, and `okfw delete` refuses to prompt on anything that is not a
+-- terminal — so the plugin asks, then passes --force.
+M.delete_note = function(file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        vim.notify("No concept specified", vim.log.levels.WARN)
+        return
+    end
+
+    local name = vim.fn.fnamemodify(file_path, ":t")
+    if vim.fn.confirm("Delete concept " .. name .. "?", "&No\n&Yes", 1) ~= 2 then
+        return
+    end
+
+    local bufnr = vim.fn.bufnr(file_path)
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "delete", file_path, "--force", "--json" },
+        cwd = vim.fn.getcwd(),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("Failed to delete: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+                local ok, res = pcall(vim.json.decode, table.concat(j:result(), "\n"))
+                vim.notify("Deleted " .. name)
+                -- Dangling links are expected, not a failure: OKF requires
+                -- consumers to tolerate a link whose target does not exist.
+                if ok and res and res.inbound and #res.inbound > 0 then
+                    vim.notify(
+                        #res.inbound .. " concept(s) still link to it: " .. table.concat(res.inbound, ", "),
+                        vim.log.levels.WARN
+                    )
+                end
+                -- The buffer now names a file that is gone.
+                if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) then
+                    vim.api.nvim_buf_delete(bufnr, { force = true })
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Move or rename a concept, repairing links at both ends. The concept keeps its
+-- id, so `parent` hierarchies survive.
+M.move_note = function(file_path, dest)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        vim.notify("No concept specified", vim.log.levels.WARN)
+        return
+    end
+
+    if not dest or dest == "" then
+        dest = vim.fn.input({
+            prompt = "Move to (directory, or path ending in .md): ",
+            completion = "dir",
+        })
+        if dest == "" then return end
+    end
+
+    local bufnr = vim.fn.bufnr(file_path)
+    local was_current = vim.fn.expand("%:p") == file_path
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "move", file_path, dest, "--json" },
+        cwd = vim.fn.getcwd(),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("Failed to move: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+                local ok, res = pcall(vim.json.decode, table.concat(j:result(), "\n"))
+                if not ok or not res or not res.to then
+                    vim.notify("Moved, but could not read the new path", vim.log.levels.WARN)
+                    return
+                end
+                local msg = "Moved to " .. (res.to_rel or res.to)
+                if res.rewrote and #res.rewrote > 0 then
+                    msg = msg .. " (rewrote links in " .. #res.rewrote .. " concept(s))"
+                end
+                vim.notify(msg)
+                -- Follow the concept: reopen at its new path and drop the buffer
+                -- still pointing at the old one.
+                if was_current then
+                    vim.cmd("edit " .. vim.fn.fnameescape(res.to))
+                end
+                if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) and vim.fn.bufnr(res.to) ~= bufnr then
+                    vim.api.nvim_buf_delete(bufnr, { force = true })
                 end
             end)
         end,
