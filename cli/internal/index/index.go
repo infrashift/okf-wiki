@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
@@ -15,7 +16,7 @@ type ConceptDoc struct {
 	ID          string   `json:"id"`
 	Title       string   `json:"title"`
 	Type        string   `json:"type"`                  // OKF free-form concept kind
-	Kind        string   `json:"kind"`                  // structured: "note", "todo", "daily-note", "issue"
+	Kind        string   `json:"kind"`                  // structured: "note", "daily-note", "issue"
 	Description string   `json:"description,omitempty"` // OKF one-sentence summary
 	Project     string   `json:"project"`
 	Tags        []string `json:"tags"`
@@ -24,11 +25,9 @@ type ConceptDoc struct {
 	Created     string   `json:"created"`
 	Timestamp   string   `json:"timestamp,omitempty"` // last meaningful change
 
-	// Todo-specific fields
-	Status    string `json:"status,omitempty"`    // "open", "in_progress", "closed"
-	Due       string `json:"due,omitempty"`       // YYYY-MM-DD
-	Completed string `json:"completed,omitempty"` // YYYY-MM-DD
-	Priority  string `json:"priority,omitempty"`  // "high", "medium", "low"
+	// OKF lifecycle (section 5.4-5.5)
+	Status     string `json:"status,omitempty"`      // draft | stable | deprecated
+	StaleAfter string `json:"stale_after,omitempty"` // YYYY-MM-DD
 }
 
 // SearchResult represents a single search hit
@@ -43,30 +42,24 @@ type SearchResult struct {
 	Score    float64  `json:"score"`
 	Snippet  string   `json:"snippet,omitempty"`
 
-	// Todo-specific fields
-	Status    string `json:"status,omitempty"`
-	Due       string `json:"due,omitempty"`
-	Completed string `json:"completed,omitempty"`
-	Priority  string `json:"priority,omitempty"`
+	// OKF lifecycle
+	Status     string `json:"status,omitempty"`
+	StaleAfter string `json:"stale_after,omitempty"`
 }
 
 // SearchOptions configures search behavior
 type SearchOptions struct {
-	Query    string   // Full-text query
-	Project  string   // Filter by project
-	Type     string   // Filter by OKF type (free-form)
-	Kind     string   // Filter by structured kind (note/todo/daily-note/issue)
-	Tags     []string // Filter by tags (AND)
-	Limit    int      // Max results (default 20)
-	Offset   int      // Pagination offset
+	Query   string   // Full-text query
+	Project string   // Filter by project
+	Type    string   // Filter by OKF type (free-form)
+	Kind    string   // Filter by structured kind (note/daily-note/issue)
+	Tags    []string // Filter by tags (AND)
+	Limit   int      // Max results (default 20)
+	Offset  int      // Pagination offset
 
-	// Todo-specific filters
-	Status          string // Filter by status (open/in_progress/closed)
-	Priority        string // Filter by priority (high/medium/low)
-	DueBefore       string // Filter todos due before this date (YYYY-MM-DD)
-	DueAfter        string // Filter todos due after this date (YYYY-MM-DD)
-	CompletedAfter  string // Filter todos completed after this date
-	CompletedBefore string // Filter todos completed before this date
+	// OKF lifecycle filters
+	Status string // Filter by lifecycle status (draft/stable/deprecated)
+	Stale  bool   // Only concepts whose stale_after has passed
 }
 
 func CreateMapping() mapping.IndexMapping {
@@ -93,11 +86,9 @@ func CreateMapping() mapping.IndexMapping {
 	// Description is full-text searchable
 	indexMapping.DefaultMapping.AddFieldMappingsAt("description", textMapping)
 
-	// Todo-specific keyword fields
+	// OKF lifecycle keyword fields
 	indexMapping.DefaultMapping.AddFieldMappingsAt("status", keywordMapping)
-	indexMapping.DefaultMapping.AddFieldMappingsAt("priority", keywordMapping)
-	indexMapping.DefaultMapping.AddFieldMappingsAt("due", keywordMapping)
-	indexMapping.DefaultMapping.AddFieldMappingsAt("completed", keywordMapping)
+	indexMapping.DefaultMapping.AddFieldMappingsAt("stale_after", keywordMapping)
 
 	return indexMapping
 }
@@ -118,6 +109,30 @@ func IndexDocument(idx bleve.Index, doc *ConceptDoc) error {
 // DeleteDocument removes a document from the index
 func DeleteDocument(idx bleve.Index, id string) error {
 	return idx.Delete(id)
+}
+
+// AllDocIDs returns every document id currently in the index. Used to find
+// indexed concepts whose file no longer exists, since nothing else in the
+// index knows a document has become stale.
+func AllDocIDs(idx bleve.Index) ([]string, error) {
+	count, err := idx.DocCount()
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, nil
+	}
+	req := bleve.NewSearchRequest(bleve.NewMatchAllQuery())
+	req.Size = int(count)
+	res, err := idx.Search(req)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(res.Hits))
+	for _, hit := range res.Hits {
+		ids = append(ids, hit.ID)
+	}
+	return ids, nil
 }
 
 // Search performs a search with the given options
@@ -171,48 +186,20 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		queries = append(queries, kindQuery)
 	}
 
-	// Status filter (for todos)
+	// Lifecycle status filter
 	if opts.Status != "" {
 		statusQuery := bleve.NewTermQuery(opts.Status)
 		statusQuery.SetField("status")
 		queries = append(queries, statusQuery)
 	}
 
-	// Priority filter (for todos)
-	if opts.Priority != "" {
-		priorityQuery := bleve.NewTermQuery(opts.Priority)
-		priorityQuery.SetField("priority")
-		queries = append(queries, priorityQuery)
-	}
-
-	// Due date range filters
-	if opts.DueAfter != "" || opts.DueBefore != "" {
-		min := opts.DueAfter
-		max := opts.DueBefore
-		if min == "" {
-			min = "0000-00-00"
-		}
-		if max == "" {
-			max = "9999-99-99"
-		}
-		dueQuery := bleve.NewTermRangeInclusiveQuery(min, max, &[]bool{true}[0], &[]bool{true}[0])
-		dueQuery.SetField("due")
-		queries = append(queries, dueQuery)
-	}
-
-	// Completed date range filters
-	if opts.CompletedAfter != "" || opts.CompletedBefore != "" {
-		min := opts.CompletedAfter
-		max := opts.CompletedBefore
-		if min == "" {
-			min = "0000-00-00"
-		}
-		if max == "" {
-			max = "9999-99-99"
-		}
-		completedQuery := bleve.NewTermRangeInclusiveQuery(min, max, &[]bool{true}[0], &[]bool{true}[0])
-		completedQuery.SetField("completed")
-		queries = append(queries, completedQuery)
+	// Stale filter: stale_after is an absolute date, so "stale" is everything
+	// with a stale_after at or before today (OKF section 5.5, inclusive).
+	if opts.Stale {
+		today := time.Now().Format("2006-01-02")
+		staleQuery := bleve.NewTermRangeInclusiveQuery("0000-00-00", today, &[]bool{true}[0], &[]bool{true}[0])
+		staleQuery.SetField("stale_after")
+		queries = append(queries, staleQuery)
 	}
 
 	// Combine all queries with AND
@@ -229,7 +216,7 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 	searchRequest := bleve.NewSearchRequest(finalQuery)
 	searchRequest.Size = opts.Limit
 	searchRequest.From = opts.Offset
-	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "tags", "file_path", "status", "due", "completed", "priority"}
+	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "tags", "file_path", "status", "stale_after"}
 
 	// Add highlighting for body matches
 	if opts.Query != "" {
@@ -273,18 +260,12 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 				}
 			}
 		}
-		// Extract todo-specific fields
+		// Extract OKF lifecycle fields
 		if status, ok := hit.Fields["status"].(string); ok {
 			result.Status = status
 		}
-		if due, ok := hit.Fields["due"].(string); ok {
-			result.Due = due
-		}
-		if completed, ok := hit.Fields["completed"].(string); ok {
-			result.Completed = completed
-		}
-		if priority, ok := hit.Fields["priority"].(string); ok {
-			result.Priority = priority
+		if staleAfter, ok := hit.Fields["stale_after"].(string); ok {
+			result.StaleAfter = staleAfter
 		}
 
 		// Extract highlight snippet
@@ -327,6 +308,14 @@ func FormatSearchResults(results []SearchResult, total int) string {
 		if r.Project != "" {
 			sb.WriteString(fmt.Sprintf(" | Project: %s", r.Project))
 		}
+		// Absent status means stable (OKF section 5.4), so only call out the
+		// states worth noticing.
+		if r.Status == "draft" || r.Status == "deprecated" {
+			sb.WriteString(fmt.Sprintf(" | Status: %s", r.Status))
+		}
+		if r.IsStale(time.Now()) {
+			sb.WriteString(fmt.Sprintf(" | STALE since %s", r.StaleAfter))
+		}
 		sb.WriteString("\n")
 		if len(r.Tags) > 0 {
 			sb.WriteString(fmt.Sprintf("   Tags: %s\n", strings.Join(r.Tags, ", ")))
@@ -343,45 +332,16 @@ func FormatSearchResults(results []SearchResult, total int) string {
 	return sb.String()
 }
 
-// FormatTodoResults formats todo results for terminal display
-func FormatTodoResults(results []SearchResult, total int) string {
-	if len(results) == 0 {
-		return "No todos found."
+// IsStale reports whether the hit's stale_after has passed, inclusive of the
+// boundary day (OKF section 5.5).
+func (r SearchResult) IsStale(today time.Time) bool {
+	if r.StaleAfter == "" {
+		return false
 	}
-
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Found %d todos:\n\n", total))
-
-	for i, r := range results {
-		// Status indicator
-		statusIcon := "[ ]"
-		switch r.Status {
-		case "in_progress":
-			statusIcon = "[~]"
-		case "closed":
-			statusIcon = "[x]"
-		}
-
-		sb.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, statusIcon, r.Title))
-		sb.WriteString(fmt.Sprintf("   ID: %s | Status: %s", r.ID, r.Status))
-		if r.Priority != "" {
-			sb.WriteString(fmt.Sprintf(" | Priority: %s", r.Priority))
-		}
-		if r.Project != "" {
-			sb.WriteString(fmt.Sprintf(" | Project: %s", r.Project))
-		}
-		sb.WriteString("\n")
-		if r.Due != "" {
-			sb.WriteString(fmt.Sprintf("   Due: %s\n", r.Due))
-		}
-		if r.Completed != "" {
-			sb.WriteString(fmt.Sprintf("   Completed: %s\n", r.Completed))
-		}
-		if r.FilePath != "" {
-			sb.WriteString(fmt.Sprintf("   File: %s\n", r.FilePath))
-		}
-		sb.WriteString("\n")
+	cutoff, err := time.Parse("2006-01-02", r.StaleAfter)
+	if err != nil {
+		return false
 	}
-
-	return sb.String()
+	y, m, d := today.Date()
+	return !time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Before(cutoff)
 }

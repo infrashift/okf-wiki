@@ -67,7 +67,12 @@ func NoteFilename(dir, title, id string) string {
 }
 
 // SanitizeSubdir cleans a user/agent-requested bundle subdirectory and rejects
-// any path that would escape the bundle root. Returns "" if invalid.
+// any path that would escape the bundle root or land inside the bundle's own
+// internals. Returns "" if invalid.
+//
+// Dot-directories are rejected because SkipWalkDir skips them: a concept written
+// to .index/ or .todos/ would sit inside the search index or the generated todo
+// output, and would be invisible to search, index.md, and every other walk.
 func SanitizeSubdir(p string) string {
 	p = strings.TrimSpace(filepath.ToSlash(p))
 	p = strings.TrimPrefix(p, "/")
@@ -77,6 +82,11 @@ func SanitizeSubdir(p string) string {
 	}
 	if cleaned == ".." || strings.HasPrefix(cleaned, "../") {
 		return ""
+	}
+	for _, seg := range strings.Split(cleaned, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return ""
+		}
 	}
 	return cleaned
 }

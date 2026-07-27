@@ -64,40 +64,11 @@ func CreateConcept(cfg *config.Config, spec Spec) (string, string, error) {
 		content = strings.TrimRight(content, "\n") + "\n\n" + strings.TrimRight(spec.Body, "\n") + "\n"
 	}
 
-	filePath := filepath.Join(outputDir, NoteFilename(outputDir, spec.Title, id))
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write file: %w", err)
-	}
-	return filePath, id, nil
-}
-
-// CreateTodo writes a new todo concept and returns its absolute path and id.
-// The caller is responsible for AutoSync.
-func CreateTodo(cfg *config.Config, title, project, dir, due, priority string, tags []string) (string, string, error) {
-	id := uuid.Must(uuid.NewV7()).String()
-
-	tmpl, err := templates.Get("todo")
-	if err != nil {
-		return "", "", fmt.Errorf("failed to get todo template: %w", err)
-	}
-	content, err := tmpl.GenerateNoteWithOptions(id, title, project, tags, &templates.TodoOptions{
-		Status:   "open",
-		Due:      due,
-		Priority: priority,
-	})
-	if err != nil {
-		return "", "", fmt.Errorf("failed to generate todo: %w", err)
-	}
-
-	outputDir, err := ConceptDir(cfg, dir, project)
-	if err != nil {
+	if err := ValidateGenerated([]byte(content)); err != nil {
 		return "", "", err
 	}
-	if err := os.MkdirAll(outputDir, 0755); err != nil {
-		return "", "", fmt.Errorf("failed to create directory: %w", err)
-	}
 
-	filePath := filepath.Join(outputDir, NoteFilename(outputDir, title, id))
+	filePath := filepath.Join(outputDir, NoteFilename(outputDir, spec.Title, id))
 	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
 		return "", "", fmt.Errorf("failed to write file: %w", err)
 	}

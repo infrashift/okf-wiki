@@ -1,11 +1,10 @@
 package bundle
 
 import (
-	"bufio"
-	"bytes"
-	"fmt"
-	"strings"
+	"sort"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // TouchTimestamp ensures the updates map stamps a fresh `timestamp` unless the
@@ -20,221 +19,104 @@ func TouchTimestamp(updates map[string]string) map[string]string {
 	return updates
 }
 
-// UpdateFrontmatter updates specific fields in YAML frontmatter.
+// sortedKeys returns a map's keys in a stable order. Appended fields used to
+// land in Go's randomized map order, so two runs of the same update could
+// produce different frontmatter.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// UpdateFrontmatter sets fields in a concept's YAML frontmatter, bumping
+// `timestamp` unless the caller supplied one. Keys may be dotted paths
+// ("okfw.status"); intermediate mappings are created as needed.
 func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
 	updates = TouchTimestamp(updates)
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	updatedFields := make(map[string]bool)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		updated := false
-
-		for field, value := range updates {
-			if strings.HasPrefix(line, field+":") {
-				newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-				updatedFields[field] = true
-				updated = true
-				break
+	out, err := Edit(content, func(m *yaml.Node) error {
+		for _, k := range sortedKeys(updates) {
+			if err := SetPath(m, k, updates[k]); err != nil {
+				return err
 			}
 		}
-
-		if !updated {
-			newFrontmatter.WriteString(line + "\n")
-		}
+		return syncGeneratedAt(m, updates["timestamp"])
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	for field, value := range updates {
-		if !updatedFields[field] {
-			newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-		}
+	if err := guardMutation(content, out); err != nil {
+		return nil, err
 	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return out, nil
 }
 
-// UpdateFrontmatterRemove updates fields and removes specified fields from frontmatter.
+// syncGeneratedAt keeps `generated.at` equal to `timestamp`. Both record when the
+// content last meaningfully changed, and ValidateBusinessRules rejects a
+// disagreement, so exactly one code path updates both.
+//
+// It only touches an existing `generated` block: creating one would need a
+// `generated.by` actor, and inventing an attribution is worse than omitting it.
+func syncGeneratedAt(m *yaml.Node, timestamp string) error {
+	if timestamp == "" {
+		return nil
+	}
+	if MapGet(m, "generated") == nil {
+		return nil
+	}
+	return SetPath(m, "generated.at", timestamp)
+}
+
+// UpdateFrontmatterRemove sets fields and removes others. Removals are applied
+// first so a field can be moved in a single call.
 func UpdateFrontmatterRemove(content []byte, updates map[string]string, remove []string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
 	updates = TouchTimestamp(updates)
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	// Convert remove slice to set for easy lookup
-	removeSet := make(map[string]bool)
-	for _, field := range remove {
-		removeSet[field] = true
-	}
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	updatedFields := make(map[string]bool)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		skip := false
-
-		// Check if this line should be removed
-		for field := range removeSet {
-			if strings.HasPrefix(line, field+":") {
-				skip = true
-				break
+	out, err := Edit(content, func(m *yaml.Node) error {
+		for _, path := range remove {
+			DeletePath(m, path)
+		}
+		for _, k := range sortedKeys(updates) {
+			if err := SetPath(m, k, updates[k]); err != nil {
+				return err
 			}
 		}
-
-		if skip {
-			continue
-		}
-
-		updated := false
-		for field, value := range updates {
-			if strings.HasPrefix(line, field+":") {
-				newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-				updatedFields[field] = true
-				updated = true
-				break
-			}
-		}
-
-		if !updated {
-			newFrontmatter.WriteString(line + "\n")
-		}
+		return syncGeneratedAt(m, updates["timestamp"])
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// Add any fields that weren't already present
-	for field, value := range updates {
-		if !updatedFields[field] {
-			newFrontmatter.WriteString(fmt.Sprintf("%s: %q\n", field, value))
-		}
+	if err := guardMutation(content, out); err != nil {
+		return nil, err
 	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return out, nil
 }
 
-// AddFrontmatterTags appends new tags to the tags: YAML list in frontmatter.
+// AddFrontmatterTags appends tags to the `tags` sequence, creating it when
+// absent. Tags already present are skipped, so the call is idempotent.
 func AddFrontmatterTags(content []byte, tags []string) ([]byte, error) {
-	if !bytes.HasPrefix(content, []byte("---")) {
-		return nil, fmt.Errorf("no frontmatter found")
-	}
-
-	rest := content[3:]
-	if len(rest) > 0 && rest[0] == '\n' {
-		rest = rest[1:]
-	}
-
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return nil, fmt.Errorf("frontmatter closing not found")
-	}
-
-	frontmatter := rest[:endIdx]
-	afterFrontmatter := rest[endIdx+4:]
-
-	var newFrontmatter bytes.Buffer
-	scanner := bufio.NewScanner(bytes.NewReader(frontmatter))
-	foundTags := false
-	inTagsList := false
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "tags:") {
-			foundTags = true
-			// Check for inline empty array: "tags: []"
-			trimmed := strings.TrimSpace(strings.TrimPrefix(line, "tags:"))
-			if trimmed == "[]" {
-				// Replace inline empty array with multiline list header
-				newFrontmatter.WriteString("tags:\n")
-				for _, tag := range tags {
-					newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-				}
-				// Don't enter inTagsList mode — tags are already written
+	out, err := Edit(content, func(m *yaml.Node) error {
+		existing := map[string]bool{}
+		for _, t := range SeqStrings(m, "tags") {
+			existing[t] = true
+		}
+		for _, t := range tags {
+			if existing[t] {
 				continue
 			}
-			newFrontmatter.WriteString(line + "\n")
-			inTagsList = true
-			continue
-		}
-
-		// If we're in the tags list, look for list items (lines starting with "  - ")
-		if inTagsList {
-			if strings.HasPrefix(strings.TrimSpace(line), "- ") {
-				newFrontmatter.WriteString(line + "\n")
-				continue
+			if err := AppendToSeq(m, "tags", QuotedScalar(t)); err != nil {
+				return err
 			}
-			// End of tags list - append new tags before this line
-			for _, tag := range tags {
-				newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-			}
-			inTagsList = false
+			existing[t] = true
 		}
-
-		newFrontmatter.WriteString(line + "\n")
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-
-	// If tags list was the last section in frontmatter
-	if inTagsList {
-		for _, tag := range tags {
-			newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-		}
+	if err := guardMutation(content, out); err != nil {
+		return nil, err
 	}
-
-	// If no tags: field existed, add one
-	if !foundTags {
-		newFrontmatter.WriteString("tags:\n")
-		for _, tag := range tags {
-			newFrontmatter.WriteString(fmt.Sprintf("  - %q\n", tag))
-		}
-	}
-
-	var result bytes.Buffer
-	result.WriteString("---\n")
-	result.Write(newFrontmatter.Bytes())
-	result.WriteString("---")
-	result.Write(afterFrontmatter)
-
-	return result.Bytes(), nil
+	return out, nil
 }

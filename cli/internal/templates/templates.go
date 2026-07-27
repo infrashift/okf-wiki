@@ -29,9 +29,6 @@ var featureTemplate string
 //go:embed daily.md
 var dailyTemplate string
 
-//go:embed todo.md
-var todoTemplate string
-
 //go:embed issue.md
 var issueTemplate string
 
@@ -39,16 +36,9 @@ var issueTemplate string
 type Template struct {
 	Name        string
 	Description string
-	Kind        string // structured kind: "note" (default), "todo", "daily-note", "issue"
+	Kind        string // structured kind: "note" (default), "daily-note", "issue"
 	Tags        []string
 	Body        string
-}
-
-// TodoOptions holds todo-specific frontmatter options
-type TodoOptions struct {
-	Status   string // "open", "in_progress", "closed"
-	Due      string // YYYY-MM-DD
-	Priority string // "high", "medium", "low"
 }
 
 // TemplateData holds the data for template rendering
@@ -104,13 +94,6 @@ var BuiltinTemplates = map[string]*Template{
 		Tags:        []string{"daily"},
 		Body:        dailyTemplate,
 	},
-	"todo": {
-		Name:        "todo",
-		Description: "Actionable task with status tracking",
-		Kind:        "todo",
-		Tags:        []string{"todo"},
-		Body:        todoTemplate,
-	},
 	"issue": {
 		Name:        "issue",
 		Description: "Issue tracking like GitHub (bug, enhancement, question)",
@@ -155,11 +138,6 @@ func (t *Template) Render(data TemplateData) (string, error) {
 
 // GenerateFrontmatter generates YAML frontmatter for a template
 func (t *Template) GenerateFrontmatter(id, title, project string, extraTags []string) string {
-	return t.GenerateFrontmatterWithOptions(id, title, project, extraTags, nil)
-}
-
-// GenerateFrontmatterWithOptions generates YAML frontmatter with optional todo-specific fields
-func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, extraTags []string, todoOpts *TodoOptions) string {
 	now := time.Now()
 
 	// Merge template tags with extra tags
@@ -203,23 +181,6 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 		buf.WriteString(fmt.Sprintf("project: %q\n", project))
 	}
 
-	// Todo-specific fields
-	if kind == "todo" {
-		status := "open"
-		if todoOpts != nil && todoOpts.Status != "" {
-			status = todoOpts.Status
-		}
-		buf.WriteString(fmt.Sprintf("status: %q\n", status))
-
-		if todoOpts != nil && todoOpts.Due != "" {
-			buf.WriteString(fmt.Sprintf("due: %q\n", todoOpts.Due))
-		}
-
-		if todoOpts != nil && todoOpts.Priority != "" {
-			buf.WriteString(fmt.Sprintf("priority: %q\n", todoOpts.Priority))
-		}
-	}
-
 	buf.WriteString("tags:\n")
 	for _, tag := range allTags {
 		buf.WriteString(fmt.Sprintf("  - %q\n", tag))
@@ -235,12 +196,7 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 
 // GenerateNote generates a complete note from a template
 func (t *Template) GenerateNote(id, title, project string, extraTags []string) (string, error) {
-	return t.GenerateNoteWithOptions(id, title, project, extraTags, nil)
-}
-
-// GenerateNoteWithOptions generates a complete note with optional todo-specific fields
-func (t *Template) GenerateNoteWithOptions(id, title, project string, extraTags []string, todoOpts *TodoOptions) (string, error) {
-	frontmatter := t.GenerateFrontmatterWithOptions(id, title, project, extraTags, todoOpts)
+	frontmatter := t.GenerateFrontmatter(id, title, project, extraTags)
 
 	data := TemplateData{
 		ID:      id,

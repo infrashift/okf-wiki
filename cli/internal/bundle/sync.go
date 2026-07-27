@@ -50,10 +50,8 @@ func IndexFile(idx Indexer, filePath string) error {
 		FilePath:    filePath,
 		Created:     z.Created.Format("2006-01-02T15:04:05Z07:00"),
 		Timestamp:   z.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-		Status:      z.Status,
-		Due:         z.Due,
-		Completed:   z.Completed,
-		Priority:    z.Priority,
+		Status:      z.LifecycleStatus(),
+		StaleAfter:  z.StaleAfter,
 	}
 
 	return idx.Index(z.ID, doc)
@@ -93,6 +91,70 @@ func AutoSync(cfg *config.Config, filePath string) error {
 	}
 	defer store.Close()
 	return store.SyncFile(filePath, cfg.RootPath)
+}
+
+// LiveConceptIDs returns the frontmatter ids of every concept currently on disk
+// in the bundle.
+func LiveConceptIDs(root string) (map[string]bool, error) {
+	live := map[string]bool{}
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if SkipWalkDir(root, p, fi.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || IsReservedBase(fi.Name()) {
+			return nil
+		}
+		if id := config.ReadConceptID(p); id != "" {
+			live[id] = true
+		}
+		return nil
+	})
+	return live, err
+}
+
+// PruneIndex drops search-index entries whose concept file no longer exists and
+// returns how many were removed.
+//
+// Nothing used to do this: index.DeleteDocument had no callers, so a deleted
+// concept stayed in `okfw search` results indefinitely — search reports index
+// hits without stat-ing the file, and the only remedy was deleting .index by
+// hand.
+func PruneIndex(cfg *config.Config) (int, error) {
+	if _, err := os.Stat(cfg.IndexPath); err != nil {
+		return 0, nil // no search index yet — nothing to prune
+	}
+	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	if err != nil {
+		return 0, err
+	}
+	defer idx.Close()
+
+	indexed, err := index.AllDocIDs(idx)
+	if err != nil {
+		return 0, err
+	}
+	live, err := LiveConceptIDs(cfg.RootPath)
+	if err != nil {
+		return 0, err
+	}
+
+	removed := 0
+	for _, id := range indexed {
+		if live[id] {
+			continue
+		}
+		if err := index.DeleteDocument(idx, id); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 // WriteIndexFiles regenerates the auto-maintained index.md listing in every
@@ -163,7 +225,10 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 	for d := range dirs {
 		var b strings.Builder
 		if d == "" {
-			b.WriteString("---\nokf_version: \"0.1\"\n---\n\n")
+			// OKF v0.2 section 12: the bundle-root index.md is the only place
+			// frontmatter is permitted in an index file, and okf_version is
+			// the only key it may carry.
+			b.WriteString("---\nokf_version: \"" + config.OKFVersion + "\"\n---\n\n")
 		}
 		heading := d
 		if heading == "" {
@@ -196,5 +261,60 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 		}
 		count++
 	}
+
+	if err := pruneOrphanedIndexes(root, dirs); err != nil {
+		return count, err
+	}
 	return count, nil
+}
+
+// pruneOrphanedIndexes removes generated index.md files in directories that no
+// longer hold any concepts, and the directory itself once it is empty.
+//
+// Without this, emptying a directory left its listing behind still advertising
+// the concepts that used to be there — a generated file making false claims,
+// which `okfw delete` and `okfw move` now produce routinely. index.md is
+// okfw-owned and overwritten on every change, so removing one is in remit.
+func pruneOrphanedIndexes(root string, keep map[string]bool) error {
+	var stale []string
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if SkipWalkDir(root, p, fi.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if fi.Name() != "index.md" {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, filepath.Dir(p))
+		if rerr != nil {
+			return nil
+		}
+		d := filepath.ToSlash(rel)
+		if d == "." {
+			d = "" // the bundle root's index.md is always kept
+		}
+		if !keep[d] {
+			stale = append(stale, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, p := range stale {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		// Tidy up the directory when nothing else is left in it. Deliberately
+		// not recursive: os.Remove only succeeds on an empty directory, so a
+		// parent holding other content is untouched.
+		_ = os.Remove(filepath.Dir(p))
+	}
+	return nil
 }

@@ -1,467 +1,418 @@
 package index
 
 import (
-	"os"
+	"encoding/json"
+	"strings"
 	"testing"
+	"time"
 )
 
-// setupTestIndex creates a temporary Bleve index with test documents
-func setupTestIndex(t *testing.T) (string, func()) {
-	t.Helper()
-	tmpDir, err := os.MkdirTemp("", "okfw-index-test-*")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
+// Fixture ids, named so failures are readable.
+const (
+	idAuthNote  = "20260201100000-aaa" // note, stable
+	idDraftSpec = "20260202100000-bbb" // note, draft
+	idOldAPI    = "20260203100000-ccc" // note, deprecated + long stale
+	idDaily     = "20260204100000-ddd" // daily-note, no status
+	idIssue     = "20260205100000-eee" // issue, stale_after in the past
+	idFuture    = "20260206100000-fff" // note, stale_after far in the future
+)
 
-	indexPath := tmpDir + "/test.bleve"
+// setupTestIndex builds a temporary Bleve index and returns its path.
+func setupTestIndex(t *testing.T) string {
+	t.Helper()
+	indexPath := t.TempDir() + "/test.bleve"
 	idx, err := OpenOrCreateIndex(indexPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("Failed to create index: %v", err)
+		t.Fatalf("failed to create index: %v", err)
 	}
+
+	past := time.Now().AddDate(0, 0, -30).Format("2006-01-02")
+	future := time.Now().AddDate(5, 0, 0).Format("2006-01-02")
 
 	docs := []ConceptDoc{
 		{
-			ID:       "20260201100000-aaa",
-			Title:    "Authentication Design",
-			Type:     "note",
-			Project:  "backend",
-			Tags:     []string{"auth", "design"},
-			Body:     "OAuth2 implementation with JWT tokens",
-			FilePath: "/notes/auth-design.md",
-			Created:  "2026-02-01T10:00:00Z",
+			ID: idAuthNote, Title: "Authentication Design", Type: "note", Kind: "note",
+			Project: "backend", Tags: []string{"auth", "design"},
+			Body: "OAuth2 implementation with JWT tokens", FilePath: "/notes/auth-design.md",
+			Created: "2026-02-01T10:00:00Z", Status: "stable",
 		},
 		{
-			ID:       "20260202100000-bbb",
-			Title:    "Fix login bug",
-			Type:     "todo",
-			Project:  "backend",
-			Tags:     []string{"bug", "auth"},
-			Body:     "Users getting logged out after 10 minutes",
-			FilePath: "/notes/fix-login.md",
-			Created:  "2026-02-02T10:00:00Z",
-			Status:   "open",
-			Priority: "high",
-			Due:      "2026-02-15",
+			ID: idDraftSpec, Title: "Payments Spec", Type: "note", Kind: "note",
+			Project: "backend", Tags: []string{"payments"},
+			Body: "Draft of the payments integration", FilePath: "/notes/payments.md",
+			Created: "2026-02-02T10:00:00Z", Status: "draft",
 		},
 		{
-			ID:        "20260203100000-ccc",
-			Title:     "Update API docs",
-			Type:      "todo",
-			Project:   "docs",
-			Tags:      []string{"docs"},
-			Body:      "API documentation is outdated",
-			FilePath:  "/notes/update-docs.md",
-			Created:   "2026-02-03T10:00:00Z",
-			Status:    "closed",
-			Priority:  "medium",
-			Due:       "2026-02-10",
-			Completed: "2026-02-09",
+			ID: idOldAPI, Title: "Legacy API v1", Type: "note", Kind: "note",
+			Project: "docs", Tags: []string{"docs", "legacy"},
+			Body: "Superseded by v2", FilePath: "/notes/legacy-api.md",
+			Created: "2026-02-03T10:00:00Z", Status: "deprecated", StaleAfter: past,
 		},
 		{
-			ID:       "20260204100000-ddd",
-			Title:    "Daily 2026-02-04",
-			Type:     "daily-note",
-			Project:  "",
-			Tags:     []string{"daily"},
-			Body:     "Morning standup notes and planning",
-			FilePath: "/notes/daily-2026-02-04.md",
-			Created:  "2026-02-04T08:00:00Z",
+			ID: idDaily, Title: "Daily 2026-02-04", Type: "daily-note", Kind: "daily-note",
+			Tags: []string{"daily"},
+			Body: "Morning standup notes and planning", FilePath: "/notes/daily-2026-02-04.md",
+			Created: "2026-02-04T08:00:00Z",
 		},
 		{
-			ID:       "20260205100000-eee",
-			Title:    "Security audit findings",
-			Type:     "issue",
-			Project:  "backend",
-			Tags:     []string{"security", "audit"},
-			Body:     "Found XSS vulnerability in search endpoint",
-			FilePath: "/notes/security-audit.md",
-			Created:  "2026-02-05T10:00:00Z",
-			Status:   "open",
-			Priority: "high",
-			Due:      "2026-02-20",
+			ID: idIssue, Title: "Security audit findings", Type: "issue", Kind: "issue",
+			Project: "backend", Tags: []string{"security", "audit"},
+			Body: "Found XSS vulnerability in search endpoint", FilePath: "/notes/security-audit.md",
+			Created: "2026-02-05T10:00:00Z", Status: "stable", StaleAfter: past,
 		},
 		{
-			ID:       "20260206100000-fff",
-			Title:    "Refactor database layer",
-			Type:     "todo",
-			Project:  "backend",
-			Tags:     []string{"refactor", "database"},
-			Body:     "Move to repository pattern",
-			FilePath: "/notes/refactor-db.md",
-			Created:  "2026-02-06T10:00:00Z",
-			Status:   "open",
-			Priority: "low",
-			Due:      "2026-03-01",
+			ID: idFuture, Title: "Long-lived reference", Type: "note", Kind: "note",
+			Project: "backend", Tags: []string{"reference"},
+			Body: "Move to repository pattern", FilePath: "/notes/reference.md",
+			Created: "2026-02-06T10:00:00Z", Status: "stable", StaleAfter: future,
 		},
 	}
 
-	for _, doc := range docs {
-		d := doc
-		if err := IndexDocument(idx, &d); err != nil {
+	for i := range docs {
+		if err := IndexDocument(idx, &docs[i]); err != nil {
 			idx.Close()
-			os.RemoveAll(tmpDir)
-			t.Fatalf("Failed to index document %s: %v", doc.ID, err)
+			t.Fatalf("failed to index %s: %v", docs[i].ID, err)
 		}
 	}
-
-	idx.Close()
-
-	return indexPath, func() {
-		os.RemoveAll(tmpDir)
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
 	}
+	return indexPath
+}
+
+// resultIDs collapses hits to a set for order-independent assertions.
+func resultIDs(results []SearchResult) map[string]bool {
+	ids := map[string]bool{}
+	for _, r := range results {
+		ids[r.ID] = true
+	}
+	return ids
+}
+
+func search(t *testing.T, path string, opts SearchOptions) []SearchResult {
+	t.Helper()
+	idx, err := OpenOrCreateIndex(path)
+	if err != nil {
+		t.Fatalf("failed to open index: %v", err)
+	}
+	defer idx.Close()
+	if opts.Limit == 0 {
+		opts.Limit = 50
+	}
+	results, _, err := Search(idx, opts)
+	if err != nil {
+		t.Fatalf("search failed: %v", err)
+	}
+	return results
 }
 
 func TestSearchByType(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
-
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
-	}
-	defer idx.Close()
+	path := setupTestIndex(t)
 
 	tests := []struct {
 		name     string
 		typeVal  string
-		wantMin  int
 		wantIDs  []string
 		dontWant []string
 	}{
-		{
-			name:    "filter by type=todo",
-			typeVal: "todo",
-			wantMin: 3,
-			wantIDs: []string{"20260202100000-bbb", "20260203100000-ccc", "20260206100000-fff"},
-		},
-		{
-			name:    "filter by type=note",
-			typeVal: "note",
-			wantMin: 1,
-			wantIDs: []string{"20260201100000-aaa"},
-		},
-		{
-			name:    "filter by type=daily-note",
-			typeVal: "daily-note",
-			wantMin: 1,
-			wantIDs: []string{"20260204100000-ddd"},
-		},
-		{
-			name:    "filter by type=issue",
-			typeVal: "issue",
-			wantMin: 1,
-			wantIDs: []string{"20260205100000-eee"},
-		},
+		{"note", "note", []string{idAuthNote, idDraftSpec, idOldAPI, idFuture}, []string{idDaily, idIssue}},
+		{"daily-note", "daily-note", []string{idDaily}, []string{idAuthNote}},
+		{"issue", "issue", []string{idIssue}, []string{idAuthNote, idDaily}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			results, _, err := Search(idx, SearchOptions{
-				Type:  tt.typeVal,
-				Limit: 50,
-			})
-			if err != nil {
-				t.Fatalf("Search failed: %v", err)
-			}
-			if len(results) < tt.wantMin {
-				t.Errorf("Expected at least %d results, got %d", tt.wantMin, len(results))
-			}
-			resultIDs := map[string]bool{}
-			for _, r := range results {
-				resultIDs[r.ID] = true
-			}
+			got := resultIDs(search(t, path, SearchOptions{Type: tt.typeVal}))
 			for _, id := range tt.wantIDs {
-				if !resultIDs[id] {
-					t.Errorf("Expected result ID %s not found", id)
+				if !got[id] {
+					t.Errorf("expected %s in results", id)
+				}
+			}
+			for _, id := range tt.dontWant {
+				if got[id] {
+					t.Errorf("did not expect %s in results", id)
 				}
 			}
 		})
 	}
 }
 
-func TestSearchByStatus(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
+func TestSearchByLifecycleStatus(t *testing.T) {
+	path := setupTestIndex(t)
 
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
-	}
-	defer idx.Close()
-
-	// Search for open todos
-	results, _, err := Search(idx, SearchOptions{
-		Status: "open",
-		Limit:  50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	for _, r := range results {
-		if r.Status != "open" {
-			t.Errorf("Expected status=open, got %q for %s", r.Status, r.ID)
-		}
-	}
-
-	if len(results) < 2 {
-		t.Errorf("Expected at least 2 open results, got %d", len(results))
-	}
-
-	// Search for closed todos
-	results, _, err = Search(idx, SearchOptions{
-		Status: "closed",
-		Limit:  50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Errorf("Expected 1 closed result, got %d", len(results))
-	}
-	if len(results) > 0 && results[0].ID != "20260203100000-ccc" {
-		t.Errorf("Expected closed result ID 20260203100000-ccc, got %s", results[0].ID)
+	for _, tt := range []struct {
+		status  string
+		wantIDs []string
+	}{
+		{"draft", []string{idDraftSpec}},
+		{"deprecated", []string{idOldAPI}},
+		{"stable", []string{idAuthNote, idIssue, idFuture}},
+	} {
+		t.Run(tt.status, func(t *testing.T) {
+			results := search(t, path, SearchOptions{Status: tt.status})
+			got := resultIDs(results)
+			for _, id := range tt.wantIDs {
+				if !got[id] {
+					t.Errorf("expected %s for status=%s", id, tt.status)
+				}
+			}
+			if len(results) != len(tt.wantIDs) {
+				t.Errorf("status=%s returned %d results, want %d", tt.status, len(results), len(tt.wantIDs))
+			}
+			for _, r := range results {
+				if r.Status != tt.status {
+					t.Errorf("%s has status %q, want %q", r.ID, r.Status, tt.status)
+				}
+			}
+		})
 	}
 }
 
-func TestSearchByPriority(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
+// Staleness is a date comparison against today, inclusive of the boundary day
+// (OKF section 5.5), so a past stale_after is stale and a future one is not.
+func TestSearchStale(t *testing.T) {
+	path := setupTestIndex(t)
+	got := resultIDs(search(t, path, SearchOptions{Stale: true}))
 
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
-	}
-	defer idx.Close()
-
-	results, _, err := Search(idx, SearchOptions{
-		Priority: "high",
-		Limit:    50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	if len(results) != 2 {
-		t.Errorf("Expected 2 high-priority results, got %d", len(results))
-	}
-
-	for _, r := range results {
-		if r.Priority != "high" {
-			t.Errorf("Expected priority=high, got %q for %s", r.Priority, r.ID)
+	for _, id := range []string{idOldAPI, idIssue} {
+		if !got[id] {
+			t.Errorf("expected %s to be stale", id)
 		}
 	}
-}
-
-func TestSearchByDueDateRange(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
-
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
+	if got[idFuture] {
+		t.Error("a stale_after 5 years out must not count as stale")
 	}
-	defer idx.Close()
-
-	// Due before 2026-02-16 should get login bug (2026-02-15) and docs (2026-02-10)
-	results, _, err := Search(idx, SearchOptions{
-		DueBefore: "2026-02-16",
-		Limit:     50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	resultIDs := map[string]bool{}
-	for _, r := range results {
-		resultIDs[r.ID] = true
-	}
-
-	if !resultIDs["20260202100000-bbb"] {
-		t.Error("Expected login bug (due 2026-02-15) in results")
-	}
-	if !resultIDs["20260203100000-ccc"] {
-		t.Error("Expected docs todo (due 2026-02-10) in results")
-	}
-
-	// Due after 2026-02-16 should get security audit (2026-02-20) and refactor (2026-03-01)
-	results, _, err = Search(idx, SearchOptions{
-		DueAfter: "2026-02-16",
-		Limit:    50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	resultIDs = map[string]bool{}
-	for _, r := range results {
-		resultIDs[r.ID] = true
-	}
-
-	if !resultIDs["20260205100000-eee"] {
-		t.Error("Expected security audit (due 2026-02-20) in results")
-	}
-	if !resultIDs["20260206100000-fff"] {
-		t.Error("Expected refactor (due 2026-03-01) in results")
-	}
-
-	// Range: due between 2026-02-14 and 2026-02-21
-	results, _, err = Search(idx, SearchOptions{
-		DueAfter:  "2026-02-14",
-		DueBefore: "2026-02-21",
-		Limit:     50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	resultIDs = map[string]bool{}
-	for _, r := range results {
-		resultIDs[r.ID] = true
-	}
-
-	if !resultIDs["20260202100000-bbb"] {
-		t.Error("Expected login bug (due 2026-02-15) in range results")
-	}
-	if !resultIDs["20260205100000-eee"] {
-		t.Error("Expected security audit (due 2026-02-20) in range results")
-	}
-	if resultIDs["20260203100000-ccc"] {
-		t.Error("Did not expect docs todo (due 2026-02-10) in range results")
-	}
-	if resultIDs["20260206100000-fff"] {
-		t.Error("Did not expect refactor (due 2026-03-01) in range results")
+	if got[idAuthNote] || got[idDaily] {
+		t.Error("concepts without stale_after must never be stale")
 	}
 }
 
 func TestSearchCombinedFilters(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
+	path := setupTestIndex(t)
 
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
+	// project + status
+	got := resultIDs(search(t, path, SearchOptions{Project: "backend", Status: "stable"}))
+	for _, id := range []string{idAuthNote, idIssue, idFuture} {
+		if !got[id] {
+			t.Errorf("expected %s", id)
+		}
 	}
-	defer idx.Close()
-
-	// type=todo + status=open + project=backend
-	results, _, err := Search(idx, SearchOptions{
-		Type:    "todo",
-		Status:  "open",
-		Project: "backend",
-		Limit:   50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
+	if got[idDraftSpec] {
+		t.Error("draft must not appear under status=stable")
+	}
+	if got[idOldAPI] {
+		t.Error("docs project must not appear under project=backend")
 	}
 
-	resultIDs := map[string]bool{}
-	for _, r := range results {
-		resultIDs[r.ID] = true
+	// type + stale narrows to a single hit
+	results := search(t, path, SearchOptions{Type: "issue", Stale: true})
+	if len(results) != 1 || results[0].ID != idIssue {
+		t.Errorf("type=issue + stale = %v, want just %s", resultIDs(results), idIssue)
 	}
 
-	if !resultIDs["20260202100000-bbb"] {
-		t.Error("Expected login bug in results")
-	}
-	if !resultIDs["20260206100000-fff"] {
-		t.Error("Expected refactor in results")
-	}
-	// closed doc todo should NOT appear
-	if resultIDs["20260203100000-ccc"] {
-		t.Error("Did not expect closed docs todo in results")
-	}
-	// issue should NOT appear (type=issue, not todo)
-	if resultIDs["20260205100000-eee"] {
-		t.Error("Did not expect issue in todo results")
-	}
-
-	// type=todo + priority=high + status=open
-	results, _, err = Search(idx, SearchOptions{
-		Type:     "todo",
-		Priority: "high",
-		Status:   "open",
-		Limit:    50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
-	if len(results) != 1 {
-		t.Errorf("Expected 1 result (open high-priority todo), got %d", len(results))
-	}
-	if len(results) > 0 && results[0].ID != "20260202100000-bbb" {
-		t.Errorf("Expected login bug, got %s", results[0].ID)
+	// tags AND together
+	got = resultIDs(search(t, path, SearchOptions{Tags: []string{"docs", "legacy"}}))
+	if !got[idOldAPI] || len(got) != 1 {
+		t.Errorf("tags AND = %v, want just %s", got, idOldAPI)
 	}
 }
 
 func TestSearchFullTextWithFilters(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
+	path := setupTestIndex(t)
 
-	idx, err := OpenOrCreateIndex(indexPath)
-	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
-	}
-	defer idx.Close()
-
-	// Full-text "auth" + type=note
-	results, _, err := Search(idx, SearchOptions{
-		Query: "authentication",
-		Type:  "note",
-		Limit: 50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
-	}
-
+	results := search(t, path, SearchOptions{Query: "authentication", Type: "note"})
 	if len(results) == 0 {
-		t.Error("Expected at least 1 result for 'authentication' + type=note")
+		t.Fatal("expected a hit for 'authentication' + type=note")
 	}
-	if len(results) > 0 && results[0].ID != "20260201100000-aaa" {
-		t.Errorf("Expected auth design note, got %s", results[0].ID)
-	}
-
-	// Full-text "auth" + type=todo should not return the note
-	results, _, err = Search(idx, SearchOptions{
-		Query: "authentication",
-		Type:  "todo",
-		Limit: 50,
-	})
-	if err != nil {
-		t.Fatalf("Search failed: %v", err)
+	if results[0].ID != idAuthNote {
+		t.Errorf("expected %s first, got %s", idAuthNote, results[0].ID)
 	}
 
-	for _, r := range results {
-		if r.ID == "20260201100000-aaa" {
-			t.Error("Did not expect note in todo-filtered results")
-		}
+	// The same query filtered to a type the note does not have returns nothing.
+	if got := resultIDs(search(t, path, SearchOptions{Query: "authentication", Type: "issue"})); got[idAuthNote] {
+		t.Error("did not expect the note in issue-filtered results")
 	}
 }
 
 func TestSearchMatchAll(t *testing.T) {
-	indexPath, cleanup := setupTestIndex(t)
-	defer cleanup()
-
-	idx, err := OpenOrCreateIndex(indexPath)
+	path := setupTestIndex(t)
+	idx, err := OpenOrCreateIndex(path)
 	if err != nil {
-		t.Fatalf("Failed to open index: %v", err)
+		t.Fatal(err)
 	}
 	defer idx.Close()
 
-	// No filters should return all documents
-	results, total, err := Search(idx, SearchOptions{
-		Limit: 50,
-	})
+	results, total, err := Search(idx, SearchOptions{Limit: 50})
 	if err != nil {
-		t.Fatalf("Search failed: %v", err)
+		t.Fatalf("search failed: %v", err)
+	}
+	if total != 6 || len(results) != 6 {
+		t.Errorf("total=%d len=%d, want 6/6", total, len(results))
+	}
+}
+
+func TestSearchLimitAndOffset(t *testing.T) {
+	path := setupTestIndex(t)
+	first := search(t, path, SearchOptions{Limit: 2})
+	if len(first) != 2 {
+		t.Fatalf("limit=2 returned %d", len(first))
+	}
+	rest := search(t, path, SearchOptions{Limit: 2, Offset: 2})
+	if len(rest) != 2 {
+		t.Fatalf("offset page returned %d", len(rest))
+	}
+	for _, r := range rest {
+		if resultIDs(first)[r.ID] {
+			t.Errorf("%s appeared on both pages", r.ID)
+		}
+	}
+}
+
+// --- AllDocIDs / DeleteDocument: the pruning primitives ---
+
+func TestAllDocIDs(t *testing.T) {
+	path := setupTestIndex(t)
+	idx, err := OpenOrCreateIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	ids, err := AllDocIDs(idx)
+	if err != nil {
+		t.Fatalf("AllDocIDs: %v", err)
+	}
+	if len(ids) != 6 {
+		t.Errorf("got %d ids, want 6: %v", len(ids), ids)
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		seen[id] = true
+	}
+	for _, want := range []string{idAuthNote, idDraftSpec, idOldAPI, idDaily, idIssue, idFuture} {
+		if !seen[want] {
+			t.Errorf("missing %s", want)
+		}
+	}
+}
+
+func TestAllDocIDsOnEmptyIndex(t *testing.T) {
+	idx, err := OpenOrCreateIndex(t.TempDir() + "/empty.bleve")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	ids, err := AllDocIDs(idx)
+	if err != nil {
+		t.Fatalf("AllDocIDs on an empty index: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("got %v, want none", ids)
+	}
+}
+
+func TestDeleteDocumentRemovesItFromResults(t *testing.T) {
+	path := setupTestIndex(t)
+	idx, err := OpenOrCreateIndex(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DeleteDocument(idx, idAuthNote); err != nil {
+		t.Fatalf("DeleteDocument: %v", err)
+	}
+	if err := idx.Close(); err != nil {
+		t.Fatal(err)
 	}
 
-	if total != 6 {
-		t.Errorf("Expected 6 total results, got %d", total)
+	if got := resultIDs(search(t, path, SearchOptions{})); got[idAuthNote] {
+		t.Error("deleted document still appears in search results")
 	}
-	if len(results) != 6 {
-		t.Errorf("Expected 6 results, got %d", len(results))
+}
+
+// --- rendering layer ---
+
+func TestFormatSearchResultsEmpty(t *testing.T) {
+	if got := FormatSearchResults(nil, 0); got != "No results found." {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestFormatSearchResults(t *testing.T) {
+	out := FormatSearchResults([]SearchResult{{
+		ID: idAuthNote, Title: "Authentication Design", Project: "backend",
+		Tags: []string{"auth", "design"}, FilePath: "/notes/auth-design.md",
+		Snippet: "OAuth2 tokens", Status: "stable",
+	}}, 1)
+
+	for _, want := range []string{
+		"Found 1 results:",
+		"1. Authentication Design",
+		"ID: " + idAuthNote,
+		"Project: backend",
+		"Tags: auth, design",
+		"File: /notes/auth-design.md",
+		"...OAuth2 tokens...",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	// "stable" is the default, so it is not worth a line of terminal output.
+	if strings.Contains(out, "Status:") {
+		t.Errorf("stable status should not be printed:\n%s", out)
+	}
+}
+
+func TestFormatSearchResultsFlagsDraftDeprecatedAndStale(t *testing.T) {
+	past := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	out := FormatSearchResults([]SearchResult{
+		{ID: "a", Title: "Draft thing", Status: "draft"},
+		{ID: "b", Title: "Old thing", Status: "deprecated", StaleAfter: past},
+	}, 2)
+
+	for _, want := range []string{"Status: draft", "Status: deprecated", "STALE since " + past} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestSearchResultsToJSON(t *testing.T) {
+	out, err := SearchResultsToJSON([]SearchResult{{ID: "a", Title: "T", Status: "draft"}})
+	if err != nil {
+		t.Fatalf("SearchResultsToJSON: %v", err)
+	}
+	var back []SearchResult
+	if err := json.Unmarshal([]byte(out), &back); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if len(back) != 1 || back[0].ID != "a" || back[0].Status != "draft" {
+		t.Errorf("round-trip lost data: %+v", back)
+	}
+	// Empty optional fields stay out of the payload; agents read this.
+	if strings.Contains(out, "stale_after") {
+		t.Errorf("empty stale_after should be omitted:\n%s", out)
+	}
+}
+
+func TestSearchResultIsStale(t *testing.T) {
+	today := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name       string
+		staleAfter string
+		want       bool
+	}{
+		{"absent", "", false},
+		{"yesterday", "2026-07-24", true},
+		{"today is inclusive", "2026-07-25", true},
+		{"tomorrow", "2026-07-26", false},
+		{"unparseable", "not-a-date", false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := SearchResult{StaleAfter: tt.staleAfter}
+			if got := r.IsStale(today); got != tt.want {
+				t.Errorf("IsStale(%q) = %v, want %v", tt.staleAfter, got, tt.want)
+			}
+		})
 	}
 }

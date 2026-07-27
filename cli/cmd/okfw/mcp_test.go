@@ -105,21 +105,30 @@ func TestMCPCreateSearchReadUpdate(t *testing.T) {
 		t.Errorf("tags not written:\n%s", text)
 	}
 
-	// todo lifecycle via create + update set_status
-	text, isErr = callTool(t, s, "create", `{"kind":"todo","title":"Ship it","priority":"high"}`)
-	if isErr {
-		t.Fatalf("create todo failed: %s", text)
-	}
-	var todo struct{ Path string }
-	_ = json.Unmarshal([]byte(text), &todo)
+	// OKF lifecycle: set_lifecycle and set_stale_after
 	text, isErr = callTool(t, s, "update",
-		fmt.Sprintf(`{"ref":%q,"action":"set_status","value":"closed"}`, todo.Path))
+		fmt.Sprintf(`{"ref":%q,"action":"set_lifecycle","value":"deprecated"}`, created.Path))
 	if isErr {
-		t.Fatalf("set_status failed: %s", text)
+		t.Fatalf("set_lifecycle failed: %s", text)
 	}
-	text, _ = callTool(t, s, "read", fmt.Sprintf(`{"ref":%q}`, todo.Path))
-	if !strings.Contains(text, `status: "closed"`) || !strings.Contains(text, "completed:") {
-		t.Errorf("todo should be closed with completed date:\n%s", text)
+	text, isErr = callTool(t, s, "update",
+		fmt.Sprintf(`{"ref":%q,"action":"set_stale_after","value":"2026-12-31"}`, created.Path))
+	if isErr {
+		t.Fatalf("set_stale_after failed: %s", text)
+	}
+	text, _ = callTool(t, s, "read", fmt.Sprintf(`{"ref":%q}`, created.Path))
+	if !strings.Contains(text, `status: "deprecated"`) || !strings.Contains(text, `stale_after: "2026-12-31"`) {
+		t.Errorf("lifecycle fields not written:\n%s", text)
+	}
+
+	// Invalid values are rejected rather than written through.
+	if _, isErr = callTool(t, s, "update",
+		fmt.Sprintf(`{"ref":%q,"action":"set_lifecycle","value":"closed"}`, created.Path)); !isErr {
+		t.Error("set_lifecycle should reject a non-lifecycle value")
+	}
+	if _, isErr = callTool(t, s, "update",
+		fmt.Sprintf(`{"ref":%q,"action":"set_stale_after","value":"not-a-date"}`, created.Path)); !isErr {
+		t.Error("set_stale_after should reject a malformed date")
 	}
 
 	// daily

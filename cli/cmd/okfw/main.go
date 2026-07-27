@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"okfw/cli/internal/bundle"
@@ -27,16 +26,15 @@ func main() {
 	var limitFlag int
 	var jsonFlag bool
 	var graphLimitFlag int
-	var outputFlag string
 	var templateFlag string
 	var descriptionFlag string
 	var pathFlag string
 	var statusFlag string
-	var priorityFlag string
 
 	var rootCmd = &cobra.Command{
-		Use:   "okfw",
-		Short: "Manage a per-project OKF wiki of linked markdown concepts",
+		Use:          "okfw",
+		SilenceUsage: true,
+		Short:        "Manage a per-project OKF wiki of linked markdown concepts",
 		Long: `okfw manages a local-first knowledge base — an Open Knowledge Format (OKF)
 wiki of markdown concepts stored in a .okfw/ directory at your project root.
 
@@ -73,7 +71,7 @@ Examples:
 				return err
 			}
 
-			filePath, id, err := createConcept(cfg, conceptSpec{
+			filePath, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 				Title:       args[0],
 				Project:     projectFlag,
 				Dir:         pathFlag,
@@ -94,7 +92,7 @@ Examples:
 			}
 
 			// Auto-index the new note
-			if err := autoSync(cfg, filePath); err != nil {
+			if err := bundle.AutoSync(cfg, filePath); err != nil {
 				fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 			}
 
@@ -164,12 +162,12 @@ wiki exists.`,
 					return nil
 				}
 				if fi.IsDir() {
-					if skipWalkDir(cfg.RootPath, p, fi.Name()) {
+					if bundle.SkipWalkDir(cfg.RootPath, p, fi.Name()) {
 						return filepath.SkipDir
 					}
 					return nil
 				}
-				if strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
+				if strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
 					concepts++
 				}
 				return nil
@@ -286,10 +284,10 @@ If given a directory, indexes all .md files recursively.`,
 					if err != nil {
 						return err
 					}
-					if fi.IsDir() && skipWalkDir(path, p, fi.Name()) {
+					if fi.IsDir() && bundle.SkipWalkDir(path, p, fi.Name()) {
 						return filepath.SkipDir
 					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
+					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
 						files = append(files, p)
 					}
 					return nil
@@ -303,7 +301,7 @@ If given a directory, indexes all .md files recursively.`,
 
 			indexed := 0
 			for _, filePath := range files {
-				if err := indexFile(idx, filePath); err != nil {
+				if err := bundle.IndexFile(idx, filePath); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to index %s: %v\n", filePath, err)
 					continue
 				}
@@ -317,8 +315,7 @@ If given a directory, indexes all .md files recursively.`,
 
 	var typeFlag string
 	var kindFlag string
-	var dueBeforeFlag string
-	var dueAfterFlag string
+	var staleFlag bool
 
 	var searchCmd = &cobra.Command{
 		Use:   "search [query]",
@@ -347,15 +344,13 @@ Examples:
 			defer idx.Close()
 
 			opts := index.SearchOptions{
-				Project:   projectFlag,
-				Type:      typeFlag,
-				Kind:      kindFlag,
-				Tags:      tagsFlag,
-				Limit:     limitFlag,
-				Status:    statusFlag,
-				Priority:  priorityFlag,
-				DueBefore: dueBeforeFlag,
-				DueAfter:  dueAfterFlag,
+				Project: projectFlag,
+				Type:    typeFlag,
+				Kind:    kindFlag,
+				Tags:    tagsFlag,
+				Limit:   limitFlag,
+				Status:  statusFlag,
+				Stale:   staleFlag,
 			}
 
 			if len(args) > 0 {
@@ -384,24 +379,28 @@ Examples:
 	var graphStartFlag string
 	var graphDepthFlag int
 	var graphSyncFlag bool
+	var graphASCIIFlag bool
 
 	var graphCmd = &cobra.Command{
 		Use:   "graph [path]",
-		Short: "Show an ASCII tree of concept relationships",
-		Long: `Print an ASCII tree showing relationships between concepts.
+		Short: "Render concept relationships as a Mermaid diagram (or an ASCII tree)",
+		Long: `Print the relationships between concepts.
 
-The tree is printed to stdout so it can be viewed directly in the terminal
-or piped to other tools. A summary line (N nodes, M edges) is printed to
-stderr so it does not pollute piped output.
+Output is Mermaid flowchart syntax by default, suitable for pasting into
+markdown. Use --ascii for a plain-text tree that reads directly in a terminal.
+
+The diagram goes to stdout so it can be piped; a summary line
+(N nodes, M edges) goes to stderr so it does not pollute piped output.
 
 If no path is given, the discovered wiki root is used.
 When a graph database (.graph.db) exists, it is used for fast queries.
 Use --sync to force a fresh sync before querying.
 
 Examples:
-  okfw graph                             # Tree from the wiki root
-  okfw graph path/to/dir                 # Tree of all concepts in directory
-  okfw graph --start 20260213-abc-123    # Tree centered on a specific concept
+  okfw graph                             # Mermaid diagram from the wiki root
+  okfw graph --ascii                     # Plain-text tree instead
+  okfw graph path/to/dir                 # All concepts in a directory
+  okfw graph --start 20260213-abc-123    # Centered on a specific concept
   okfw graph --depth 3                   # Traverse up to 3 hops from start
   okfw graph --limit 20                  # Show up to 20 nodes (default: 10)
   okfw graph --sync                      # Sync graph DB before querying`,
@@ -455,7 +454,11 @@ Examples:
 				edges = g.GetEdges(nodes)
 			}
 
-			fmt.Println(graph.GenerateMermaid(nodes, edges))
+			if graphASCIIFlag {
+				fmt.Println(graph.GenerateASCIITree(nodes, edges, graphStartFlag))
+			} else {
+				fmt.Println(graph.GenerateMermaid(nodes, edges))
+			}
 			fmt.Fprintf(os.Stderr, "%d nodes, %d edges\n", len(nodes), len(edges))
 			return nil
 		},
@@ -474,7 +477,7 @@ Examples:
 				return fmt.Errorf("failed to read file: %w", err)
 			}
 
-			newContent, err := updateFrontmatter(content, map[string]string{
+			newContent, err := bundle.UpdateFrontmatter(content, map[string]string{
 				"project": project,
 			})
 			if err != nil {
@@ -492,7 +495,7 @@ Examples:
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: config load failed, skipping index update: %v\n", cfgErr)
 			} else {
-				if err := autoSync(cfg, filePath); err != nil {
+				if err := bundle.AutoSync(cfg, filePath); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 				}
 			}
@@ -589,10 +592,10 @@ Examples:
 					if err != nil {
 						return err
 					}
-					if fi.IsDir() && skipWalkDir(searchPath, p, fi.Name()) {
+					if fi.IsDir() && bundle.SkipWalkDir(searchPath, p, fi.Name()) {
 						return filepath.SkipDir
 					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
+					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
 						files = append(files, p)
 					}
 					return nil
@@ -777,16 +780,15 @@ Examples:
 	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
 	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/todo/daily-note/issue)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
-	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by status (open/in_progress/closed)")
-	searchCmd.Flags().StringVar(&priorityFlag, "priority", "", "Filter by priority (high/medium/low)")
-	searchCmd.Flags().StringVar(&dueBeforeFlag, "due-before", "", "Filter todos due before date (YYYY-MM-DD)")
-	searchCmd.Flags().StringVar(&dueAfterFlag, "due-after", "", "Filter todos due after date (YYYY-MM-DD)")
+	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
+	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
 
 	graphCmd.Flags().IntVarP(&graphLimitFlag, "limit", "l", 10, "Maximum number of nodes to display")
 	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific concept ID")
 	graphCmd.Flags().IntVar(&graphDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
+	graphCmd.Flags().BoolVar(&graphASCIIFlag, "ascii", false, "Render a plain-text tree instead of Mermaid")
 	graphCmd.Flags().BoolVar(&graphSyncFlag, "sync", false, "Sync graph database before querying")
 
 	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of notes to export")
@@ -862,113 +864,6 @@ Examples:
 	dailyCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON (with --list)")
 
 	// Todo-specific flags
-	var dueFlag string
-	var overdueFlag bool
-	var closedFlag bool
-	var todayFlag bool
-	var thisWeekFlag bool
-
-	var todoCmd = &cobra.Command{
-		Use:   "todo [title]",
-		Short: "Create a new todo",
-		Long: `Create a new actionable todo item.
-
-Todos are a special type of concept with status tracking, due dates, and priority.
-
-Examples:
-  okfw todo "Fix login bug"                          # Basic todo
-  okfw todo "Update docs" --due 2026-02-20           # With due date
-  okfw todo "Critical fix" --priority high           # With priority
-  okfw todo "Feature work" --project myproj          # With project`,
-		Args: cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			title := args[0]
-			filePath, _, err := createTodo(cfg, title, projectFlag, pathFlag, dueFlag, priorityFlag, tagsFlag)
-			if err != nil {
-				return err
-			}
-
-			fmt.Printf("Created todo: %s\n", title)
-			if dueFlag != "" {
-				fmt.Printf("Due: %s\n", dueFlag)
-			}
-			fmt.Printf("File: %s\n", filePath)
-
-			// Auto-index
-			if err := autoSync(cfg, filePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to index todo: %v\n", err)
-			}
-
-			return nil
-		},
-	}
-
-	todoCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Optional project metadata (also used as the todo's folder)")
-	todoCmd.Flags().StringVar(&pathFlag, "path", "", "Place the todo in a bundle subdirectory (e.g. projects/okf)")
-	todoCmd.Flags().StringVar(&dueFlag, "due", "", "Due date (YYYY-MM-DD)")
-	todoCmd.Flags().StringVar(&priorityFlag, "priority", "", "Priority (high, medium, low)")
-	todoCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Additional tags")
-
-	var setStatusCmd = &cobra.Command{
-		Use:   "set-status [id_or_file] [status]",
-		Short: "Set the status of a todo",
-		Long: `Set the status of a todo to open, in_progress, or closed.
-
-Examples:
-  okfw set-status 202602131045 closed          # By ID
-  okfw set-status ./path/to/todo.md in_progress # By file path
-  okfw set-status ./path/to/todo.md open        # Reopen a closed todo`,
-		Args: cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			status := args[1]
-			validStatuses := map[string]bool{"open": true, "in_progress": true, "closed": true}
-			if !validStatuses[status] {
-				return fmt.Errorf("invalid status %q: must be open, in_progress, or closed", status)
-			}
-
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			filePath, err := resolveConceptPath(cfg, args[0])
-			if err != nil {
-				return err
-			}
-
-			content, err := os.ReadFile(filePath)
-			if err != nil {
-				return fmt.Errorf("failed to read file: %w", err)
-			}
-
-			newContent, changed, err := applyTodoStatus(content, status)
-			if err != nil {
-				return err
-			}
-			if !changed {
-				fmt.Printf("Todo is already %s\n", status)
-				return nil
-			}
-
-			if err := os.WriteFile(filePath, newContent, 0644); err != nil {
-				return fmt.Errorf("failed to write file: %w", err)
-			}
-			fmt.Printf("Set todo status to %s\n", status)
-
-			// Auto-index
-			if err := autoSync(cfg, filePath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to index todo: %v\n", err)
-			}
-
-			return nil
-		},
-	}
-
 	var addTagsCmd = &cobra.Command{
 		Use:   "add-tags [id_or_file] [tags...]",
 		Short: "Add tags to a concept",
@@ -987,7 +882,7 @@ Examples:
 				if err != nil {
 					return err
 				}
-				filePath, err = resolveConceptPath(cfg, args[0])
+				filePath, err = bundle.ResolveConceptPath(cfg, args[0])
 				if err != nil {
 					return err
 				}
@@ -1021,13 +916,13 @@ Examples:
 				return nil
 			}
 
-			newContent, err := addFrontmatterTags(content, added)
+			newContent, err := bundle.AddFrontmatterTags(content, added)
 			if err != nil {
 				return fmt.Errorf("failed to update frontmatter: %w", err)
 			}
 
 			// Bump the OKF timestamp (last meaningful change).
-			newContent, err = updateFrontmatter(newContent, nil)
+			newContent, err = bundle.UpdateFrontmatter(newContent, nil)
 			if err != nil {
 				return fmt.Errorf("failed to update timestamp: %w", err)
 			}
@@ -1043,7 +938,7 @@ Examples:
 			if cfgErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: config load failed, skipping index update: %v\n", cfgErr)
 			} else {
-				if err := autoSync(cfg, filePath); err != nil {
+				if err := bundle.AutoSync(cfg, filePath); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to index: %v\n", err)
 				}
 			}
@@ -1052,21 +947,70 @@ Examples:
 		},
 	}
 
+	var migrateDryRun bool
+	var migrateCmd = &cobra.Command{
+		Use:   "migrate [path]",
+		Short: "Bring older concepts up to the current frontmatter shape",
+		Long: `Rewrite concepts written by an earlier okfw so they satisfy the current
+schema. Safe to re-run: a second pass reports nothing to do.
+
+okfw removed its task-tracking fields, because OKF v0.2 spec'd 'status' as the
+lifecycle field (draft/stable/deprecated) and okfw was using it for todo
+progress. This drops 'due', 'completed', 'priority' and 'kind: todo', and
+rewrites a legacy 'status':
+
+  status: closed              ->  status: deprecated
+  status: open|in_progress    ->  removed (absent means stable)
+
+The free-form OKF 'type' is left alone: the spec does not register type values,
+so an existing type: "todo" stays until you change it.
+
+Examples:
+  okfw migrate --dry-run     # report what would change
+  okfw migrate               # apply`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Discover("")
+			if err != nil {
+				return err
+			}
+			root := cfg.RootPath
+			if len(args) > 0 {
+				root = args[0]
+			}
+			return runMigrate(cfg, root, migrateDryRun)
+		},
+	}
+	migrateCmd.Flags().BoolVar(&migrateDryRun, "dry-run", false, "Report what would change without writing")
+
 	var validateOKF bool
+	var validateAll bool
 	var validateCmd = &cobra.Command{
 		Use:   "validate [id_or_file_or_path]",
-		Short: "Validate a concept's frontmatter, or a bundle's OKF conformance",
-		Long: `Validate a concept's frontmatter against the CUE schema and business rules,
-or check a whole bundle for OKF conformance with --okf.
+		Short: "Validate a concept's frontmatter, or a whole bundle",
+		Long: `Validate concept frontmatter. There are two different checks, because
+okfw's schema is deliberately stricter than OKF requires.
+
+  (default)  Strict okfw validation of one concept: the full CUE #Concept
+             schema — required id/title/type/tags/created/timestamp, and no
+             undeclared fields.
+  --all      The same strict check over every concept in the bundle.
+  --okf      OKF conformance only (spec section 11): every non-reserved .md has
+             parseable frontmatter with a non-empty 'type'. Permissive by
+             design, so a bundle okfw did not author can still pass.
 
 Examples:
   okfw validate ./path/to/note.md
   okfw validate 202602131045
-  okfw validate --okf                 # conformance check of the bundle root
-  okfw validate --okf path/to/dir     # conformance check of a path`,
+  okfw validate --all                 # strict check of every concept
+  okfw validate --okf                 # OKF conformance of the bundle root
+  okfw validate --okf path/to/dir     # OKF conformance of a path`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if validateOKF {
+			if validateOKF && validateAll {
+				return fmt.Errorf("--okf and --all are different checks; run them separately")
+			}
+			if validateOKF || validateAll {
 				cfg, err := config.Discover("")
 				if err != nil {
 					return err
@@ -1075,11 +1019,14 @@ Examples:
 				if len(args) > 0 {
 					root = args[0]
 				}
+				if validateAll {
+					return runValidateAll(cfg, root)
+				}
 				return runValidateOKF(cfg, root)
 			}
 
 			if len(args) == 0 {
-				return fmt.Errorf("a concept id or file is required (or use --okf to check the bundle)")
+				return fmt.Errorf("a concept id or file is required (or use --all / --okf to check the bundle)")
 			}
 			filePath := args[0]
 
@@ -1089,7 +1036,7 @@ Examples:
 				if err != nil {
 					return err
 				}
-				filePath, err = resolveConceptPath(cfg, args[0])
+				filePath, err = bundle.ResolveConceptPath(cfg, args[0])
 				if err != nil {
 					return err
 				}
@@ -1110,204 +1057,6 @@ Examples:
 		},
 	}
 
-	var todosCmd = &cobra.Command{
-		Use:   "todos [query]",
-		Short: "List and search todos",
-		Long: `List and search todos with various filters.
-
-Examples:
-  okfw todos                        # All open todos
-  okfw todos --closed               # All closed todos
-  okfw todos --project myproj       # Filter by project
-  okfw todos --priority high        # Filter by priority
-  okfw todos --overdue              # Overdue todos
-  okfw todos --due today            # Due today
-  okfw todos --due this-week        # Due this week
-  okfw todos "fix bug"              # Full-text search in todos`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-			if err != nil {
-				return fmt.Errorf("failed to open index: %w", err)
-			}
-			defer idx.Close()
-
-			opts := index.SearchOptions{
-				Kind:     "todo",
-				Project:  projectFlag,
-				Tags:     tagsFlag,
-				Limit:    limitFlag,
-				Priority: priorityFlag,
-			}
-
-			// Status filter
-			if closedFlag {
-				opts.Status = "closed"
-			} else if statusFlag != "" {
-				opts.Status = statusFlag
-			} else {
-				// Default to open todos
-				opts.Status = "open"
-			}
-
-			// Due date filters
-			today := time.Now().Format("2006-01-02")
-			if overdueFlag {
-				opts.DueBefore = today
-				opts.Status = "open" // Overdue only makes sense for open todos
-			} else if todayFlag {
-				opts.DueAfter = today
-				opts.DueBefore = today
-			} else if thisWeekFlag {
-				opts.DueAfter = today
-				endOfWeek := time.Now().AddDate(0, 0, 7-int(time.Now().Weekday()))
-				opts.DueBefore = endOfWeek.Format("2006-01-02")
-			}
-
-			// Full-text query
-			if len(args) > 0 {
-				opts.Query = strings.Join(args, " ")
-			}
-
-			results, total, err := index.Search(idx, opts)
-			if err != nil {
-				return fmt.Errorf("search failed: %w", err)
-			}
-
-			if jsonFlag {
-				jsonOutput, err := index.SearchResultsToJSON(results)
-				if err != nil {
-					return fmt.Errorf("failed to format JSON: %w", err)
-				}
-				fmt.Println(jsonOutput)
-			} else {
-				fmt.Print(index.FormatTodoResults(results, total))
-			}
-
-			return nil
-		},
-	}
-
-	todosCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
-	todosCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by status (open, in_progress, closed)")
-	todosCmd.Flags().BoolVar(&closedFlag, "closed", false, "Show closed todos")
-	todosCmd.Flags().StringVar(&priorityFlag, "priority", "", "Filter by priority (high, medium, low)")
-	todosCmd.Flags().BoolVar(&overdueFlag, "overdue", false, "Show overdue todos")
-	todosCmd.Flags().BoolVar(&todayFlag, "today", false, "Show todos due today")
-	todosCmd.Flags().BoolVar(&thisWeekFlag, "this-week", false, "Show todos due this week")
-	todosCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag")
-	todosCmd.Flags().IntVarP(&limitFlag, "limit", "l", 50, "Maximum number of results")
-	todosCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON")
-
-	var todoListCmd = &cobra.Command{
-		Use:   "todo-list",
-		Short: "Generate a markdown todo list",
-		Long: `Generate a markdown file listing todos.
-
-The generated file is placed in the configured todos_path directory.
-
-Examples:
-  okfw todo-list                           # All open todos
-  okfw todo-list --project myproj          # Project-specific list
-  okfw todo-list --today                   # Due today
-  okfw todo-list --output my-todos.md      # Custom filename`,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-			if err != nil {
-				return fmt.Errorf("failed to open index: %w", err)
-			}
-			defer idx.Close()
-
-			opts := index.SearchOptions{
-				Kind:    "todo",
-				Project: projectFlag,
-				Limit:   200, // Higher limit for list generation
-			}
-
-			// Default to open todos
-			if closedFlag {
-				opts.Status = "closed"
-			} else {
-				opts.Status = "open"
-			}
-
-			// Due date filters
-			today := time.Now().Format("2006-01-02")
-			if todayFlag {
-				opts.DueAfter = today
-				opts.DueBefore = today
-			} else if thisWeekFlag {
-				opts.DueAfter = today
-				endOfWeek := time.Now().AddDate(0, 0, 7-int(time.Now().Weekday()))
-				opts.DueBefore = endOfWeek.Format("2006-01-02")
-			}
-
-			results, _, err := index.Search(idx, opts)
-			if err != nil {
-				return fmt.Errorf("search failed: %w", err)
-			}
-
-			// Generate markdown
-			markdown := generateTodoListMarkdown(results, projectFlag, todayFlag, thisWeekFlag)
-
-			// Determine output path
-			todosDir := cfg.TodosPath
-			if !filepath.IsAbs(todosDir) {
-				todosDir = filepath.Join(cfg.RootPath, todosDir)
-			}
-
-			if err := os.MkdirAll(todosDir, 0755); err != nil {
-				return fmt.Errorf("failed to create todos directory: %w", err)
-			}
-
-			// Ensure .gitignore includes todos path
-			if err := ensureGitignore(cfg.RootPath, cfg.TodosPath); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not update .gitignore: %v\n", err)
-			}
-
-			// Determine output filename
-			outputName := outputFlag
-			if outputName == "" {
-				if projectFlag != "" {
-					outputName = fmt.Sprintf("%s-todos.md", projectFlag)
-				} else if todayFlag {
-					outputName = fmt.Sprintf("todos-%s.md", today)
-				} else {
-					outputName = "todos.md"
-				}
-			}
-			if !strings.HasSuffix(outputName, ".md") {
-				outputName += ".md"
-			}
-
-			outputPath := filepath.Join(todosDir, outputName)
-			if err := os.WriteFile(outputPath, []byte(markdown), 0644); err != nil {
-				return fmt.Errorf("failed to write todo list: %w", err)
-			}
-
-			fmt.Printf("Generated todo list with %d items\n", len(results))
-			fmt.Printf("Output: %s\n", outputPath)
-
-			return nil
-		},
-	}
-
-	todoListCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
-	todoListCmd.Flags().BoolVar(&todayFlag, "today", false, "Show todos due today")
-	todoListCmd.Flags().BoolVar(&thisWeekFlag, "this-week", false, "Show todos due this week")
-	todoListCmd.Flags().BoolVar(&closedFlag, "closed", false, "Include closed todos")
-	todoListCmd.Flags().StringVarP(&outputFlag, "output", "o", "", "Output filename")
-
-	// Git workflow commands
 	// --- graph-sync command ---
 	var graphSyncValidateFlag bool
 
@@ -1352,6 +1101,18 @@ Examples:
 
 			fmt.Printf("Graph synced: %d total, %d added, %d updated, %d deleted\n",
 				result.Total, result.Added, result.Updated, result.Deleted)
+
+			// The graph purges deleted concepts; the search index has no
+			// equivalent, so prune it here or a removed concept keeps turning
+			// up in `okfw search` forever.
+			pruned, err := bundle.PruneIndex(cfg)
+			if err != nil {
+				return fmt.Errorf("failed to prune the search index: %w", err)
+			}
+			if pruned > 0 {
+				fmt.Printf("Search index pruned: %d stale entr%s removed\n",
+					pruned, map[bool]string{true: "y", false: "ies"}[pruned == 1])
+			}
 
 			if result.Dangling > 0 {
 				fmt.Printf("Warning: %d dangling edge(s) detected\n", result.Dangling)
@@ -1590,12 +1351,16 @@ Example client configuration (Claude Code):
 	rootCmd.AddCommand(setProjectCmd)
 	rootCmd.AddCommand(backlinksCmd)
 	rootCmd.AddCommand(dailyCmd)
-	rootCmd.AddCommand(todoCmd)
-	rootCmd.AddCommand(setStatusCmd)
-	rootCmd.AddCommand(todosCmd)
-	rootCmd.AddCommand(todoListCmd)
 	rootCmd.AddCommand(addTagsCmd)
-	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check the whole bundle for OKF conformance")
+	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check the whole bundle for OKF conformance (permissive, spec section 11)")
+	validateCmd.Flags().BoolVar(&validateAll, "all", false, "Apply the strict okfw schema to every concept in the bundle")
+	for _, c := range fileCommands() {
+		rootCmd.AddCommand(c)
+	}
+	for _, c := range okfFamilyCommands() {
+		rootCmd.AddCommand(c)
+	}
+	rootCmd.AddCommand(migrateCmd)
 	rootCmd.AddCommand(validateCmd)
 
 	if err := rootCmd.Execute(); err != nil {
@@ -1650,10 +1415,10 @@ func buildGraphFromPath(path, bundleRoot string) (*graph.Graph, error) {
 			if err != nil {
 				return err
 			}
-			if fi.IsDir() && skipWalkDir(path, p, fi.Name()) {
+			if fi.IsDir() && bundle.SkipWalkDir(path, p, fi.Name()) {
 				return filepath.SkipDir
 			}
-			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !isReservedBase(fi.Name()) {
+			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
 				files = append(files, p)
 			}
 			return nil
@@ -1699,7 +1464,6 @@ func runInit(target string) error {
 	gitignore := "# okfw generated artifacts\n" +
 		config.IndexDirName + "/\n" +
 		config.GraphDBName + "\n" +
-		config.TodosDirName + "/\n" +
 		"ephemeral/\n"
 	if err := os.WriteFile(filepath.Join(wikiDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("failed to write .gitignore: %w", err)
@@ -1707,7 +1471,7 @@ func runInit(target string) error {
 
 	// Start OKF-conformant: root index.md with the okf_version declaration.
 	cfg := config.ConfigFor(wikiDir)
-	if _, err := writeIndexFiles(cfg, wikiDir); err != nil {
+	if _, err := bundle.WriteIndexFiles(cfg, wikiDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to generate index.md: %v\n", err)
 	}
 
@@ -1715,11 +1479,9 @@ func runInit(target string) error {
 	return nil
 }
 
-// skipWalkDir reports whether a directory met during a bundle walk should be
+// bundle.SkipWalkDir reports whether a directory met during a bundle walk should be
 // skipped: hidden directories (.index, .git, ...) and the ephemeral/ export
 // dir — but never the walk root itself, which is the hidden .okfw directory.
-func skipWalkDir(root, p, name string) bool { return bundle.SkipWalkDir(root, p, name) }
-
 // queryGraph runs FindConnected or FindAllConnected based on startID.
 func queryGraph(g *graph.Graph, startID string, limit, depth int) ([]*graph.Node, error) {
 	if startID != "" {
@@ -1845,24 +1607,114 @@ func ensureGitignore(basePath string, graphPath string) error {
 	return nil
 }
 
-// indexFile indexes a single markdown file
-func indexFile(idx bundle.Indexer, filePath string) error { return bundle.IndexFile(idx, filePath) }
+// bundle.IndexFile indexes a single markdown file
+// runMigrate strips the removed todo feature's frontmatter from every concept in
+// the bundle. Idempotent: a second run reports nothing to do.
+func runMigrate(cfg *config.Config, root string, dryRun bool) error {
+	var scanned, changed int
 
-func slugify(s string) string { return bundle.Slugify(s) }
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if bundle.SkipWalkDir(root, p, fi.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		scanned++
 
-func shortID(id string, n int) string { return bundle.ShortID(id, n) }
+		out, dropped, err := bundle.StripLegacyTodoFields(content)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
+			return nil
+		}
+		if out == nil {
+			return nil
+		}
+		changed++
+		fmt.Printf("  %s: dropped %s\n", rel, strings.Join(dropped, ", "))
+		if dryRun {
+			return nil
+		}
+		if err := os.WriteFile(p, out, 0644); err != nil {
+			return err
+		}
+		return bundle.AutoSync(cfg, p)
+	})
+	if err != nil {
+		return err
+	}
 
-func noteFilename(dir, title, id string) string { return bundle.NoteFilename(dir, title, id) }
-
-func sanitizeSubdir(p string) string { return bundle.SanitizeSubdir(p) }
-
-func conceptDir(cfg *config.Config, pathFlag, project string) (string, error) {
-	return bundle.ConceptDir(cfg, pathFlag, project)
+	if changed == 0 {
+		fmt.Printf("Nothing to migrate: %d concept(s) already clean.\n", scanned)
+		return nil
+	}
+	if dryRun {
+		fmt.Printf("\n%d of %d concept(s) would change. Re-run without --dry-run to apply.\n", changed, scanned)
+		return nil
+	}
+	fmt.Printf("\nMigrated %d of %d concept(s).\n", changed, scanned)
+	return nil
 }
 
-func isReservedBase(name string) bool { return bundle.IsReservedBase(name) }
+// runValidateAll applies the strict okfw #Concept schema to every concept in the
+// bundle. This is the bulk counterpart to `okfw validate <file>`; runValidateOKF
+// deliberately checks far less, because OKF conformance permits concepts okfw
+// itself would reject.
+func runValidateAll(cfg *config.Config, root string) error {
+	var concepts, invalid int
+	var problems []string
 
-func relDir(rel string) string { return bundle.RelDir(rel) }
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if fi.IsDir() {
+			if bundle.SkipWalkDir(root, p, fi.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+			return nil
+		}
+		rel, _ := filepath.Rel(root, p)
+		content, err := os.ReadFile(p)
+		if err != nil {
+			invalid++
+			problems = append(problems, fmt.Sprintf("  ✗ %s: %v", rel, err))
+			return nil
+		}
+		concepts++
+		if _, err := config.ParseAndValidate(content); err != nil {
+			invalid++
+			problems = append(problems, fmt.Sprintf("  ✗ %s: %v", rel, err))
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, pmsg := range problems {
+		fmt.Println(pmsg)
+	}
+	fmt.Printf("\nokfw schema: %d concept(s), %d invalid.\n", concepts, invalid)
+	if invalid > 0 {
+		return fmt.Errorf("%d concept(s) failed schema validation", invalid)
+	}
+	return nil
+}
 
 // runValidateOKF checks a bundle for OKF conformance: every non-reserved .md has
 // parseable frontmatter with a non-empty `type`. Unresolved links are reported as
@@ -1877,12 +1729,12 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			return err
 		}
 		if fi.IsDir() {
-			if skipWalkDir(root, p, fi.Name()) {
+			if bundle.SkipWalkDir(root, p, fi.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".md") || isReservedBase(fi.Name()) {
+		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -1948,7 +1800,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 // disclosure). The root index.md carries the okf_version declaration; all other
 // index files have no frontmatter.
 func runIndexMd(cfg *config.Config, root string) error {
-	count, err := writeIndexFiles(cfg, root)
+	count, err := bundle.WriteIndexFiles(cfg, root)
 	if err != nil {
 		return err
 	}
@@ -1956,14 +1808,10 @@ func runIndexMd(cfg *config.Config, root string) error {
 	return nil
 }
 
-// writeIndexFiles (re)generates an OKF index.md in every bundle directory:
+// bundle.WriteIndexFiles (re)generates an OKF index.md in every bundle directory:
 // the root index carries the okf_version declaration, all others have no
 // frontmatter. index.md files are owned by okfw and overwritten. Returns the
 // number of files written.
-func writeIndexFiles(cfg *config.Config, root string) (int, error) {
-	return bundle.WriteIndexFiles(cfg, root)
-}
-
 // runLog renders an OKF log.md at the bundle root from git history (date-grouped,
 // newest first). Concept additions/modifications/deletions become
 // Creation/Update/Deprecation entries.
@@ -2004,7 +1852,7 @@ func runLog(cfg *config.Config, root string) error {
 		}
 		status := fields[0]
 		p := fields[len(fields)-1]
-		if !strings.HasSuffix(p, ".md") || isReservedBase(filepath.Base(p)) {
+		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(filepath.Base(p)) {
 			continue
 		}
 		verb := "Update"
@@ -2043,17 +1891,9 @@ func runLog(cfg *config.Config, root string) error {
 	return nil
 }
 
-// touchTimestamp ensures the updates map bumps the OKF `timestamp` field to now
+// bundle.TouchTimestamp ensures the updates map bumps the OKF `timestamp` field to now
 // (last meaningful change), unless the caller already set it explicitly.
-func touchTimestamp(updates map[string]string) map[string]string {
-	return bundle.TouchTimestamp(updates)
-}
-
-// updateFrontmatter updates specific fields in YAML frontmatter
-func updateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
-	return bundle.UpdateFrontmatter(content, updates)
-}
-
+// bundle.UpdateFrontmatter updates specific fields in YAML frontmatter
 // backlinksToJSON converts backlinks slice to JSON
 func backlinksToJSON(backlinks interface{}) (string, error) {
 	data, err := json.MarshalIndent(backlinks, "", "  ")
@@ -2066,7 +1906,7 @@ func backlinksToJSON(backlinks interface{}) (string, error) {
 // createOrOpenDaily returns the daily note for the given date, creating it
 // (and auto-syncing indexes) when it doesn't exist yet.
 func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, created bool, err error) {
-	id := newV7WithTime(targetDate)
+	id := bundle.NewV7WithTime(targetDate)
 	dateStr := targetDate.Format("2006-01-02")
 	dayName := targetDate.Format("Monday")
 	title := fmt.Sprintf("%s %s", dateStr, dayName)
@@ -2085,7 +1925,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 		return "", false, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	filePath := filepath.Join(dailyDir, noteFilename(dailyDir, title, id))
+	filePath := filepath.Join(dailyDir, bundle.NoteFilename(dailyDir, title, id))
 
 	tmpl, err := templates.Get("daily")
 	if err != nil {
@@ -2099,7 +1939,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 		return "", false, fmt.Errorf("failed to write file: %w", err)
 	}
 
-	if err := autoSync(cfg, filePath); err != nil {
+	if err := bundle.AutoSync(cfg, filePath); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 	}
 	return filePath, true, nil
@@ -2168,7 +2008,7 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 
 		fileDate := z.Created
 		if fileDate.IsZero() {
-			fileDate, err = timeFromID(z.ID)
+			fileDate, err = bundle.TimeFromID(z.ID)
 			if err != nil {
 				return nil
 			}
@@ -2233,164 +2073,12 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 	return nil
 }
 
-// autoIndex indexes a single file silently (for auto-indexing on create/update)
-func autoIndex(cfg *config.Config, filePath string) error { return bundle.AutoIndex(cfg, filePath) }
-
-// autoSync updates the search index and, when a graph database exists, the
+// bundle.AutoIndex indexes a single file silently (for auto-indexing on create/update)
+// bundle.AutoSync updates the search index and, when a graph database exists, the
 // persistent graph for a single created or updated file (best-effort).
-func autoSync(cfg *config.Config, filePath string) error { return bundle.AutoSync(cfg, filePath) }
+// bundle.Spec describes a concept to create.
 
-// conceptSpec describes a concept to create.
-type conceptSpec = bundle.Spec
-
-// createConcept writes a new concept (optionally from a template) and returns
-// its absolute path and id. The caller is responsible for autoSync.
-func createConcept(cfg *config.Config, spec conceptSpec) (string, string, error) {
-	return bundle.CreateConcept(cfg, spec)
-}
-
-// createTodo writes a new todo concept and returns its absolute path and id.
-// The caller is responsible for autoSync.
-func createTodo(cfg *config.Config, title, project, dir, due, priority string, tags []string) (string, string, error) {
-	return bundle.CreateTodo(cfg, title, project, dir, due, priority, tags)
-}
-
-// applyTodoStatus rewrites a todo's frontmatter for the given status
-// transition (closed also stamps completed; open clears it). Returns the
-// updated content, or changed=false when the todo is already in that status.
-func applyTodoStatus(content []byte, status string) (newContent []byte, changed bool, err error) {
-	z, err := config.ParseFrontmatter(content)
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse frontmatter: %w", err)
-	}
-	if !z.IsTodo() {
-		return nil, false, fmt.Errorf("note is not a todo (type: %s)", z.GetKind())
-	}
-	if z.Status == status {
-		return nil, false, nil
-	}
-
-	switch status {
-	case "closed":
-		newContent, err = updateFrontmatter(content, map[string]string{
-			"status":    "closed",
-			"completed": time.Now().Format("2006-01-02"),
-		})
-	case "open":
-		newContent, err = updateFrontmatterRemove(content, map[string]string{
-			"status": "open",
-		}, []string{"completed"})
-	case "in_progress":
-		newContent, err = updateFrontmatter(content, map[string]string{
-			"status": "in_progress",
-		})
-	default:
-		return nil, false, fmt.Errorf("invalid status %q: must be open, in_progress, or closed", status)
-	}
-	if err != nil {
-		return nil, false, fmt.Errorf("failed to update frontmatter: %w", err)
-	}
-	return newContent, true, nil
-}
-
-// generateBasicNote creates a basic note without a template
-func generateBasicNote(id, title, project string, tags []string) string {
-	return bundle.GenerateBasicNote(id, title, project, tags)
-}
-
-// resolveConceptPath resolves a concept ID or file path to an absolute file path
-func resolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
-	return bundle.ResolveConceptPath(cfg, idOrPath)
-}
-
-// updateFrontmatterRemove updates fields and removes specified fields from frontmatter
-func updateFrontmatterRemove(content []byte, updates map[string]string, remove []string) ([]byte, error) {
-	return bundle.UpdateFrontmatterRemove(content, updates, remove)
-}
-
-// addFrontmatterTags appends new tags to the tags: YAML list in frontmatter
-func addFrontmatterTags(content []byte, tags []string) ([]byte, error) {
-	return bundle.AddFrontmatterTags(content, tags)
-}
-
-// generateTodoListMarkdown generates a markdown todo list from search results
-func generateTodoListMarkdown(results []index.SearchResult, project string, today, thisWeek bool) string {
-	var buf bytes.Buffer
-
-	// Title
-	title := "Todo List"
-	if project != "" {
-		title = fmt.Sprintf("Todo List: %s", project)
-	} else if today {
-		title = fmt.Sprintf("Todos Due: %s", time.Now().Format("2006-01-02"))
-	} else if thisWeek {
-		title = "Todos Due This Week"
-	}
-
-	buf.WriteString(fmt.Sprintf("# %s\n\n", title))
-	buf.WriteString(fmt.Sprintf("Generated: %s\n\n", time.Now().Format("2006-01-02 15:04")))
-
-	if len(results) == 0 {
-		buf.WriteString("No todos found.\n")
-		return buf.String()
-	}
-
-	// Group by priority
-	high := make([]index.SearchResult, 0)
-	medium := make([]index.SearchResult, 0)
-	low := make([]index.SearchResult, 0)
-	noPriority := make([]index.SearchResult, 0)
-
-	for _, r := range results {
-		switch r.Priority {
-		case "high":
-			high = append(high, r)
-		case "medium":
-			medium = append(medium, r)
-		case "low":
-			low = append(low, r)
-		default:
-			noPriority = append(noPriority, r)
-		}
-	}
-
-	writeTodoGroup := func(title string, todos []index.SearchResult) {
-		if len(todos) == 0 {
-			return
-		}
-		buf.WriteString(fmt.Sprintf("## %s\n\n", title))
-		for _, todo := range todos {
-			checkbox := "[ ]"
-			if todo.Status == "closed" {
-				checkbox = "[x]"
-			} else if todo.Status == "in_progress" {
-				checkbox = "[~]"
-			}
-			buf.WriteString(fmt.Sprintf("- %s **%s** [[%s]]\n", checkbox, todo.Title, todo.ID))
-			if todo.Due != "" {
-				buf.WriteString(fmt.Sprintf("  - Due: %s\n", todo.Due))
-			}
-			if todo.Project != "" {
-				buf.WriteString(fmt.Sprintf("  - Project: %s\n", todo.Project))
-			}
-		}
-		buf.WriteString("\n")
-	}
-
-	writeTodoGroup("High Priority", high)
-	writeTodoGroup("Medium Priority", medium)
-	writeTodoGroup("Low Priority", low)
-	writeTodoGroup("Other", noPriority)
-
-	buf.WriteString(fmt.Sprintf("---\n\nTotal: %d todos\n", len(results)))
-
-	return buf.String()
-}
-
-// newV7WithTime constructs a UUIDv7 with a specific timestamp instead of time.Now().
-func newV7WithTime(t time.Time) string { return bundle.NewV7WithTime(t) }
-
-// timeFromID extracts creation time from either ID format:
+// bundle.NewV7WithTime constructs a UUIDv7 with a specific timestamp instead of time.Now().
+// bundle.TimeFromID extracts creation time from either ID format:
 //   - Legacy: "YYYYMMDDHHmmss-UUID" → parse 14-char prefix
 //   - UUIDv7: parse first 48 bits as Unix milliseconds
-func timeFromID(id string) (time.Time, error) { return bundle.TimeFromID(id) }

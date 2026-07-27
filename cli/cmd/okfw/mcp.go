@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graphdb"
 	"okfw/cli/internal/index"
@@ -107,29 +108,27 @@ func mcpTools() []map[string]interface{} {
 			"name":        "search",
 			"description": "Search wiki concepts. Returns [{id,title,path,project,tags,snippet}]; path is wiki-relative (use with read).",
 			"inputSchema": obj(map[string]interface{}{
-				"q":        str("full-text query"),
-				"project":  str("filter by project"),
-				"tag":      str("filter by tag"),
-				"kind":     enum("filter by kind", "note", "todo", "daily-note", "issue"),
-				"status":   enum("todo status filter", "open", "in_progress", "closed"),
-				"priority": enum("todo priority filter", "high", "medium", "low"),
-				"limit":    num("max results (default 10)"),
+				"q":       str("full-text query"),
+				"project": str("filter by project"),
+				"tag":     str("filter by tag"),
+				"kind":    enum("filter by kind", "note", "daily-note", "issue"),
+				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
+				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
+				"limit":   num("max results (default 10)"),
 			}),
 		},
 		{
 			"name":        "create",
 			"description": "Create a concept. Returns {id,path}.",
 			"inputSchema": obj(map[string]interface{}{
-				"kind":        enum("what to create (default note)", "note", "todo", "daily"),
-				"title":       str("title (required for note/todo)"),
+				"kind":        enum("what to create (default note)", "note", "daily"),
+				"title":       str("title (required for note)"),
 				"project":     str("optional project metadata (also used as folder)"),
 				"dir":         str("wiki subdirectory, e.g. research/protocols"),
 				"tags":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
 				"description": str("one-sentence OKF description"),
 				"body":        str("markdown body content"),
 				"template":    str("template name (see okfw templates)"),
-				"due":         str("todo due date YYYY-MM-DD"),
-				"priority":    enum("todo priority", "high", "medium", "low"),
 				"date":        str("daily note date YYYY-MM-DD (default today)"),
 			}),
 		},
@@ -145,8 +144,8 @@ func mcpTools() []map[string]interface{} {
 			"description": "Update a concept: metadata, or its markdown body (append / set_body).",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":    str("concept id or path"),
-				"action": enum("what to change", "set_project", "set_status", "add_tags", "append", "set_body"),
-				"value":  str("project | status | comma-separated tags | markdown (append/set_body)"),
+				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "append", "set_body"),
+				"value":  str("project | draft|stable|deprecated | YYYY-MM-DD | comma-separated tags | markdown (append/set_body)"),
 			}, "ref", "action", "value"),
 		},
 		{
@@ -207,7 +206,7 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 		resp.Result = map[string]interface{}{
 			"protocolVersion": version,
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": "okfw", "version": "0.1"},
+			"serverInfo":      map[string]interface{}{"name": "okfw", "version": config.Version},
 		}
 	case "ping":
 		resp.Result = map[string]interface{}{}
@@ -255,7 +254,7 @@ func resolveRef(cfg *config.Config, ref string) (string, error) {
 		}
 		return p, nil
 	}
-	return resolveConceptPath(cfg, ref)
+	return bundle.ResolveConceptPath(cfg, ref)
 }
 
 func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
@@ -292,13 +291,13 @@ type mcpHit struct {
 
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
-		Q        string `json:"q"`
-		Project  string `json:"project"`
-		Tag      string `json:"tag"`
-		Kind     string `json:"kind"`
-		Status   string `json:"status"`
-		Priority string `json:"priority"`
-		Limit    int    `json:"limit"`
+		Q       string `json:"q"`
+		Project string `json:"project"`
+		Tag     string `json:"tag"`
+		Kind    string `json:"kind"`
+		Status  string `json:"status"`
+		Stale   bool   `json:"stale"`
+		Limit   int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
@@ -314,12 +313,12 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 	defer idx.Close()
 
 	opts := index.SearchOptions{
-		Query:    a.Q,
-		Project:  a.Project,
-		Kind:     a.Kind,
-		Status:   a.Status,
-		Priority: a.Priority,
-		Limit:    a.Limit,
+		Query:   a.Q,
+		Project: a.Project,
+		Kind:    a.Kind,
+		Status:  a.Status,
+		Stale:   a.Stale,
+		Limit:   a.Limit,
 	}
 	if a.Tag != "" {
 		opts.Tags = []string{a.Tag}
@@ -353,8 +352,6 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		Description string   `json:"description"`
 		Template    string   `json:"template"`
 		Body        string   `json:"body"`
-		Due         string   `json:"due"`
-		Priority    string   `json:"priority"`
 		Date        string   `json:"date"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -377,24 +374,11 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		return jsonResult(map[string]string{"path": relPath(cfg, path)})
 
-	case "todo":
-		if a.Title == "" {
-			return errResult(fmt.Errorf("title is required for todos"))
-		}
-		path, id, err := createTodo(cfg, a.Title, a.Project, a.Dir, a.Due, a.Priority, a.Tags)
-		if err != nil {
-			return errResult(err)
-		}
-		if err := autoSync(cfg, path); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to index todo: %v\n", err)
-		}
-		return jsonResult(map[string]string{"id": id, "path": relPath(cfg, path)})
-
 	case "", "note":
 		if a.Title == "" {
 			return errResult(fmt.Errorf("title is required for notes"))
 		}
-		path, id, err := createConcept(cfg, conceptSpec{
+		path, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 			Title:       a.Title,
 			Project:     a.Project,
 			Dir:         a.Dir,
@@ -406,12 +390,12 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		if err != nil {
 			return errResult(err)
 		}
-		if err := autoSync(cfg, path); err != nil {
+		if err := bundle.AutoSync(cfg, path); err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 		}
 		return jsonResult(map[string]string{"id": id, "path": relPath(cfg, path)})
 	}
-	return errResult(fmt.Errorf("unknown kind %q: want note, todo, or daily", a.Kind))
+	return errResult(fmt.Errorf("unknown kind %q: want note or daily", a.Kind))
 }
 
 func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -457,13 +441,19 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	var newContent []byte
 	switch a.Action {
 	case "set_project":
-		newContent, err = updateFrontmatter(content, map[string]string{"project": a.Value})
-	case "set_status":
-		var changed bool
-		newContent, changed, err = applyTodoStatus(content, a.Value)
-		if err == nil && !changed {
-			return jsonResult(map[string]string{"path": relPath(cfg, path), "status": "unchanged"})
+		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"project": a.Value})
+	case "set_lifecycle":
+		switch a.Value {
+		case "draft", "stable", "deprecated":
+		default:
+			return errResult(fmt.Errorf("invalid lifecycle status %q: want draft, stable, or deprecated", a.Value))
 		}
+		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"status": a.Value})
+	case "set_stale_after":
+		if _, perr := time.Parse("2006-01-02", a.Value); perr != nil {
+			return errResult(fmt.Errorf("invalid stale_after %q: want YYYY-MM-DD", a.Value))
+		}
+		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"stale_after": a.Value})
 	case "add_tags":
 		var tags []string
 		for _, t := range strings.Split(a.Value, ",") {
@@ -471,20 +461,20 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 				tags = append(tags, t)
 			}
 		}
-		newContent, err = addFrontmatterTags(content, tags)
+		newContent, err = bundle.AddFrontmatterTags(content, tags)
 		if err == nil {
-			newContent, err = updateFrontmatter(newContent, nil) // bump timestamp
+			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
 	case "append":
 		appended := append([]byte(strings.TrimRight(string(content), "\n")), []byte("\n\n"+strings.TrimRight(a.Value, "\n")+"\n")...)
-		newContent, err = updateFrontmatter(appended, nil) // bump timestamp
+		newContent, err = bundle.UpdateFrontmatter(appended, nil) // bump timestamp
 	case "set_body":
 		fm, ferr := config.ExtractFrontmatter(content)
 		if ferr != nil {
 			return errResult(ferr)
 		}
 		rebuilt := "---\n" + string(fm) + "\n---\n\n" + strings.TrimRight(a.Value, "\n") + "\n"
-		newContent, err = updateFrontmatter([]byte(rebuilt), nil) // bump timestamp
+		newContent, err = bundle.UpdateFrontmatter([]byte(rebuilt), nil) // bump timestamp
 	default:
 		return errResult(fmt.Errorf("unknown action %q", a.Action))
 	}
@@ -495,7 +485,7 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	if err := os.WriteFile(path, newContent, 0644); err != nil {
 		return errResult(err)
 	}
-	if err := autoSync(cfg, path); err != nil {
+	if err := bundle.AutoSync(cfg, path); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to index: %v\n", err)
 	}
 	return jsonResult(map[string]string{"path": relPath(cfg, path), "status": "ok"})

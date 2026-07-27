@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
@@ -23,7 +24,6 @@ const WikiDirName = ".okfw"
 const (
 	IndexDirName = ".index"    // Bleve search index
 	GraphDBName  = ".graph.db" // bbolt graph database
-	TodosDirName = ".todos"    // generated todo lists
 )
 
 // Config carries the resolved paths of a discovered wiki.
@@ -31,7 +31,6 @@ type Config struct {
 	RootPath  string // absolute path of the .okfw directory (the OKF bundle root)
 	IndexPath string // absolute path of the Bleve index
 	GraphPath string // graph database path, relative to RootPath
-	TodosPath string // todos output directory, relative to RootPath
 }
 
 // ErrNoWiki is returned by Discover when no .okfw directory is found.
@@ -49,7 +48,6 @@ func ConfigFor(wikiDir string) *Config {
 		RootPath:  wikiDir,
 		IndexPath: filepath.Join(wikiDir, IndexDirName),
 		GraphPath: GraphDBName,
-		TodosPath: TodosDirName,
 	}
 }
 
@@ -83,14 +81,29 @@ func Discover(startDir string) (*Config, error) {
 	}
 }
 
-// LoadConceptSchema compiles and returns the #Concept CUE definition.
+// The compiled schema is process-wide and immutable, so it is built once.
+// Recompiling per call made every concept pay CUE compilation — invisible for a
+// single `okfw validate`, but paid thousands of times over by validate --all and
+// by `graphy export okfw`.
+var (
+	schemaOnce sync.Once
+	schemaVal  cue.Value
+	schemaErr  error
+)
+
+// LoadConceptSchema returns the #Concept CUE definition, compiling it on first
+// use. The returned value is shared; callers must not mutate it.
 func LoadConceptSchema() (cue.Value, error) {
-	ctx := cuecontext.New()
-	val := ctx.CompileString(conceptSchema)
-	if val.Err() != nil {
-		return cue.Value{}, fmt.Errorf("failed to compile concept schema: %w", val.Err())
-	}
-	return val.LookupPath(cue.ParsePath("#Concept")), nil
+	schemaOnce.Do(func() {
+		ctx := cuecontext.New()
+		val := ctx.CompileString(conceptSchema)
+		if val.Err() != nil {
+			schemaErr = fmt.Errorf("failed to compile concept schema: %w", val.Err())
+			return
+		}
+		schemaVal = val.LookupPath(cue.ParsePath("#Concept"))
+	})
+	return schemaVal, schemaErr
 }
 
 // ValidateConceptYAML validates YAML frontmatter against the #Concept schema.

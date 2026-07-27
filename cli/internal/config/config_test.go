@@ -44,9 +44,6 @@ func TestDiscover(t *testing.T) {
 	if cfg.GraphPath != GraphDBName {
 		t.Errorf("GraphPath = %q, want %q", cfg.GraphPath, GraphDBName)
 	}
-	if cfg.TodosPath != TodosDirName {
-		t.Errorf("TodosPath = %q, want %q", cfg.TodosPath, TodosDirName)
-	}
 
 	// Found from a nested subdirectory (walks upward).
 	cfg, err = Discover(nested)
@@ -293,7 +290,7 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 	// Read the valid test file
 	content, err := os.ReadFile("../../testdata/valid_concept.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)
@@ -309,7 +306,7 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 	content, err := os.ReadFile("../../testdata/valid_concept_with_parent.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)
@@ -325,7 +322,7 @@ func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 func TestParseAndValidate_InvalidFile(t *testing.T) {
 	content, err := os.ReadFile("../../testdata/invalid_concept.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	_, err = ParseAndValidate(content)
@@ -337,7 +334,7 @@ func TestParseAndValidate_InvalidFile(t *testing.T) {
 func TestParseAndValidate_NoProject(t *testing.T) {
 	content, err := os.ReadFile("../../testdata/valid_concept_no_project.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)

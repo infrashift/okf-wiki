@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuiltinTemplates(t *testing.T) {
-	expectedTemplates := []string{"meeting", "book-review", "snippet", "project-idea", "user-story", "feature", "daily", "todo", "issue"}
+	expectedTemplates := []string{"meeting", "book-review", "snippet", "project-idea", "user-story", "feature", "daily", "issue"}
 
 	for _, name := range expectedTemplates {
 		tmpl, ok := BuiltinTemplates[name]
@@ -45,7 +45,7 @@ func TestGet(t *testing.T) {
 		{"user-story", false},
 		{"feature", false},
 		{"daily", false},
-		{"todo", false},
+		{"todo", true}, // removed with the task-tracking feature
 		{"issue", false},
 		{"nonexistent", true},
 		{"", true},
@@ -73,8 +73,8 @@ func TestGet(t *testing.T) {
 func TestList(t *testing.T) {
 	names := List()
 
-	if len(names) != 9 {
-		t.Errorf("Expected 9 templates, got %d", len(names))
+	if len(names) != 8 {
+		t.Errorf("Expected 8 templates, got %d", len(names))
 	}
 
 	expected := map[string]bool{
@@ -85,7 +85,6 @@ func TestList(t *testing.T) {
 		"user-story":   true,
 		"feature":      true,
 		"daily":        true,
-		"todo":         true,
 		"issue":        true,
 	}
 
@@ -163,34 +162,6 @@ func TestGenerateFrontmatter_NoDuplicateTags(t *testing.T) {
 	}
 }
 
-func TestGenerateTodoFrontmatter(t *testing.T) {
-	tmpl, _ := Get("todo")
-
-	todoOpts := &TodoOptions{
-		Status:   "open",
-		Due:      "2026-02-20",
-		Priority: "high",
-	}
-
-	frontmatter := tmpl.GenerateFrontmatterWithOptions("20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Fix login bug", "my-project", nil, todoOpts)
-
-	if !strings.Contains(frontmatter, `type: "todo"`) {
-		t.Errorf("Todo frontmatter should contain type: todo")
-	}
-
-	if !strings.Contains(frontmatter, `status: "open"`) {
-		t.Errorf("Todo frontmatter should contain status")
-	}
-
-	if !strings.Contains(frontmatter, `due: "2026-02-20"`) {
-		t.Errorf("Todo frontmatter should contain due date")
-	}
-
-	if !strings.Contains(frontmatter, `priority: "high"`) {
-		t.Errorf("Todo frontmatter should contain priority")
-	}
-}
-
 func TestGenerateNote(t *testing.T) {
 	tmpl, _ := Get("user-story")
 
@@ -247,13 +218,13 @@ func TestGenerateFrontmatter_OKFFields(t *testing.T) {
 		t.Error("frontmatter should include timestamp")
 	}
 
-	// A todo: both `type` and `kind` are written.
-	todo, _ := Get("todo")
-	fm = todo.GenerateFrontmatterWithOptions(id, "T", "p", nil, &TodoOptions{Status: "open"})
-	if !strings.Contains(fm, `type: "todo"`) || !strings.Contains(fm, `kind: "todo"`) {
-		t.Errorf("todo should write both type and kind:\n%s", fm)
+	// A non-default kind: both `type` and `kind` are written.
+	issue, _ := Get("issue")
+	fm = issue.GenerateFrontmatter(id, "T", "p", nil)
+	if !strings.Contains(fm, `type: "issue"`) || !strings.Contains(fm, `kind: "issue"`) {
+		t.Errorf("issue should write both type and kind:\n%s", fm)
 	}
 	if !strings.Contains(fm, "timestamp:") {
-		t.Error("todo frontmatter should include timestamp")
+		t.Error("issue frontmatter should include timestamp")
 	}
 }
