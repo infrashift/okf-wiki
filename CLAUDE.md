@@ -76,7 +76,12 @@ six are pure-Go parsers (markdown/sql via regex, yaml/json via yaml.v3, cue via
 cuelang, terraform via hcl) that a grammar bump cannot break;
 `detect` never lists dot-directories — the walk and `git ls-files` share one
 ignore filter, so graphy cannot re-ingest its own `.okfw/` export as heading
-nodes;
+nodes; the build-output ignores (`dist/`, `build/`, `target/`, `out/`) are
+**anchored to the repo root** while `node_modules/`/`vendor/` match at any
+depth, because those four are ordinary words that name real source packages —
+matching `build/` at any depth silently erased this repo's own
+`cli/internal/graphy/build` package from the graph, and invisibly, since a file
+`detect` never lists is not a file that *failed* to extract;
 `graphy export okfw` is idempotent via the store's exports bucket, recoverable
 from the `<!-- graphy:node … -->` body markers if `.graphy/` is lost, and
 stamps exported concepts with `type: code-<entity>`, `resource:` (source
@@ -87,7 +92,43 @@ No-op re-exports write nothing (content compared with previous
 timestamp/commit stamps, so `timestamp` means "last meaningful change"), and
 renamed/moved entities keep their concept id: unique same-name-different-file
 or 1:1 same-file-same-kind pairings adopt the old concept and rename its file
-(rationale is excluded from the same-file pairing — see below). Community
+(rationale is excluded from the same-file pairing — see below).
+
+Adoption resolves **after** every live placement, never during. Both community
+matchers can otherwise select a record another item already resolved — a
+community that splits leaves a successor overlapping the original by more than
+half, and two communities can carry byte-identical titles — and adopting it
+renames the file that item sits on and deletes its record, so pass 2 then dies
+on `ENOENT` after those writes landed. Renames go through `bundle.MoveConcept`
+so inbound links are repaired, and the no-op guard compares the filename's slug
+directly: the old guard asked `bundle.NoteFilename`, which skips names that
+exist on disk — including the file being renamed — so it never fired and
+"re-keyed in place" never was. The record's concept id is a cache of what the
+file says; the file wins, or children get a `parent:` pointing at an id that
+exists nowhere. A changed `--project` fails loudly rather than splitting the
+bundle across two directories, where every `./name.md` link would resolve to
+nothing.
+
+**Rendering is budgeted, because the bundle is read one concept at a time.**
+Structural `contains` edges naming a file or heading are dropped rather than
+rendered as dead text — they restate `resource:` and the outline, and were a
+fifth of every bullet. A heading endpoint redirects to its document, which is
+what makes a doc→code reference navigable from the code side. Edges group under
+`### <relation> (N)` carrying the true count, sorted by confidence then degree,
+capped by `--max-edges` (default 25) with the remainder naming the query that
+returns it; AMBIGUOUS edges are segregated into a trailing roll-up rather than
+interleaved, where they read exactly like resolved ones. Doc concepts render an
+**outline** of their headings with what each section references. Community
+concepts carry a composition line and cap their member table at 40. A
+`type: code-graph` **overview concept** is the bundle's front door — stats,
+languages, the cluster meta (algorithm/resolution/seed, otherwise unrecoverable
+from a bundle), every subsystem and the top entry points — and communities
+parent to it, so the export is a tree rather than a thousand siblings.
+`TestExportStaysWithinItsTokenBudget` pins the result: every other test here
+asserts something is *present*, so they all push toward rendering more, and
+nothing else pushes back.
+
+Community
 concepts are keyed in the exports bucket by their **label slug**, not their
 detection id: ids are ordered by each community's smallest member, so one added
 node renumbers most of them, and integer keys silently *repurposed* concepts
@@ -191,6 +232,71 @@ widening the set back re-extracts. `--full` purges are counted as
 `Stats.CacheCleared`, kept apart from `FilesPurged` so "purged" keeps meaning
 "gone from disk".
 
+**Resolution confidence is a claim about evidence, not a score.** `lookupSymbol`
+reports whether it matched the ref's full (possibly qualified) name or only its
+bare tail, and the two get different ladders. A full match keeps
+same-file→EXTRACTED, unique→INFERRED, 2..5→AMBIGUOUS. A **tail-only** match
+resolves at most one candidate and otherwise *drops*: the qualifier that said
+which symbol was meant has already been discarded, so the extra candidates are
+not rival readings, they are unrelated symbols sharing a method name. Fanning
+out over them manufactured edges — every `err.Error()` in this repo landed on
+all three error types, making them the largest, most-connected entities in the
+graph and the most expensive concepts in the bundle. For Go, a call qualified by
+a package the file imports is scoped to that package's directory first
+(`goPackageDirs`), which turns a blind tail match into an exact one. Measured
+here: AMBIGUOUS fell from 14.1% of edges to 3.7%, while INFERRED *rose*, because
+the scoping recovers real cross-package calls.
+
+**Cross-artifact linking beyond code.** Markdown emits `references` refs for
+backticked identifiers in prose, not only for links — links only resolve when a
+doc names a *path*, which this repo's 38 documents did exactly once. Refs are
+owned by the enclosing H1/H2 rather than the document, carry line numbers, and a
+`#L42` anchor resolves to the declaration on that line instead of the file node.
+Markdown refs also get the `anyLang` fallback that only ADRs had: every markdown
+node kind is non-indexable, so a language-keyed lookup could *never* reach a Go
+symbol, which is why doc→code was structurally impossible before. An ADR drops
+the `references` refs that duplicate its own `explains` refs — the stronger
+relation wins rather than both being recorded.
+
+Three relations join things the graph previously could not: **`implements`** is
+inferred for Go by comparing an interface's `Members` against a type's method
+set (Go satisfaction is structural, so nothing in the source names the
+implementor; empty interfaces and embedded/promoted methods deliberately
+under-report rather than guess). **`tests`** points from a test to its subject,
+derived from naming convention only — promoting a test's call edges would mark
+every assertion helper as under test — with the subject taken from the longest
+CamelCase prefix naming a real symbol, lower-cased initial included
+(`TestRunMigrateIsIdempotent` → `runMigrate`), floored at 5 characters so short
+generic words cannot win. `Node.Test` marks every entity in a test file whether
+or not an edge was derived: test files inflate `Degree`, which `--min-degree`
+reads as significance, and pull the partition toward mirroring the suite.
+**`depends_on`** is read from `go.mod`/`package.json`, since every third-party
+call is dropped by resolution; a declared module `contains` the subpackages
+actually imported, without which `tree-sitter-go` looks unused while
+`tree-sitter-go/bindings/go` looks undeclared.
+
+**Deterministic traversal** (`query.Neighbors`/`Edges`/`FileNodes`/`Rationale`,
+surfaced as `graphy neighbors|callers|uses|why|nodes|concept` and the matching
+MCP tools) is what an agent uses when it already knows the entity;
+`graphy query` is the only non-deterministic command, since its seeds come from
+a model or a keyword score. `ResolveEntity` accepts a repo-relative file path as
+well as a name, qualified name or id — an agent is almost always working *in* a
+file. Everything is capped and says so: a result carrying `truncated`/`… N more`
+withheld rows, and an unknown relation/kind/direction is a hard error listing the
+vocabulary rather than a silently-ignored filter, which would widen the query to
+everything and read as "no matches". Test entities are excluded by default.
+
+**The bridge.** `graphy export okfw` records `store.MetaBundleKey` (the bundle
+root) alongside each `ExportRecord`, because a record holds a *bundle-relative*
+path and nothing else identified the bundle — so the mapping could not be turned
+into a path anyone could open. `graphy concept` crosses graph→wiki;
+`okfw search --node-id` crosses back, which requires `graphy.node_id` to reach
+the Bleve index as a keyword field. Every node graphy's MCP tools return carries
+its `concept` path. `cmd/graphy`'s `TestSkillDocumentsEveryCommand` /
+`TestSkillPromisesOnlyRealCommands` check the agent skill against the registered
+command set in both directions: the skill advertised impact analysis for months
+while no command answered it, and that drift is now a test failure.
+
 ## Data Model
 
 Concepts are markdown files with YAML frontmatter. A concept's OKF ID is its file
@@ -286,6 +392,11 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - `WriteIndexFiles` also prunes listings for directories that no longer hold
   concepts (and the emptied directory), or a delete would leave a generated
   `index.md` still advertising what used to be there.
+- `bundle.DeleteConceptFile` is `DeleteConcept` without the `index.md` refresh,
+  for callers deleting in bulk — `WriteIndexFiles` walks the whole bundle, so
+  running it per deletion turns a sweep into quadratic work. Every such caller
+  owes one refresh afterwards (`graphy export okfw`'s stale sweep does this in
+  its single `syncBundle` pass).
 - The Bleve index is pruned by `bundle.PruneIndex`, wired into `graph-sync`.
   Nothing used to prune it, so a deleted concept stayed in `okfw search` results
   forever — `search` reports index hits without stat-ing the file.
@@ -296,7 +407,7 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - Run `okfw graph-sync` to build/update the persistent graph for O(1) backlink lookups
 - Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing, auto-maintained by okfw on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
 - The Neovim plugin uses snacks.nvim for pickers (not telescope), and needs `plenary.job` at **runtime**, not only for tests
-- `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated tools (search/create/read/update/graph), compact JSON, no protocol dependency. `update` actions must stay at parity with the CLI writers
+- `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated tools (search/create/read/update/graph), compact JSON, no protocol dependency. `update` actions must stay at parity with the CLI writers. `read` takes `section`/`offset`/`limit` rather than always dumping a whole concept, and `search` takes `node_id` — the wiki→graph half of the bridge, which needs `graphy.node_id` indexed as a Bleve keyword field (`bundle.IndexFile` populates it from the frontmatter extension block)
 - `cli/internal/bundle` is the shared write path for **both** binaries, so it owns
   its tests. Do not reintroduce the pass-through wrappers that used to sit in
   `cmd/okfw/main.go` (`slugify`, `noteFilename`, …): they existed only so

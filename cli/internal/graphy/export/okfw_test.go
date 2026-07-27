@@ -1973,3 +1973,128 @@ func TestExportRecordsTheBundleAndBridgesToConcepts(t *testing.T) {
 		t.Errorf("ConceptIndex missing Alpha: %v", idx)
 	}
 }
+
+// TestExportStaysWithinItsTokenBudget is a regression guard on the size of what
+// the export writes, not on its correctness.
+//
+// Every other test here asserts that some particular thing is present, so they
+// all push in the direction of rendering more. Nothing pushed back, and the
+// bundle is read by agents one concept at a time: a concept that grows past a
+// few thousand characters stops being worth opening. These bounds are generous
+// against the fixture below — they exist to catch a change that removes a cap
+// or reinstates the structural dead ends, not to police ordinary edits.
+func TestExportStaysWithinItsTokenBudget(t *testing.T) {
+	s, cfg := hubFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	files := conceptFiles(t, cfg, res.Dir)
+	var total, largest int
+	var largestName string
+	bullets := 0
+	for name, content := range files {
+		total += len(content)
+		if len(content) > largest {
+			largest, largestName = len(content), name
+		}
+		inEdges := false
+		for _, line := range strings.Split(string(content), "\n") {
+			switch {
+			case strings.HasPrefix(line, "## Outgoing"), strings.HasPrefix(line, "## Incoming"):
+				inEdges = true
+			case strings.HasPrefix(line, "## "):
+				inEdges = false
+			case inEdges && strings.HasPrefix(line, "- "):
+				bullets++
+			}
+		}
+	}
+
+	// The hub has 200 callers; at --max-edges 25 no concept may list them all.
+	// Uncapped, the hub concept alone runs past 12kB.
+	const maxConceptBytes = 4000
+	if largest > maxConceptBytes {
+		t.Errorf("largest concept %s is %d bytes, over the %d budget",
+			largestName, largest, maxConceptBytes)
+	}
+	// 25 shown on the hub plus one back-edge per caller. An uncapped render
+	// emits 400, and reinstating the structural file edges would double that.
+	const maxBullets = 300
+	if bullets > maxBullets {
+		t.Errorf("rendered %d edge bullets across %d concepts, over the %d budget",
+			bullets, len(files), maxBullets)
+	}
+
+	// Every bullet must be a link or a source location. A bare label is a dead
+	// end that costs tokens and answers nothing — which is what the structural
+	// `contains` edges to file nodes used to be.
+	for name, content := range files {
+		inEdges := false
+		for _, line := range strings.Split(string(content), "\n") {
+			switch {
+			case strings.HasPrefix(line, "## Outgoing"), strings.HasPrefix(line, "## Incoming"):
+				inEdges = true
+				continue
+			case strings.HasPrefix(line, "## "):
+				inEdges = false
+				continue
+			}
+			if !inEdges || !strings.HasPrefix(line, "- ") {
+				continue
+			}
+			if strings.HasPrefix(line, "- … ") || strings.HasPrefix(line, "- Ambiguous") {
+				continue
+			}
+			if !strings.Contains(line, "](") && !strings.Contains(line, "`") {
+				t.Errorf("%s has a dead-end bullet: %q", name, line)
+			}
+		}
+	}
+	t.Logf("%d concepts, %d bytes total, largest %d, %d edge bullets",
+		len(files), total, largest, bullets)
+}
+
+// hubFixture builds a graph with one heavily-referenced entity, which is where
+// an uncapped renderer does its damage: 200 callers, each in its own file so
+// the structural `contains` edges that must not be rendered are present too.
+func hubFixture(t *testing.T) (*store.Store, *config.Config) {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	hub := model.Node{ID: "go:function:hub.go#Hub", Label: "Hub", Kind: model.KindFunction,
+		Language: "go", File: "hub.go", Span: model.Span{StartLine: 1}, Degree: 400}
+	nodes := []model.Node{hub}
+	var edges []model.Edge
+	for i := 0; i < 200; i++ {
+		file := fmt.Sprintf("c%03d.go", i)
+		// A file node per caller: these produce the structural `contains` edges
+		// that must not be rendered.
+		fileID := model.NodeID("go", model.KindFile, file, "")
+		callerID := model.NodeID("go", model.KindFunction, file, fmt.Sprintf("Caller%03d", i))
+		nodes = append(nodes,
+			model.Node{ID: fileID, Label: file, Kind: model.KindFile, Language: "go",
+				File: file, Span: model.Span{StartLine: 1}, Degree: 2},
+			model.Node{ID: callerID, Label: fmt.Sprintf("Caller%03d", i), Kind: model.KindFunction,
+				Language: "go", File: file, Span: model.Span{StartLine: 3}, Degree: 2})
+		edges = append(edges,
+			model.Edge{Source: fileID, Target: callerID, Relation: model.RelContains, Confidence: model.ConfExtracted},
+			model.Edge{Source: callerID, Target: hub.ID, Relation: model.RelCalls, Confidence: model.ConfInferred})
+	}
+	if err := s.PutFile(store.FileRecord{Path: "all.go", NodeIDs: ids(nodes)}, nodes); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges(edges); err != nil {
+		t.Fatal(err)
+	}
+	bundleRoot := filepath.Join(t.TempDir(), ".okfw")
+	if err := os.MkdirAll(bundleRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return s, config.ConfigFor(bundleRoot)
+}
