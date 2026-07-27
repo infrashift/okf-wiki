@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,6 +67,46 @@ const (
 	// dependency, read from a package manifest rather than from source.
 	RelDependsOn Relation = "depends_on"
 )
+
+// allRelations and allKinds back the validators below. A query that names a
+// relation or kind gets an error rather than a silently empty filter, which
+// would widen the query to everything and read as "no results".
+var allRelations = []Relation{
+	RelCalls, RelImports, RelInherits, RelImplements,
+	RelReferences, RelContains, RelDefines, RelExplains, RelTests, RelDependsOn,
+}
+
+var allKinds = []Kind{
+	KindFunction, KindMethod, KindClass, KindStruct, KindInterface, KindType,
+	KindModule, KindFile, KindDoc, KindHeading, KindVariable, KindConfig,
+	KindResource, KindExternal, KindRationale,
+}
+
+// ValidRelation reports whether r is part of the vocabulary.
+func ValidRelation(r Relation) bool { return slices.Contains(allRelations, r) }
+
+// ValidKind reports whether k is part of the vocabulary.
+func ValidKind(k Kind) bool { return slices.Contains(allKinds, k) }
+
+// RelationNames lists the relation vocabulary, for help text and errors.
+func RelationNames() []string {
+	out := make([]string, len(allRelations))
+	for i, r := range allRelations {
+		out[i] = string(r)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// KindNames lists the kind vocabulary, for help text and errors.
+func KindNames() []string {
+	out := make([]string, len(allKinds))
+	for i, k := range allKinds {
+		out[i] = string(k)
+	}
+	sort.Strings(out)
+	return out
+}
 
 // Confidence tags how an edge was established.
 type Confidence string

@@ -65,12 +65,26 @@ func pathCmd() *cobra.Command {
 }
 
 func explainCmd() *cobra.Command {
-	var asJSON bool
+	var tf traverseFlags
+	var direction string
 	cmd := &cobra.Command{
 		Use:   "explain <entity>",
 		Short: "Show an entity's details and connections",
-		Args:  cobra.ExactArgs(1),
+		Long: `Prints an entity card: location, signature, doc, community, and its edges.
+
+Use --rel and --direction to narrow the edge list; on a hub entity the full card
+is hundreds of edges. For the impact question specifically, ` + "`graphy callers`" + `
+is the same query with the direction already chosen.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			rels, _, err := tf.parse()
+			if err != nil {
+				return err
+			}
+			dir, err := query.ParseDirection(direction)
+			if err != nil {
+				return err
+			}
 			_, s, err := openStore()
 			if err != nil {
 				return err
@@ -81,18 +95,21 @@ func explainCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			card, err := query.Explain(s, n.ID)
+			card, err := query.ExplainFiltered(s, n.ID, query.EdgeQuery{
+				Direction: dir, Relations: rels, Limit: tf.limit, IncludeTests: tf.tests,
+			})
 			if err != nil {
 				return err
 			}
-			if asJSON {
+			if tf.asJSON {
 				return json.NewEncoder(os.Stdout).Encode(card)
 			}
 			printCard(s, card)
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "emit the card as JSON")
+	tf.bind(cmd, false)
+	cmd.Flags().StringVar(&direction, "direction", string(query.Both), "which edges to list: out, in, or both")
 	return cmd
 }
 
@@ -123,6 +140,10 @@ func printCard(s storeReader, card *query.Card) {
 	fmt.Printf("  degree:    %d\n", n.Degree)
 	printEdgeGroup(s, "Outgoing", card.Out, true)
 	printEdgeGroup(s, "Incoming", card.In, false)
+	if card.Truncated {
+		fmt.Printf("  … %d of %d edges shown (raise --limit, or narrow with --rel)\n",
+			len(card.Out)+len(card.In), card.Total)
+	}
 }
 
 // storeReader is the minimal lookup surface the printers need.
@@ -159,9 +180,14 @@ func padRelation(r model.Relation) string {
 }
 
 func reportCmd() *cobra.Command {
-	return &cobra.Command{
+	var section string
+	var list bool
+	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Print GRAPH_REPORT.md",
+		Long: `Prints the generated graph report. On a large repository the whole document
+runs to thousands of tokens, most of them the community listing, so --section
+takes just the part you need and --sections lists what is available.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			w, err := openWorkspace()
 			if err != nil {
@@ -171,6 +197,20 @@ func reportCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("no report at %s (run `graphy build`)", w.ReportPath())
 			}
+			switch {
+			case list:
+				for _, name := range reportSections(string(content)) {
+					fmt.Println(name)
+				}
+				return nil
+			case section != "":
+				body, ok := reportSection(string(content), section)
+				if !ok {
+					return fmt.Errorf("no section %q (try --sections)", section)
+				}
+				fmt.Print(body)
+				return nil
+			}
 			fmt.Print(string(content))
 			if !strings.HasSuffix(string(content), "\n") {
 				fmt.Println()
@@ -178,4 +218,66 @@ func reportCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&section, "section", "", "print only this section, by heading text")
+	cmd.Flags().BoolVar(&list, "sections", false, "list the report's section headings")
+	return cmd
+}
+
+// reportSections lists the report's top-level headings, in document order.
+//
+// Depth-limited on purpose: the community listing contributes one H3 per
+// community, so listing every heading on a real repository is longer than the
+// document the flag exists to avoid printing. Those subsections are still
+// reachable — asking for "Communities" returns them all.
+func reportSections(content string) []string {
+	var out []string
+	for _, line := range strings.Split(content, "\n") {
+		if h, ok := headingText(line); ok && headingLevel(line) <= 2 {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+// reportSection extracts one heading's content, matched case-insensitively,
+// through to the next heading of the same or a shallower level.
+func reportSection(content, want string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	want = strings.ToLower(strings.TrimSpace(want))
+	start, level := -1, 0
+	for i, line := range lines {
+		h, ok := headingText(line)
+		if !ok {
+			continue
+		}
+		if start < 0 {
+			if strings.ToLower(h) == want {
+				start, level = i, headingLevel(line)
+			}
+			continue
+		}
+		if headingLevel(line) <= level {
+			return strings.Join(lines[start:i], "\n"), true
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	return strings.Join(lines[start:], "\n"), true
+}
+
+func headingLevel(line string) int {
+	n := 0
+	for n < len(line) && line[n] == '#' {
+		n++
+	}
+	return n
+}
+
+func headingText(line string) (string, bool) {
+	n := headingLevel(line)
+	if n == 0 || n >= len(line) || line[n] != ' ' {
+		return "", false
+	}
+	return strings.TrimSpace(line[n+1:]), true
 }

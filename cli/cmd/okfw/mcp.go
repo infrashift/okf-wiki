@@ -106,7 +106,7 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "search",
-			"description": "Search wiki concepts. Returns [{id,title,path,project,tags,snippet}]; path is wiki-relative (use with read).",
+			"description": "Search wiki concepts. Returns [{id,title,path,project,tags,snippet,node_id}]; path is wiki-relative (use with read), node_id crosses back into graphy.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
@@ -114,6 +114,7 @@ func mcpTools() []map[string]interface{} {
 				"kind":    enum("filter by kind", "note", "daily-note", "issue"),
 				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
+				"node_id": str("find the concept documenting this graphy code-graph node id"),
 				"limit":   num("max results (default 10)"),
 			}),
 		},
@@ -134,9 +135,12 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "read",
-			"description": "Read a concept's markdown by id or wiki-relative path.",
+			"description": "Read a concept's markdown by id or wiki-relative path. Narrow with section or offset/limit rather than pulling a whole long concept.",
 			"inputSchema": obj(map[string]interface{}{
-				"ref": str("concept id or path"),
+				"ref":     str("concept id or path"),
+				"section": str("read only this markdown section, by heading text"),
+				"offset":  num("first line to read (1-based)"),
+				"limit":   num("maximum lines to read"),
 			}, "ref"),
 		},
 		{
@@ -287,6 +291,9 @@ type mcpHit struct {
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Snippet string   `json:"snippet,omitempty"`
+	// NodeID is the code-graph identity of a generated concept, so a hit can be
+	// carried straight back to graphy without a second lookup.
+	NodeID string `json:"node_id,omitempty"`
 }
 
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -297,6 +304,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Kind    string `json:"kind"`
 		Status  string `json:"status"`
 		Stale   bool   `json:"stale"`
+		NodeID  string `json:"node_id"`
 		Limit   int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
@@ -313,12 +321,13 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 	defer idx.Close()
 
 	opts := index.SearchOptions{
-		Query:   a.Q,
-		Project: a.Project,
-		Kind:    a.Kind,
-		Status:  a.Status,
-		Stale:   a.Stale,
-		Limit:   a.Limit,
+		Query:        a.Q,
+		Project:      a.Project,
+		Kind:         a.Kind,
+		Status:       a.Status,
+		Stale:        a.Stale,
+		GraphyNodeID: a.NodeID,
+		Limit:        a.Limit,
 	}
 	if a.Tag != "" {
 		opts.Tags = []string{a.Tag}
@@ -337,6 +346,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			Project: r.Project,
 			Tags:    r.Tags,
 			Snippet: r.Snippet,
+			NodeID:  r.GraphyNodeID,
 		})
 	}
 	return jsonResult(map[string]interface{}{"total": total, "results": hits})
@@ -400,7 +410,10 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 
 func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
-		Ref string `json:"ref"`
+		Ref     string `json:"ref"`
+		Section string `json:"section"`
+		Offset  int    `json:"offset"`
+		Limit   int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil || a.Ref == "" {
 		return errResult(fmt.Errorf("ref is required"))
@@ -413,7 +426,65 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 	if err != nil {
 		return errResult(err)
 	}
+	// A generated entity card is small, but a hand-written concept is not, and
+	// an agent following links through a bundle pays for every one it opens.
+	// Section and line windows let it read the part it came for.
+	if a.Section != "" {
+		body, ok := markdownSection(string(content), a.Section)
+		if !ok {
+			return errResult(fmt.Errorf("no section %q in %s", a.Section, a.Ref))
+		}
+		return textResult(body)
+	}
+	if a.Offset > 0 || a.Limit > 0 {
+		return textResult(lineWindow(string(content), a.Offset, a.Limit))
+	}
 	return textResult(string(content))
+}
+
+// markdownSection extracts one heading's content, matched case-insensitively,
+// through to the next heading of the same or a shallower level.
+func markdownSection(content, want string) (string, bool) {
+	lines := strings.Split(content, "\n")
+	want = strings.ToLower(strings.TrimSpace(want))
+	start, level := -1, 0
+	for i, line := range lines {
+		n := 0
+		for n < len(line) && line[n] == '#' {
+			n++
+		}
+		if n == 0 || n >= len(line) || line[n] != ' ' {
+			continue
+		}
+		if start < 0 {
+			if strings.ToLower(strings.TrimSpace(line[n+1:])) == want {
+				start, level = i, n
+			}
+			continue
+		}
+		if n <= level {
+			return strings.Join(lines[start:i], "\n"), true
+		}
+	}
+	if start < 0 {
+		return "", false
+	}
+	return strings.Join(lines[start:], "\n"), true
+}
+
+// lineWindow returns limit lines starting at the 1-based offset.
+func lineWindow(content string, offset, limit int) string {
+	lines := strings.Split(content, "\n")
+	if offset > 0 {
+		if offset-1 >= len(lines) {
+			return ""
+		}
+		lines = lines[offset-1:]
+	}
+	if limit > 0 && limit < len(lines) {
+		lines = lines[:limit]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolResult {

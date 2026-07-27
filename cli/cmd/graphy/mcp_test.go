@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"okfw/cli/internal/config"
 	"okfw/cli/internal/graphy/build"
+	"okfw/cli/internal/graphy/export"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
 )
@@ -104,6 +106,7 @@ func TestMCPHandshakeAndToolList(t *testing.T) {
 	result, _ = json.Marshal(resp.Result)
 	for _, tool := range []string{
 		`"graphy_query"`, `"graphy_path"`, `"graphy_explain"`,
+		`"graphy_neighbors"`, `"graphy_callers"`, `"graphy_file_nodes"`, `"graphy_concept"`,
 		`"graphy_rationale"`, `"graphy_report"`, `"graphy_update"`,
 	} {
 		if !strings.Contains(string(result), tool) {
@@ -296,5 +299,135 @@ func TestMCPServeEmitsOneResponsePerRequest(t *testing.T) {
 		if resp.ID == nil {
 			t.Errorf("response is missing its request id: %s", line)
 		}
+	}
+}
+
+// TestMCPTraversalTools covers the deterministic tools an agent reaches for
+// when it already knows what it cares about — the case graphy_query, whose
+// seeds come from an LLM plan or a keyword score, cannot serve.
+func TestMCPTraversalTools(t *testing.T) {
+	s := mcpTestServer(t)
+
+	// callers answers the impact question directly.
+	out, isErr := callTool(t, s, "graphy_callers", `{"entity":"Helper"}`)
+	if isErr {
+		t.Fatalf("graphy_callers errored: %s", out)
+	}
+	if !strings.Contains(out, `"rel":"calls"`) || !strings.Contains(out, "#run") {
+		t.Errorf("graphy_callers should report run calling Helper: %s", out)
+	}
+
+	// file_nodes is the way in from a file the agent is editing.
+	out, isErr = callTool(t, s, "graphy_file_nodes", `{"file":"util/util.go"}`)
+	if isErr {
+		t.Fatalf("graphy_file_nodes errored: %s", out)
+	}
+	if !strings.Contains(out, "#Helper") {
+		t.Errorf("graphy_file_nodes should list Helper: %s", out)
+	}
+
+	// neighbors expands from a seed the caller chose, filtered by relation.
+	out, isErr = callTool(t, s, "graphy_neighbors", `{"entity":"Helper","depth":1,"relations":["calls"]}`)
+	if isErr {
+		t.Fatalf("graphy_neighbors errored: %s", out)
+	}
+	if !strings.Contains(out, "#run") {
+		t.Errorf("graphy_neighbors should reach run: %s", out)
+	}
+
+	// A misspelled relation is an error, not a silently unfiltered result that
+	// would read as "everything matched".
+	if out, isErr = callTool(t, s, "graphy_neighbors", `{"entity":"Helper","relations":["callz"]}`); !isErr {
+		t.Errorf("unknown relation should error, got: %s", out)
+	}
+	if out, isErr = callTool(t, s, "graphy_explain", `{"entity":"Helper","direction":"sideways"}`); !isErr {
+		t.Errorf("unknown direction should error, got: %s", out)
+	}
+
+	// explain narrows to one relation and one direction.
+	out, isErr = callTool(t, s, "graphy_explain", `{"entity":"Helper","direction":"in","relations":["calls"]}`)
+	if isErr {
+		t.Fatalf("filtered graphy_explain errored: %s", out)
+	}
+	if strings.Contains(out, `"out":[{`) {
+		t.Errorf("direction=in should return no outgoing edges: %s", out)
+	}
+
+	// A named report section avoids the whole document.
+	out, isErr = callTool(t, s, "graphy_report", `{"section":"Stats"}`)
+	if isErr {
+		t.Fatalf("graphy_report section errored: %s", out)
+	}
+	if !strings.Contains(out, "## Stats") || strings.Contains(out, "## Communities") {
+		t.Errorf("section should return Stats alone: %s", out)
+	}
+	if out, isErr = callTool(t, s, "graphy_report", `{"section":"Nonexistent"}`); !isErr {
+		t.Errorf("unknown section should error, got: %s", out)
+	}
+}
+
+// TestMCPConceptBridge covers the crossing point between the two tools. Before
+// this the graph knew node ids and the wiki knew concept ids, and nothing
+// mapped one to the other — each half was a dead end at the boundary.
+func TestMCPConceptBridge(t *testing.T) {
+	s := mcpTestServer(t)
+
+	// Nothing exported yet: an honest error, not an empty success.
+	out, isErr := callTool(t, s, "graphy_concept", `{"entity":"Helper"}`)
+	if !isErr {
+		t.Errorf("want an error before any export, got: %s", out)
+	}
+
+	// Export into a bundle, then the mapping resolves.
+	bundleRoot := t.TempDir()
+	okfwDir := filepath.Join(bundleRoot, ".okfw")
+	if err := os.MkdirAll(okfwDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	w, err := workspace.Discover(s.startDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := export.ToOkfw(w.Root, st, export.OkfwOptions{
+		Bundle: config.ConfigFor(okfwDir), MinDegree: 1,
+	}); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+
+	out, isErr = callTool(t, s, "graphy_concept", `{"entity":"Helper"}`)
+	if isErr {
+		t.Fatalf("graphy_concept errored: %s", out)
+	}
+	var c struct {
+		NodeID    string `json:"node_id"`
+		ConceptID string `json:"concept_id"`
+		Path      string `json:"abs_path"`
+	}
+	if err := json.Unmarshal([]byte(out), &c); err != nil {
+		t.Fatalf("graphy_concept result is not JSON: %s", out)
+	}
+	if !strings.HasSuffix(c.NodeID, "#Helper") || c.ConceptID == "" {
+		t.Errorf("graphy_concept = %+v", c)
+	}
+	// The path must be openable, which is the whole reason the bundle root is
+	// recorded alongside the bundle-relative record.
+	if _, err := os.Stat(c.Path); err != nil {
+		t.Errorf("concept path is not readable: %v", err)
+	}
+
+	// Every node any tool returns now carries its concept, so an agent never
+	// needs a second call to find out whether there is prose to read.
+	out, isErr = callTool(t, s, "graphy_file_nodes", `{"file":"util/util.go"}`)
+	if isErr {
+		t.Fatalf("graphy_file_nodes errored: %s", out)
+	}
+	if !strings.Contains(out, `"concept":"graphy/`) {
+		t.Errorf("nodes should carry their concept path: %s", out)
 	}
 }

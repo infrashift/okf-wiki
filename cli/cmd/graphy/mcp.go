@@ -128,6 +128,15 @@ func mcpTools() []map[string]interface{} {
 	num := func(desc string) map[string]interface{} {
 		return map[string]interface{}{"type": "integer", "description": desc}
 	}
+	boolean := func(desc string) map[string]interface{} {
+		return map[string]interface{}{"type": "boolean", "description": desc}
+	}
+	strs := func(desc string) map[string]interface{} {
+		return map[string]interface{}{
+			"type": "array", "items": map[string]interface{}{"type": "string"},
+			"description": desc,
+		}
+	}
 
 	return []map[string]interface{}{
 		{
@@ -148,9 +157,52 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "graphy_explain",
-			"description": "Entity card: location, signature, doc, community, and all in/out edges with confidence.",
+			"description": "Entity card: location, signature, doc, community, and its edges with confidence. Narrow with relations/direction on hub entities.",
 			"inputSchema": obj(map[string]interface{}{
-				"entity": str("entity name or id"),
+				"entity":    str("entity name, node id, or repo-relative file path"),
+				"relations": strs("restrict to these relations, e.g. [\"calls\"]"),
+				"direction": str("out, in, or both (default both)"),
+				"limit":     num("maximum edges (default 50)"),
+				"tests":     boolean("include entities declared in test files (default false)"),
+			}, "entity"),
+		},
+		{
+			"name": "graphy_neighbors",
+			"description": "Entities around one you already know, to a bounded depth, filtered by relation and kind. " +
+				"Deterministic — prefer this over graphy_query when you know the starting entity.",
+			"inputSchema": obj(map[string]interface{}{
+				"entity":    str("entity name, node id, or repo-relative file path"),
+				"depth":     num("expansion depth 1-2 (default 1)"),
+				"direction": str("out, in, or both (default both)"),
+				"relations": strs("restrict to these relations"),
+				"kinds":     strs("restrict to these node kinds, e.g. [\"function\"]"),
+				"limit":     num("maximum nodes (default 50)"),
+				"tests":     boolean("include entities declared in test files (default false)"),
+			}, "entity"),
+		},
+		{
+			"name":        "graphy_callers",
+			"description": "Impact analysis: what calls, imports, implements, tests or documents an entity. Ask before changing it.",
+			"inputSchema": obj(map[string]interface{}{
+				"entity":    str("entity name, node id, or repo-relative file path"),
+				"relations": strs("restrict to these relations"),
+				"limit":     num("maximum results (default 50)"),
+				"tests":     boolean("include callers declared in test files (default false)"),
+			}, "entity"),
+		},
+		{
+			"name":        "graphy_file_nodes",
+			"description": "The entities declared in a repo-relative file, in source order. Use this to enter the graph from a file you are editing.",
+			"inputSchema": obj(map[string]interface{}{
+				"file": str("repo-relative file path"),
+			}, "file"),
+		},
+		{
+			"name": "graphy_concept",
+			"description": "The wiki concept documenting an entity: its OKF id and bundle path. " +
+				"Use it to cross from the code graph into the wiki, then read the concept with okfw.",
+			"inputSchema": obj(map[string]interface{}{
+				"entity": str("entity name, node id, or repo-relative file path"),
 			}, "entity"),
 		},
 		{
@@ -162,8 +214,10 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "graphy_report",
-			"description": "The repository's GRAPH_REPORT.md: stats, god nodes, communities. Read before architecture questions.",
-			"inputSchema": obj(map[string]interface{}{}),
+			"description": "The repository's GRAPH_REPORT.md: stats, god nodes, communities. Read before architecture questions. Pass a section to avoid the whole document.",
+			"inputSchema": obj(map[string]interface{}{
+				"section": str("print only this section, by heading text; omit for the whole report"),
+			}),
 		},
 		{
 			"name":        "graphy_update",
@@ -297,10 +351,18 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
 		return s.toolPath(args)
 	case "graphy_explain":
 		return s.toolExplain(args)
+	case "graphy_neighbors":
+		return s.toolNeighbors(args)
+	case "graphy_callers":
+		return s.toolCallers(args)
+	case "graphy_file_nodes":
+		return s.toolFileNodes(args)
+	case "graphy_concept":
+		return s.toolConcept(args)
 	case "graphy_rationale":
 		return s.toolRationale(args)
 	case "graphy_report":
-		return s.toolReport()
+		return s.toolReport(args)
 	case "graphy_update":
 		return s.toolUpdate()
 	default:
@@ -316,8 +378,13 @@ type mcpNode struct {
 	File   string `json:"file,omitempty"`
 	Line   int    `json:"line,omitempty"`
 	Doc    string `json:"doc,omitempty"`
-	Body   string `json:"body,omitempty"` // rationale prose
+	Body   string `json:"body,omitempty"` // rationale prose, clipped
 	Degree int    `json:"degree,omitempty"`
+	Test   bool   `json:"test,omitempty"`
+	// Concept is the wiki concept documenting this entity, when it was
+	// exported. Carried on every node so an agent never has to make a second
+	// call just to find out whether there is prose to read.
+	Concept string `json:"concept,omitempty"`
 }
 
 type mcpEdge struct {
@@ -327,15 +394,54 @@ type mcpEdge struct {
 	Confidence string `json:"conf"`
 }
 
+// maxNodeBody caps the rationale prose carried inline on a node.
+//
+// Body is unbounded — a rationale node holds up to 2000 characters of comment —
+// and a depth-2 expansion can return dozens of them. Truncating here keeps the
+// summary useful while leaving the full text one graphy_rationale call away.
+const maxNodeBody = 400
+
 func compactNodes(nodes []queryNode) []mcpNode {
+	return compactNodesWith(nodes, nil)
+}
+
+// compactNodesWith projects nodes to the wire shape, annotating each with the
+// concept documenting it when a concept index is supplied.
+func compactNodesWith(nodes []queryNode, concepts map[string]query.Concept) []mcpNode {
 	out := make([]mcpNode, len(nodes))
 	for i, n := range nodes {
 		out[i] = mcpNode{
 			ID: n.ID, Label: n.Label, Kind: string(n.Kind),
-			File: n.File, Line: n.Span.StartLine, Doc: n.Doc, Body: n.Body, Degree: n.Degree,
+			File: n.File, Line: n.Span.StartLine, Doc: n.Doc,
+			Body: clip(n.Body, maxNodeBody), Degree: n.Degree, Test: n.Test,
+		}
+		if c, ok := concepts[n.ID]; ok {
+			out[i].Concept = c.RelPath
 		}
 	}
 	return out
+}
+
+// conceptIndex loads the node→concept mapping, tolerating its absence: a repo
+// that has never been exported simply has no concepts, which is not an error.
+func conceptIndex(st *store.Store) map[string]query.Concept {
+	idx, err := query.ConceptIndex(st)
+	if err != nil {
+		return nil
+	}
+	return idx
+}
+
+// clip truncates on a rune boundary, marking that it did.
+func clip(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return strings.TrimRight(string(r[:max]), " \n\t") + "…"
 }
 
 func (s *mcpServer) toolQuery(args json.RawMessage) *toolResult {
@@ -366,7 +472,7 @@ func (s *mcpServer) toolQuery(args json.RawMessage) *toolResult {
 		}
 		return jsonResult(map[string]interface{}{
 			"mode":  res.Mode,
-			"nodes": compactNodes(res.Nodes),
+			"nodes": compactNodesWith(res.Nodes, conceptIndex(st)),
 			"edges": edges,
 		})
 	})
@@ -409,10 +515,166 @@ func (s *mcpServer) toolPath(args json.RawMessage) *toolResult {
 	})
 }
 
-func (s *mcpServer) toolExplain(args json.RawMessage) *toolResult {
-	var p struct {
-		Entity string `json:"entity"`
+// traverseParams are the filters the deterministic traversal tools share.
+type traverseParams struct {
+	Entity    string   `json:"entity"`
+	File      string   `json:"file"`
+	Depth     int      `json:"depth"`
+	Direction string   `json:"direction"`
+	Relations []string `json:"relations"`
+	Kinds     []string `json:"kinds"`
+	Limit     int      `json:"limit"`
+	Tests     bool     `json:"tests"`
+}
+
+// edgeQuery converts the wire params into a query, validating the vocabulary so
+// a misspelled relation is an error rather than a silently unfiltered result.
+func (p traverseParams) edgeQuery(dir query.Direction) (query.EdgeQuery, error) {
+	rels, err := query.ParseRelations(p.Relations)
+	if err != nil {
+		return query.EdgeQuery{}, err
 	}
+	if p.Direction != "" {
+		if dir, err = query.ParseDirection(p.Direction); err != nil {
+			return query.EdgeQuery{}, err
+		}
+	}
+	return query.EdgeQuery{
+		Direction: dir, Relations: rels, Limit: p.Limit, IncludeTests: p.Tests,
+	}, nil
+}
+
+// compactEdges projects edges to the compact wire shape.
+func compactEdges(list []queryEdge) []mcpEdge {
+	out := make([]mcpEdge, len(list))
+	for i, e := range list {
+		out[i] = mcpEdge{From: e.Source, Rel: string(e.Relation), To: e.Target, Confidence: string(e.Confidence)}
+	}
+	return out
+}
+
+func (s *mcpServer) toolExplain(args json.RawMessage) *toolResult {
+	var p traverseParams
+	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
+		return errResult(fmt.Errorf("entity is required"))
+	}
+	q, err := p.edgeQuery(query.Both)
+	if err != nil {
+		return errResult(err)
+	}
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		n, err := query.ResolveEntity(st, p.Entity)
+		if err != nil {
+			return errResult(err)
+		}
+		card, err := query.ExplainFiltered(st, n.ID, q)
+		if err != nil {
+			return errResult(err)
+		}
+		out := map[string]interface{}{
+			"node":      compactNodesWith([]queryNode{card.Node}, conceptIndex(st))[0],
+			"signature": card.Node.Signature,
+			"community": card.CommunityLabel,
+			"out":       compactEdges(card.Out),
+			"in":        compactEdges(card.In),
+		}
+		// Only ever set when edges were withheld, so a caller can tell a short
+		// list from a capped one instead of assuming it saw everything.
+		if card.Truncated {
+			out["truncated"] = true
+			out["total"] = card.Total
+		}
+		return jsonResult(out)
+	})
+}
+
+func (s *mcpServer) toolNeighbors(args json.RawMessage) *toolResult {
+	var p traverseParams
+	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
+		return errResult(fmt.Errorf("entity is required"))
+	}
+	rels, err := query.ParseRelations(p.Relations)
+	if err != nil {
+		return errResult(err)
+	}
+	kinds, err := query.ParseKinds(p.Kinds)
+	if err != nil {
+		return errResult(err)
+	}
+	dir, err := query.ParseDirection(p.Direction)
+	if err != nil {
+		return errResult(err)
+	}
+	if p.Depth != 0 && (p.Depth < 1 || p.Depth > query.MaxDepth) {
+		return errResult(fmt.Errorf("depth must be between 1 and %d", query.MaxDepth))
+	}
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		n, err := query.ResolveEntity(st, p.Entity)
+		if err != nil {
+			return errResult(err)
+		}
+		res, err := query.Neighbors(st, []string{n.ID}, query.NeighborOptions{
+			Depth: p.Depth, Direction: dir, Relations: rels, Kinds: kinds,
+			Limit: p.Limit, IncludeTests: p.Tests,
+		})
+		if err != nil {
+			return errResult(err)
+		}
+		out := map[string]interface{}{
+			"seed":  n.ID,
+			"nodes": compactNodesWith(res.Nodes, conceptIndex(st)),
+			"edges": compactEdges(res.Edges),
+		}
+		if res.More {
+			out["truncated"] = true
+			out["total"] = res.Total
+		}
+		return jsonResult(out)
+	})
+}
+
+func (s *mcpServer) toolCallers(args json.RawMessage) *toolResult {
+	var p traverseParams
+	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
+		return errResult(fmt.Errorf("entity is required"))
+	}
+	q, err := p.edgeQuery(query.In)
+	if err != nil {
+		return errResult(err)
+	}
+	q.Direction = query.In // callers is the incoming direction by definition
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		n, err := query.ResolveEntity(st, p.Entity)
+		if err != nil {
+			return errResult(err)
+		}
+		res, err := query.Edges(st, n.ID, q)
+		if err != nil {
+			return errResult(err)
+		}
+		concepts := conceptIndex(st)
+		callers := make([]map[string]interface{}, 0, len(res.Hits))
+		for _, h := range res.Hits {
+			callers = append(callers, map[string]interface{}{
+				"rel":  string(h.Edge.Relation),
+				"conf": string(h.Edge.Confidence),
+				"node": compactNodesWith([]queryNode{h.Other}, concepts)[0],
+			})
+		}
+		out := map[string]interface{}{"entity": n.ID, "callers": callers}
+		if res.More {
+			out["truncated"] = true
+			out["total"] = res.Total
+		}
+		return jsonResult(out)
+	})
+}
+
+// toolConcept crosses from the code graph into the wiki. The mapping is written
+// by `graphy export okfw` and was until now readable by nothing at all, so the
+// two tools described the same entity with no shared identifier.
+func (s *mcpServer) toolConcept(args json.RawMessage) *toolResult {
+	var p traverseParams
 	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
 		return errResult(fmt.Errorf("entity is required"))
 	}
@@ -421,23 +683,30 @@ func (s *mcpServer) toolExplain(args json.RawMessage) *toolResult {
 		if err != nil {
 			return errResult(err)
 		}
-		card, err := query.Explain(st, n.ID)
+		c, err := query.ConceptFor(st, n.ID)
 		if err != nil {
 			return errResult(err)
 		}
-		edges := func(list []queryEdge) []mcpEdge {
-			out := make([]mcpEdge, len(list))
-			for i, e := range list {
-				out[i] = mcpEdge{From: e.Source, Rel: string(e.Relation), To: e.Target, Confidence: string(e.Confidence)}
-			}
-			return out
+		if c == nil {
+			return errResult(fmt.Errorf("%s has no exported concept (run `graphy export okfw`)", n.Label))
+		}
+		return jsonResult(c)
+	})
+}
+
+func (s *mcpServer) toolFileNodes(args json.RawMessage) *toolResult {
+	var p traverseParams
+	if err := json.Unmarshal(args, &p); err != nil || p.File == "" {
+		return errResult(fmt.Errorf("file is required"))
+	}
+	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
+		nodes, err := query.FileNodes(st, p.File)
+		if err != nil {
+			return errResult(err)
 		}
 		return jsonResult(map[string]interface{}{
-			"node":      compactNodes([]queryNode{card.Node})[0],
-			"signature": card.Node.Signature,
-			"community": card.CommunityLabel,
-			"out":       edges(card.Out),
-			"in":        edges(card.In),
+			"file":  p.File,
+			"nodes": compactNodesWith(nodes, conceptIndex(st)),
 		})
 	})
 }
@@ -481,13 +750,27 @@ func (s *mcpServer) toolRationale(args json.RawMessage) *toolResult {
 	})
 }
 
-func (s *mcpServer) toolReport() *toolResult {
+func (s *mcpServer) toolReport(args json.RawMessage) *toolResult {
+	var p struct {
+		Section string `json:"section"`
+	}
+	// An absent or malformed argument object means "the whole report", which is
+	// the pre-existing behaviour and the sensible default.
+	_ = json.Unmarshal(args, &p)
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
 		content, err := os.ReadFile(w.ReportPath())
 		if err != nil {
 			return errResult(fmt.Errorf("no report (run `graphy build`): %w", err))
 		}
-		return textResult(string(content))
+		if p.Section == "" {
+			return textResult(string(content))
+		}
+		body, ok := reportSection(string(content), p.Section)
+		if !ok {
+			return errResult(fmt.Errorf("no section %q (available: %s)",
+				p.Section, strings.Join(reportSections(string(content)), ", ")))
+		}
+		return textResult(body)
 	})
 }
 

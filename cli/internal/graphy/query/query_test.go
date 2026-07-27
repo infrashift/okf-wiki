@@ -155,3 +155,240 @@ func TestKeywordSearch(t *testing.T) {
 		t.Errorf("keyword hits = %v, want A and DOC", found)
 	}
 }
+
+// traverseFixture: a small package with a hub, a caller, a test, and a doc
+// section, so direction, relation, kind and test filters all have something to
+// bite on.
+func traverseFixture(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "graph.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+
+	nodes := []model.Node{
+		{ID: "F", Label: "svc/svc.go", Kind: model.KindFile, Language: "go", File: "svc/svc.go",
+			Span: model.Span{StartLine: 1}},
+		{ID: "HUB", Label: "Serve", Kind: model.KindFunction, Language: "go", File: "svc/svc.go",
+			Span: model.Span{StartLine: 10}},
+		{ID: "CALLER", Label: "Main", Kind: model.KindFunction, Language: "go", File: "cmd/main.go",
+			Span: model.Span{StartLine: 5}},
+		{ID: "TYPE", Label: "Server", Kind: model.KindStruct, Language: "go", File: "svc/svc.go",
+			Span: model.Span{StartLine: 3}},
+		{ID: "TEST", Label: "TestServe", Kind: model.KindFunction, Language: "go",
+			File: "svc/svc_test.go", Span: model.Span{StartLine: 8}, Test: true},
+		{ID: "WHY", Label: "WHY: serve blocks", Kind: model.KindRationale, Language: "go",
+			File: "svc/svc.go", Span: model.Span{StartLine: 9}, Body: "It blocks so callers can wait."},
+	}
+	if err := s.PutFile(store.FileRecord{Path: "svc/svc.go", NodeIDs: []string{"F", "TYPE", "HUB", "WHY"}},
+		[]model.Node{nodes[0], nodes[3], nodes[1], nodes[5]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutFile(store.FileRecord{Path: "cmd/main.go", NodeIDs: []string{"CALLER"}},
+		[]model.Node{nodes[2]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutFile(store.FileRecord{Path: "svc/svc_test.go", NodeIDs: []string{"TEST"}},
+		[]model.Node{nodes[4]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReplaceEdges([]model.Edge{
+		{Source: "F", Target: "HUB", Relation: model.RelContains, Confidence: model.ConfExtracted},
+		{Source: "CALLER", Target: "HUB", Relation: model.RelCalls, Confidence: model.ConfInferred},
+		{Source: "TEST", Target: "HUB", Relation: model.RelTests, Confidence: model.ConfInferred},
+		{Source: "TYPE", Target: "HUB", Relation: model.RelDefines, Confidence: model.ConfExtracted},
+		{Source: "WHY", Target: "HUB", Relation: model.RelExplains, Confidence: model.ConfExtracted},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecomputeDegrees(); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// TestResolveEntityAcceptsAFilePath: an agent is almost always working in a
+// file, and that path was the one identifier it held that resolved to nothing.
+func TestResolveEntityAcceptsAFilePath(t *testing.T) {
+	s := traverseFixture(t)
+	for _, arg := range []string{"svc/svc.go", "./svc/svc.go"} {
+		n, err := ResolveEntity(s, arg)
+		if err != nil {
+			t.Fatalf("ResolveEntity(%q): %v", arg, err)
+		}
+		if n.ID != "F" {
+			t.Errorf("ResolveEntity(%q) = %q, want the file node F", arg, n.ID)
+		}
+	}
+}
+
+func TestFileNodesOrdersBySourcePosition(t *testing.T) {
+	s := traverseFixture(t)
+	nodes, err := FileNodes(s, "svc/svc.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, n := range nodes {
+		got = append(got, n.ID)
+	}
+	want := []string{"F", "TYPE", "WHY", "HUB"} // lines 1, 3, 9, 10
+	if len(got) != len(want) {
+		t.Fatalf("FileNodes = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("FileNodes = %v, want %v", got, want)
+			break
+		}
+	}
+	if _, err := FileNodes(s, "nope.go"); err == nil {
+		t.Error("want an error for a file that was never extracted")
+	}
+}
+
+// TestEdgesFiltersByDirectionAndRelation is the impact question: Explain
+// returns every edge, so asking "who calls this" meant paying for a hub's
+// entire adjacency and filtering it by hand.
+func TestEdgesFiltersByDirectionAndRelation(t *testing.T) {
+	s := traverseFixture(t)
+
+	// Incoming, all relations, tests excluded by default.
+	res, err := Edges(s, "HUB", EdgeQuery{Direction: In})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]model.Relation{}
+	for _, h := range res.Hits {
+		got[h.Other.ID] = h.Edge.Relation
+	}
+	for _, id := range []string{"F", "CALLER", "TYPE", "WHY"} {
+		if _, ok := got[id]; !ok {
+			t.Errorf("incoming edges missing %s: %v", id, got)
+		}
+	}
+	if _, ok := got["TEST"]; ok {
+		t.Error("test code should be excluded unless asked for")
+	}
+
+	// Narrowed to one relation.
+	res, err = Edges(s, "HUB", EdgeQuery{Direction: In, Relations: []model.Relation{model.RelCalls}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Other.ID != "CALLER" {
+		t.Errorf("calls-only = %+v, want just CALLER", res.Hits)
+	}
+
+	// Tests are reachable when asked for.
+	res, err = Edges(s, "HUB", EdgeQuery{Direction: In, Relations: []model.Relation{model.RelTests}, IncludeTests: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Other.ID != "TEST" {
+		t.Errorf("tests-only = %+v, want just TEST", res.Hits)
+	}
+
+	// The cap is reported rather than silently applied.
+	res, err = Edges(s, "HUB", EdgeQuery{Direction: In, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 2 || !res.More || res.Total != 4 {
+		t.Errorf("limit 2: hits=%d truncated=%v total=%d, want 2/true/4", len(res.Hits), res.More, res.Total)
+	}
+}
+
+// TestNeighborsIsDeterministicAndBounded covers the primitive that Subgraph
+// could not provide: expansion from a seed the caller chose.
+func TestNeighborsIsDeterministicAndBounded(t *testing.T) {
+	s := traverseFixture(t)
+
+	res, err := Neighbors(s, []string{"HUB"}, NeighborOptions{Depth: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, n := range res.Nodes {
+		got[n.ID] = true
+	}
+	if !got["HUB"] || !got["CALLER"] || !got["TYPE"] {
+		t.Errorf("depth-1 neighbourhood = %v", got)
+	}
+	if got["TEST"] {
+		t.Error("test code should be excluded unless asked for")
+	}
+
+	// Kind filter narrows what expansion reaches, never the seed itself.
+	res, err = Neighbors(s, []string{"HUB"}, NeighborOptions{Depth: 1, Kinds: []model.Kind{model.KindStruct}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, n := range res.Nodes {
+		ids[n.ID] = true
+	}
+	if !ids["HUB"] || !ids["TYPE"] || len(ids) != 2 {
+		t.Errorf("kind-filtered = %v, want the seed plus TYPE", ids)
+	}
+
+	// Direction restricts the walk.
+	res, err = Neighbors(s, []string{"HUB"}, NeighborOptions{Depth: 1, Direction: Out})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Nodes) != 1 || res.Nodes[0].ID != "HUB" {
+		t.Errorf("outgoing-only from a leaf = %+v, want just the seed", res.Nodes)
+	}
+
+	// Two identical calls agree, edge for edge.
+	a, _ := Neighbors(s, []string{"HUB"}, NeighborOptions{Depth: 2})
+	b, _ := Neighbors(s, []string{"HUB"}, NeighborOptions{Depth: 2})
+	if len(a.Nodes) != len(b.Nodes) || len(a.Edges) != len(b.Edges) {
+		t.Fatal("Neighbors is not deterministic")
+	}
+	for i := range a.Nodes {
+		if a.Nodes[i].ID != b.Nodes[i].ID {
+			t.Fatalf("node order differs at %d: %s vs %s", i, a.Nodes[i].ID, b.Nodes[i].ID)
+		}
+	}
+}
+
+// TestRationaleIsADeterministicFilter: the CLI could previously only reach this
+// by phrasing the question in natural language and hoping the planner agreed.
+func TestRationaleIsADeterministicFilter(t *testing.T) {
+	s := traverseFixture(t)
+	res, err := Rationale(s, "HUB")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) != 1 || res.Hits[0].Other.ID != "WHY" {
+		t.Fatalf("Rationale = %+v, want the WHY node", res.Hits)
+	}
+	if res.Hits[0].Other.Body == "" {
+		t.Error("rationale prose should come back with the node")
+	}
+}
+
+func TestParseVocabularyRejectsUnknownNames(t *testing.T) {
+	if _, err := ParseRelations([]string{"calls", "tests"}); err != nil {
+		t.Errorf("valid relations rejected: %v", err)
+	}
+	// A silent empty filter would widen the query to everything and read as
+	// "no results" rather than as a typo.
+	if _, err := ParseRelations([]string{"callz"}); err == nil {
+		t.Error("want an error for an unknown relation")
+	}
+	if _, err := ParseKinds([]string{"funktion"}); err == nil {
+		t.Error("want an error for an unknown kind")
+	}
+	if _, err := ParseDirection("sideways"); err == nil {
+		t.Error("want an error for an unknown direction")
+	}
+	for _, d := range []string{"", "out", "IN", "both"} {
+		if _, err := ParseDirection(d); err != nil {
+			t.Errorf("ParseDirection(%q): %v", d, err)
+		}
+	}
+}

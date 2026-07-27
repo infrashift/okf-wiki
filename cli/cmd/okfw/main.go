@@ -316,6 +316,7 @@ If given a directory, indexes all .md files recursively.`,
 	var typeFlag string
 	var kindFlag string
 	var staleFlag bool
+	var nodeIDFlag string
 
 	var searchCmd = &cobra.Command{
 		Use:   "search [query]",
@@ -330,7 +331,8 @@ Examples:
   okfw search --status open --priority high # Filter todos by status and priority
   okfw search --due-before 2026-03-01       # Todos due before a date
   okfw search --due-after 2026-02-01        # Todos due after a date
-  okfw search "auth" --project myproject    # Combined search`,
+  okfw search "auth" --project myproject    # Combined search
+  okfw search --node-id go:function:a.go#F  # The concept documenting a graphy node`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
 			if err != nil {
@@ -344,13 +346,14 @@ Examples:
 			defer idx.Close()
 
 			opts := index.SearchOptions{
-				Project: projectFlag,
-				Type:    typeFlag,
-				Kind:    kindFlag,
-				Tags:    tagsFlag,
-				Limit:   limitFlag,
-				Status:  statusFlag,
-				Stale:   staleFlag,
+				Project:      projectFlag,
+				Type:         typeFlag,
+				Kind:         kindFlag,
+				Tags:         tagsFlag,
+				Limit:        limitFlag,
+				Status:       statusFlag,
+				Stale:        staleFlag,
+				GraphyNodeID: nodeIDFlag,
 			}
 
 			if len(args) > 0 {
@@ -782,6 +785,9 @@ Examples:
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
+	// The reverse of `graphy concept`: cross from a code-graph node id to the
+	// concept documenting it. The two tools otherwise share no identifier.
+	searchCmd.Flags().StringVar(&nodeIDFlag, "node-id", "", "Find the concept documenting this graphy code-graph node id")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
 
@@ -1173,7 +1179,7 @@ Examples:
 			}
 
 			if graphQueryJSONFlag {
-				data, _ := json.MarshalIndent(nodes, "", "  ")
+				data, _ := json.Marshal(nodes)
 				fmt.Println(string(data))
 			} else {
 				if len(nodes) == 0 {
@@ -1216,7 +1222,7 @@ Examples:
 					Nodes []graphdb.NodeRecord `json:"nodes"`
 					Edges []graphdb.EdgeRecord `json:"edges"`
 				}{Nodes: nodes, Edges: edges}
-				data, _ := json.MarshalIndent(result, "", "  ")
+				data, _ := json.Marshal(result)
 				fmt.Println(string(data))
 			} else {
 				for _, n := range nodes {
@@ -1253,7 +1259,7 @@ Examples:
 			}
 
 			if graphQueryJSONFlag {
-				data, _ := json.MarshalIndent(nodes, "", "  ")
+				data, _ := json.Marshal(nodes)
 				fmt.Println(string(data))
 			} else {
 				if len(nodes) == 0 {
@@ -1292,7 +1298,7 @@ Examples:
 			}
 
 			if graphQueryJSONFlag {
-				data, _ := json.MarshalIndent(edges, "", "  ")
+				data, _ := json.Marshal(edges)
 				fmt.Println(string(data))
 			} else {
 				if len(edges) == 0 {

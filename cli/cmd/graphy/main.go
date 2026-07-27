@@ -53,7 +53,9 @@ graph queries. The graph can be exported into an OKF Wiki (.okfw) bundle.`,
 		// main prints the error itself; without this cobra prints it too.
 		SilenceErrors: true,
 	}
-	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(), reportCmd(), exportCmd(), installCmd(), mcpCmd(), versionCmd())
+	root.AddCommand(initCmd(), buildCmd(), updateCmd(), queryCmd(), pathCmd(), explainCmd(),
+		neighborsCmd(), callersCmd(), usesCmd(), whyCmd(), nodesCmd(), conceptCmd(),
+		reportCmd(), exportCmd(), installCmd(), mcpCmd(), versionCmd())
 	return root
 }
 
