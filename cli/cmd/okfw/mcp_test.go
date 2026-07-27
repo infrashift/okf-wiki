@@ -285,3 +285,116 @@ graphy:
 		t.Errorf("hits do not carry kind/type: %s", out)
 	}
 }
+
+// TestMCPReadCapsAndSaysHowToContinue: the three narrowing paths worked and the
+// default — the one an agent hits without thinking — returned the whole file
+// with no bound and no marker.
+func TestMCPReadCapsAndSaysHowToContinue(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body strings.Builder
+	for i := 0; i < 500; i++ {
+		fmt.Fprintf(&body, "line %d\n", i)
+	}
+	p := writeConceptFile(t, cfg.RootPath, "long--0001.md", `---
+id: "019680f0-7e00-7abc-8def-100000000000"
+title: "Long"
+type: "note"
+tags: []
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+---
+
+`+body.String())
+	_ = p
+
+	out, isErr := callTool(t, s, "read", `{"ref":"long--0001.md"}`)
+	if isErr {
+		t.Fatalf("read errored: %s", out)
+	}
+	if strings.Contains(out, "line 400") {
+		t.Error("read returned the whole file")
+	}
+	if !strings.Contains(out, "more lines") || !strings.Contains(out, "offset:201") {
+		t.Errorf("read did not say how to continue:\n%s", out[len(out)-200:])
+	}
+
+	// An explicit window gets the same marker; it used to get none.
+	out, _ = callTool(t, s, "read", `{"ref":"long--0001.md","offset":1,"limit":10}`)
+	if !strings.Contains(out, "offset:11") {
+		t.Errorf("explicit window did not announce its cap:\n%s", out)
+	}
+}
+
+// TestMCPGraphHonoursLimitOnEveryAction: limit was defaulted for all four
+// actions and passed to exactly one, so three were unbounded while the schema
+// advertised a default of 10.
+func TestMCPGraphHonoursLimitOnEveryAction(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const target = "019680f0-7e00-7abc-8def-1000000000ff"
+	writeConceptFile(t, cfg.RootPath, "target--00ff.md", `---
+id: "`+target+`"
+title: "Target"
+type: "note"
+tags:
+  - "shared"
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+---
+
+# Target
+`)
+	for i := 0; i < 15; i++ {
+		id := fmt.Sprintf("019680f0-7e00-7abc-8def-2000000000%02d", i)
+		writeConceptFile(t, cfg.RootPath, fmt.Sprintf("linker%d--%02d.md", i, i), `---
+id: "`+id+`"
+title: "Linker`+fmt.Sprint(i)+`"
+type: "note"
+tags:
+  - "shared"
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+---
+
+# Linker
+
+Points at [Target](/target--00ff.md) and at [Nowhere](/gone-`+fmt.Sprint(i)+`.md).
+`)
+	}
+
+	for _, tc := range []struct{ name, args, key string }{
+		{"backlinks", `{"action":"backlinks","ref":"` + target + `","limit":5}`, "nodes"},
+		{"tag", `{"action":"tag","ref":"shared","limit":5}`, "nodes"},
+		{"cluster", `{"action":"cluster","ref":"` + target + `","limit":5}`, "nodes"},
+		{"dangling", `{"action":"dangling","limit":5}`, "dangling"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, isErr := callTool(t, s, "graph", tc.args)
+			if isErr {
+				t.Fatalf("graph %s errored: %s", tc.name, out)
+			}
+			var got map[string]json.RawMessage
+			if err := json.Unmarshal([]byte(out), &got); err != nil {
+				t.Fatalf("not an object: %v\n%s", err, out)
+			}
+			var rows []json.RawMessage
+			if err := json.Unmarshal(got[tc.key], &rows); err != nil {
+				t.Fatalf("%s is not a list: %v\n%s", tc.key, err, out)
+			}
+			if len(rows) > 5 {
+				t.Errorf("%s returned %d rows for limit 5", tc.name, len(rows))
+			}
+			if _, ok := got["total"]; !ok {
+				t.Errorf("%s does not report a total: %s", tc.name, out)
+			}
+		})
+	}
+}

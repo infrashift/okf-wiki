@@ -24,6 +24,7 @@ func main() {
 	var projectFlag string
 	var tagsFlag []string
 	var limitFlag int
+	var offsetFlag int
 	var jsonFlag bool
 	var graphLimitFlag int
 	var templateFlag string
@@ -352,6 +353,7 @@ Examples:
 				Kind:         kindFlag,
 				Tags:         tagsFlag,
 				Limit:        limitFlag,
+				Offset:       offsetFlag,
 				Status:       statusFlag,
 				Stale:        staleFlag,
 				GraphyNodeID: nodeIDFlag,
@@ -373,7 +375,7 @@ Examples:
 				}
 				fmt.Println(jsonOutput)
 			} else {
-				fmt.Print(index.FormatSearchResults(results, total))
+				fmt.Print(index.FormatSearchResultsFrom(results, total, offsetFlag))
 			}
 
 			return nil
@@ -783,6 +785,10 @@ Examples:
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
 	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
 	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/daily-note/issue/code)")
+	// Offset has been honoured by index.Search since it was written; nothing
+	// ever set it, so pagination was unreachable and the only way past the
+	// limit was to raise it.
+	searchCmd.Flags().IntVar(&offsetFlag, "offset", 0, "Skip this many results (pagination)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")

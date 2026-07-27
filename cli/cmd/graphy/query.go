@@ -181,7 +181,7 @@ func padRelation(r model.Relation) string {
 
 func reportCmd() *cobra.Command {
 	var section string
-	var list bool
+	var list, full bool
 	cmd := &cobra.Command{
 		Use:   "report",
 		Short: "Print GRAPH_REPORT.md",
@@ -211,15 +211,23 @@ takes just the part you need and --sections lists what is available.`,
 				fmt.Print(body)
 				return nil
 			}
-			fmt.Print(string(content))
-			if !strings.HasSuffix(string(content), "\n") {
-				fmt.Println()
+			if full {
+				fmt.Print(string(content))
+				if !strings.HasSuffix(string(content), "\n") {
+					fmt.Println()
+				}
+				return nil
 			}
+			body, withheld := reportOverview(string(content))
+			fmt.Print(body)
+			fmt.Print(withheldNote(withheld, reportSections(string(content)),
+				`--section "<name>" (or --full)`))
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&section, "section", "", "print only this section, by heading text")
 	cmd.Flags().BoolVar(&list, "sections", false, "list the report's section headings")
+	cmd.Flags().BoolVar(&full, "full", false, "print the whole report including large listings")
 	return cmd
 }
 
@@ -338,4 +346,89 @@ the command that can.`,
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	cmd.Flags().IntVar(&limit, "limit", query.DefaultLimit, "maximum members listed")
 	return cmd
+}
+
+// maxReportSection is the size past which a report section is a listing rather
+// than prose.
+//
+// Measured on this repository: Stats 402 B, God nodes 582 B, Rationale 359 B,
+// Suggested queries 210 B — and Communities 32,880 B, 95% of the document. Any
+// threshold between separates them; 4000 is headroom, not tuning.
+const maxReportSection = 4000
+
+// maxReportOverview guards a repository with many medium sections, which the
+// per-section cap alone would let through.
+const maxReportOverview = 8000
+
+// reportOverview returns the report's small sections in document order, plus a
+// description of the ones it withheld.
+//
+// The no-argument default returned the whole report — 35KB, ~9k tokens here —
+// and the fix is not "the first N bytes" but "skip the listings and name
+// them", because one section is almost all of it. Callers must render the
+// second value: a cap that does not say how to lift it reads as "that is all
+// there is", which is exactly what the old default did not say.
+func reportOverview(content string) (body string, withheld []string) {
+	var kept strings.Builder
+	var skip bool
+	var total int
+
+	sections := splitReportSections(content)
+	for _, sec := range sections {
+		oversize := len(sec.body) > maxReportSection
+		if !oversize && total+len(sec.body) > maxReportOverview {
+			oversize = true // the overview is full; treat the rest as listings
+		}
+		if oversize {
+			withheld = append(withheld,
+				fmt.Sprintf("%s (%.1f KB)", sec.name, float64(len(sec.body))/1024))
+			skip = true
+			continue
+		}
+		kept.WriteString(sec.body)
+		total += len(sec.body)
+	}
+	_ = skip
+	return kept.String(), withheld
+}
+
+type reportSectionSpan struct {
+	name string
+	body string
+}
+
+// splitReportSections cuts the report at its H1/H2 headings, keeping the
+// preamble attached to the heading above it.
+func splitReportSections(content string) []reportSectionSpan {
+	lines := strings.Split(content, "\n")
+	var out []reportSectionSpan
+	cur := reportSectionSpan{name: ""}
+	var buf strings.Builder
+	flush := func() {
+		if buf.Len() > 0 || cur.name != "" {
+			cur.body = buf.String()
+			out = append(out, cur)
+		}
+		buf.Reset()
+	}
+	for _, line := range lines {
+		if h, ok := headingText(line); ok && headingLevel(line) <= 2 {
+			flush()
+			cur = reportSectionSpan{name: h}
+		}
+		buf.WriteString(line)
+		buf.WriteString("\n")
+	}
+	flush()
+	return out
+}
+
+// withheldNote renders the trailer that names what an overview left out and how
+// to fetch it, using the caller's own vocabulary for the section argument.
+func withheldNote(withheld []string, all []string, argForm string) string {
+	if len(withheld) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("\n… %d section(s) withheld: %s. Fetch one with %s. Available sections: %s.\n",
+		len(withheld), strings.Join(withheld, ", "), argForm, strings.Join(all, ", "))
 }

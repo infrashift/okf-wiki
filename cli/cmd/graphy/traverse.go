@@ -193,6 +193,7 @@ func runEdges(entity string, q query.EdgeQuery, asJSON bool, verb string) error 
 
 func whyCmd() *cobra.Command {
 	var asJSON bool
+	var limit int
 	cmd := &cobra.Command{
 		Use:   "why <entity>",
 		Short: "The recorded reasoning behind an entity",
@@ -214,7 +215,7 @@ question in natural language and hoping the planner picked the right seeds.`,
 			if err != nil {
 				return err
 			}
-			res, err := query.Rationale(s, n.ID)
+			res, err := query.Rationale(s, n.ID, limit)
 			if err != nil {
 				return err
 			}
@@ -243,12 +244,14 @@ question in natural language and hoping the planner picked the right seeds.`,
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
+	cmd.Flags().IntVar(&limit, "limit", query.DefaultLimit, "maximum rationale entries")
 	return cmd
 }
 
 func nodesCmd() *cobra.Command {
 	var file string
 	var asJSON bool
+	var limit int
 	cmd := &cobra.Command{
 		Use:   "nodes --file <path>",
 		Short: "List the entities declared in a file",
@@ -265,20 +268,24 @@ graph without guessing a symbol name.`,
 			}
 			defer s.Close()
 
-			nodes, err := query.FileNodes(s, file)
+			res, err := query.FileNodes(s, file, limit)
 			if err != nil {
 				return err
 			}
 			if asJSON {
-				return json.NewEncoder(os.Stdout).Encode(nodes)
+				return json.NewEncoder(os.Stdout).Encode(res)
 			}
-			for _, n := range nodes {
+			for _, n := range res.Nodes {
 				fmt.Printf("  %-6d %-10s %-44s %s\n", n.Span.StartLine, n.Kind, truncate(n.Label, 44), n.ID)
+			}
+			if res.More {
+				fmt.Printf("  … %d more (raise --limit)\n", res.Total-len(res.Nodes))
 			}
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&file, "file", "", "repo-relative file path")
+	cmd.Flags().IntVar(&limit, "limit", query.DefaultLimit, "maximum entities listed")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd
 }
@@ -311,7 +318,7 @@ reverse direction is ` + "`okfw search --node-id <id>`" + `.`,
 			// would never produce one. What a path can answer is which of the
 			// entities it declares have been documented.
 			if n.Kind == model.KindFile {
-				concepts, err := query.ConceptsForFile(s, n.File)
+				concepts, err := query.ConceptsForFile(s, n.File, 0)
 				if err != nil {
 					return err
 				}

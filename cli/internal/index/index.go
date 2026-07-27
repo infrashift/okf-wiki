@@ -8,8 +8,33 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 	"github.com/blevesearch/bleve/v2/mapping"
+	"github.com/blevesearch/bleve/v2/registry"
+	"github.com/blevesearch/bleve/v2/search/highlight"
+	plainfmt "github.com/blevesearch/bleve/v2/search/highlight/format/plain"
+	simplefrag "github.com/blevesearch/bleve/v2/search/highlight/fragmenter/simple"
+	simplehl "github.com/blevesearch/bleve/v2/search/highlight/highlighter/simple"
 	"github.com/blevesearch/bleve/v2/search/query"
 )
+
+// plainHighlighter emits fragments with no markup and no escaping.
+//
+// Bleve's default is the "html" highlighter, which wraps matches in <mark>
+// *and* HTML-escapes everything around them (see its FragmentFormatter.Format).
+// The tags were pure token overhead for an agent; the escaping silently
+// corrupted any snippet of a markdown concept containing & or <.
+const plainHighlighter = "okfw-plain"
+
+func init() {
+	registry.RegisterHighlighter(plainHighlighter,
+		func(_ map[string]interface{}, cache *registry.Cache) (highlight.Highlighter, error) {
+			frag, err := cache.FragmenterNamed(simplefrag.Name)
+			if err != nil {
+				return nil, err
+			}
+			return simplehl.NewHighlighter(frag,
+				plainfmt.NewFragmentFormatter("", ""), simplehl.DefaultSeparator), nil
+		})
+}
 
 // ConceptDoc is the structure we feed into the index
 type ConceptDoc struct {
@@ -39,11 +64,15 @@ type ConceptDoc struct {
 
 // SearchResult represents a single search hit
 type SearchResult struct {
-	ID       string   `json:"id"`
-	Title    string   `json:"title"`
-	Type     string   `json:"type"`
-	Kind     string   `json:"kind"`
-	Project  string   `json:"project"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Type  string `json:"type"`
+	Kind  string `json:"kind"`
+	// Description is the OKF one-sentence summary. It was indexed but never
+	// returned, so the field purpose-built to say what a concept is could not
+	// reach the caller asking exactly that.
+	Description string   `json:"description,omitempty"`
+	Project     string   `json:"project"`
 	Tags     []string `json:"tags"`
 	FilePath string   `json:"file_path"`
 	Score    float64  `json:"score"`
@@ -238,11 +267,22 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 	searchRequest := bleve.NewSearchRequest(finalQuery)
 	searchRequest.Size = opts.Limit
 	searchRequest.From = opts.Offset
-	searchRequest.Fields = []string{"id", "title", "type", "kind", "project", "tags", "file_path", "status", "stale_after", "graphy_node_id"}
+	searchRequest.Fields = []string{"id", "title", "type", "kind", "description", "project", "tags", "file_path", "status", "stale_after", "graphy_node_id"}
 
-	// Add highlighting for body matches
+	// Highlight the body, explicitly and with no markup.
+	//
+	// Two defects lived here. The default highlighter is bleve's "html", whose
+	// formatter runs html.EscapeString over the text *surrounding* each match,
+	// not only the match — so a snippet of a markdown concept came back with
+	// `&amp;` and `&lt;` in it. The <mark> tags were waste; the escaping was
+	// corruption, and stripping the tags in Go would not have fixed it.
+	//
+	// And the field was picked by ranging hit.Fragments — a Go map — and
+	// breaking on the first entry, so identical searches returned snippets from
+	// different fields.
 	if opts.Query != "" {
-		searchRequest.Highlight = bleve.NewHighlight()
+		searchRequest.Highlight = bleve.NewHighlightWithStyle(plainHighlighter)
+		searchRequest.Highlight.AddField("body")
 	}
 
 	// Execute search
@@ -269,6 +309,9 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 		if kind, ok := hit.Fields["kind"].(string); ok {
 			result.Kind = kind
 		}
+		if desc, ok := hit.Fields["description"].(string); ok {
+			result.Description = desc
+		}
 		if project, ok := hit.Fields["project"].(string); ok {
 			result.Project = project
 		}
@@ -293,14 +336,14 @@ func Search(idx bleve.Index, opts SearchOptions) ([]SearchResult, int, error) {
 			result.GraphyNodeID = nodeID
 		}
 
-		// Extract highlight snippet
-		if len(hit.Fragments) > 0 {
-			for _, fragments := range hit.Fragments {
-				if len(fragments) > 0 {
-					result.Snippet = fragments[0]
-					break
-				}
-			}
+		// The OKF description is a purpose-written one-sentence summary; a match
+		// fragment is a window with an ellipsis at both ends. Prefer the
+		// description, and fall back to the fragment — carrying both would make
+		// every hit larger, which is the opposite of the point.
+		if result.Description != "" {
+			result.Snippet = result.Description
+		} else if frags, ok := hit.Fragments["body"]; ok && len(frags) > 0 {
+			result.Snippet = frags[0]
 		}
 
 		results = append(results, result)
@@ -319,7 +362,18 @@ func SearchResultsToJSON(results []SearchResult) (string, error) {
 }
 
 // FormatSearchResults formats results for terminal display
+// FormatSearchResults renders a result page, naming what it withheld.
+//
+// It printed the true total and then listed only the capped slice with no
+// marker at all, so a 57-hit search read as "here are your 57 results" over 20
+// lines. Every graphy traversal announces its cap; this did not.
 func FormatSearchResults(results []SearchResult, total int) string {
+	return FormatSearchResultsFrom(results, total, 0)
+}
+
+// FormatSearchResultsFrom is FormatSearchResults for a paged call, so the
+// continuation offset it suggests is correct.
+func FormatSearchResultsFrom(results []SearchResult, total, offset int) string {
 	if len(results) == 0 {
 		return "No results found."
 	}
@@ -352,6 +406,11 @@ func FormatSearchResults(results []SearchResult, total int) string {
 			sb.WriteString(fmt.Sprintf("   ...%s...\n", r.Snippet))
 		}
 		sb.WriteString("\n")
+	}
+
+	if shown := offset + len(results); total > shown {
+		sb.WriteString(fmt.Sprintf("… %d more (raise --limit, or page with --offset %d)\n",
+			total-shown, shown))
 	}
 
 	return sb.String()

@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"time"
 
@@ -195,9 +194,10 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "graphy_file_nodes",
-			"description": "The entities declared in a repo-relative file, in source order. Use this to enter the graph from a file you are editing.",
+			"description": "The entities declared in a repo-relative file, in source order. Every node's file is the one you asked for, so it is omitted per node. Use this to enter the graph from a file you are editing.",
 			"inputSchema": obj(map[string]interface{}{
-				"file": str("repo-relative file path"),
+				"file":  str("repo-relative file path"),
+				"limit": num("maximum entities (default 50)"),
 			}, "file"),
 		},
 		{
@@ -766,7 +766,7 @@ func (s *mcpServer) toolConcept(args json.RawMessage) *toolResult {
 		// produce one. What a path can answer is which of the entities it
 		// declares have been documented.
 		if n.Kind == model.KindFile {
-			concepts, err := query.ConceptsForFile(st, n.File)
+			concepts, err := query.ConceptsForFile(st, n.File, 0)
 			if err != nil {
 				return errResult(err)
 			}
@@ -822,14 +822,22 @@ func (s *mcpServer) toolFileNodes(args json.RawMessage) *toolResult {
 		return errResult(fmt.Errorf("file is required"))
 	}
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
-		nodes, err := query.FileNodes(st, p.File)
+		res, err := query.FileNodes(st, p.File, p.Limit)
 		if err != nil {
 			return errResult(err)
 		}
-		return jsonResult(map[string]interface{}{
-			"file":  p.File,
-			"nodes": compactNodesWith(nodes, conceptIndex(st)),
-		})
+		// Every node's `file` is the path the caller just asked about, already
+		// the top-level key — 18% of this response on this repository's larger
+		// files was that one string repeated.
+		nodes := compactNodesWith(res.Nodes, conceptIndex(st))
+		for i := range nodes {
+			nodes[i].File = ""
+		}
+		out := map[string]interface{}{"file": p.File, "nodes": nodes, "total": res.Total}
+		if res.More {
+			out["truncated"] = true
+		}
+		return jsonResult(out)
 	})
 }
 
@@ -839,37 +847,60 @@ func (s *mcpServer) toolFileNodes(args json.RawMessage) *toolResult {
 func (s *mcpServer) toolRationale(args json.RawMessage) *toolResult {
 	var p struct {
 		Entity string `json:"entity"`
+		Limit  int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil || p.Entity == "" {
 		return errResult(fmt.Errorf("entity is required"))
+	}
+	if p.Limit <= 0 {
+		p.Limit = defaultRationaleLimit
 	}
 	return s.withStore(func(w *workspace.Workspace, st *store.Store) *toolResult {
 		n, err := query.ResolveEntity(st, p.Entity)
 		if err != nil {
 			return errResult(err)
 		}
-		card, err := query.Explain(st, n.ID)
+		// query.Rationale is what the CLI uses. This handler used to pull the
+		// entity's whole adjacency through Explain and filter explains-edges in
+		// Go — unbounded, and clipping bodies to 400 characters where the CLI
+		// kept all 2000. Same question, two different answers.
+		res, err := query.Rationale(st, n.ID, p.Limit)
 		if err != nil {
 			return errResult(err)
 		}
-		// Rationale points AT the entity, so it arrives on the incoming side.
-		var out []mcpNode
-		for _, e := range card.In {
-			if e.Relation != model.RelExplains {
-				continue
-			}
-			src, err := st.GetNode(e.Source)
-			if err != nil || src == nil {
-				continue
-			}
-			out = append(out, compactNodes([]queryNode{*src})[0])
+		// Bodies are NOT clipped here. maxNodeBody is right for a neighbourhood
+		// node, where the body is incidental context; in this tool the body is
+		// the answer, and clipping it forces a second call to read what was
+		// asked for.
+		out := make([]mcpNode, 0, len(res.Hits))
+		for _, h := range res.Hits {
+			out = append(out, compactNodeFull(h.Other))
 		}
-		sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-		return jsonResult(map[string]interface{}{
-			"entity":    n.Label,
-			"rationale": out,
-		})
+		result := map[string]interface{}{"entity": n.Label, "rationale": out}
+		if res.More {
+			result["truncated"] = true
+			result["total"] = res.Total
+		}
+		return jsonResult(result)
 	})
+}
+
+// defaultRationaleLimit bounds the rationale attached to one entity.
+//
+// Bodies are up to 2000 characters and are returned unclipped, because the body
+// is the answer. Measured on this repository the fan-in is 1-2 explains-edges
+// per entity, so 10 is five times the observed worst case and bounds the
+// response at roughly 20KB.
+const defaultRationaleLimit = 10
+
+// compactNodeFull is compactNodes for one node, keeping its body intact.
+func compactNodeFull(n queryNode) mcpNode {
+	out := mcpNode{
+		ID: n.ID, Label: n.Label, Kind: string(n.Kind),
+		File: n.File, Line: n.Span.StartLine, Doc: n.Doc,
+		Body: n.Body, Degree: n.Degree, Test: n.Test,
+	}
+	return out
 }
 
 func (s *mcpServer) toolReport(args json.RawMessage) *toolResult {
@@ -885,7 +916,9 @@ func (s *mcpServer) toolReport(args json.RawMessage) *toolResult {
 			return errResult(fmt.Errorf("no report (run `graphy build`): %w", err))
 		}
 		if p.Section == "" {
-			return textResult(string(content))
+			body, withheld := reportOverview(string(content))
+			return textResult(body + withheldNote(withheld,
+				reportSections(string(content)), `graphy_report {"section":"<name>"}`))
 		}
 		body, ok := reportSection(string(content), p.Section)
 		if !ok {

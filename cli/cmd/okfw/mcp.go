@@ -117,6 +117,7 @@ func mcpTools() []map[string]interface{} {
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
 				"node_id": str("find the concept documenting this graphy code-graph node id"),
 				"limit":   num("max results (default 10)"),
+				"offset":  num("skip this many results; `truncated` reports next_offset"),
 			}),
 		},
 		{
@@ -136,7 +137,7 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "read",
-			"description": "Read a concept's markdown by id or wiki-relative path. Narrow with section or offset/limit rather than pulling a whole long concept.",
+			"description": "Read a concept's markdown by id or wiki-relative path. Capped at 200 lines; narrow with section, or page with offset/limit.",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":     str("concept id or path"),
 				"section": str("read only this markdown section, by heading text"),
@@ -155,7 +156,7 @@ func mcpTools() []map[string]interface{} {
 		},
 		{
 			"name":        "graph",
-			"description": "Link-graph queries. Returns compact node lists [{id,title,path}].",
+			"description": "Link-graph queries. backlinks|tag -> {nodes:[{id,title,path}],total}; cluster adds edges; dangling -> {dangling:[{from,from_path,to}],total}. Capped at `limit`; `truncated` means more exist.",
 			"inputSchema": obj(map[string]interface{}{
 				"action": enum("query", "backlinks", "cluster", "tag", "dangling"),
 				"ref":    str("concept id/path (backlinks, cluster) or tag name (tag)"),
@@ -313,6 +314,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Stale   bool   `json:"stale"`
 		NodeID  string `json:"node_id"`
 		Limit   int    `json:"limit"`
+		Offset  int    `json:"offset"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
@@ -336,6 +338,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Stale:        a.Stale,
 		GraphyNodeID: a.NodeID,
 		Limit:        a.Limit,
+		Offset:       a.Offset,
 	}
 	if a.Tag != "" {
 		opts.Tags = []string{a.Tag}
@@ -359,7 +362,14 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			NodeID:  r.GraphyNodeID,
 		})
 	}
-	return jsonResult(map[string]interface{}{"total": total, "results": hits})
+	out := map[string]interface{}{"total": total, "results": hits}
+	// A bare total the caller has to compare against len(results) is not an
+	// announcement. Say it, and say how to get the rest.
+	if shown := a.Offset + len(hits); total > shown {
+		out["truncated"] = true
+		out["next_offset"] = shown
+	}
+	return jsonResult(out)
 }
 
 func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -447,10 +457,25 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 		return textResult(body)
 	}
 	if a.Offset > 0 || a.Limit > 0 {
-		return textResult(lineWindow(string(content), a.Offset, a.Limit))
+		limit := a.Limit
+		if limit <= 0 {
+			limit = defaultReadLines
+		}
+		return textResult(readWindow(string(content), a.Offset, limit))
 	}
-	return textResult(string(content))
+	// A read that asked for no window used to return the whole file, uncapped
+	// and unmarked — the one path through this handler with no bound, in the
+	// tool an agent calls most.
+	return textResult(readWindow(string(content), 1, defaultReadLines))
 }
+
+// defaultReadLines bounds a read that asked for no window.
+//
+// Generated concepts are held to 4000 bytes by
+// TestExportStaysWithinItsTokenBudget — roughly 100 lines — so this never bites
+// one, and the graph→wiki bridge is unaffected. It bounds a hand-written
+// concept, which nothing bounded, at about 3k tokens.
+const defaultReadLines = 200
 
 // markdownSection extracts one heading's content, matched case-insensitively,
 // through to the next heading of the same or a shallower level.
@@ -482,19 +507,35 @@ func markdownSection(content, want string) (string, bool) {
 	return strings.Join(lines[start:], "\n"), true
 }
 
-// lineWindow returns limit lines starting at the 1-based offset.
-func lineWindow(content string, offset, limit int) string {
+// lineWindow returns limit lines starting at the 1-based offset, and how many
+// lines it withheld after them.
+func lineWindow(content string, offset, limit int) (string, int) {
 	lines := strings.Split(content, "\n")
 	if offset > 0 {
 		if offset-1 >= len(lines) {
-			return ""
+			return "", 0
 		}
 		lines = lines[offset-1:]
 	}
+	more := 0
 	if limit > 0 && limit < len(lines) {
+		more = len(lines) - limit
 		lines = lines[:limit]
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n"), more
+}
+
+// readWindow renders a line window with its continuation marker.
+func readWindow(content string, offset, limit int) string {
+	if offset < 1 {
+		offset = 1
+	}
+	text, more := lineWindow(content, offset, limit)
+	if more == 0 {
+		return text
+	}
+	return fmt.Sprintf("%s\n\n… %d more lines — continue with offset:%d, or pass section:\"<heading>\"",
+		text, more, offset+limit)
 }
 
 func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -635,6 +676,27 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		}
 		return nodes
 	}
+	// nodeEnvelope caps a node list and says what it withheld. The limit was
+	// advertised in the schema and applied to exactly one of the four actions,
+	// so three were unbounded while claiming a default of 10. Capping here
+	// rather than in graphdb keeps the store's signatures — also used by
+	// `okfw graph-query` and the Neovim plugin — out of it.
+	nodeEnvelope := func(records []graphdb.NodeRecord) map[string]interface{} {
+		total := len(records)
+		out := map[string]interface{}{"total": total}
+		if total > a.Limit {
+			records = records[:a.Limit]
+			out["truncated"] = true
+		}
+		out["nodes"] = toNodes(records)
+		return out
+	}
+
+	type edge struct {
+		From     string `json:"from"`
+		FromPath string `json:"from_path,omitempty"`
+		To       string `json:"to"`
+	}
 
 	switch a.Action {
 	case "backlinks":
@@ -642,21 +704,19 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		if err != nil {
 			return errResult(err)
 		}
-		return jsonResult(toNodes(records))
+		return jsonResult(nodeEnvelope(records))
 	case "cluster":
 		records, edges, err := store.GetCluster(id, a.Depth, a.Limit)
 		if err != nil {
 			return errResult(err)
 		}
-		type edge struct {
-			From string `json:"from"`
-			To   string `json:"to"`
-		}
+		out := nodeEnvelope(records)
 		es := make([]edge, 0, len(edges))
 		for _, e := range edges {
 			es = append(es, edge{From: e.From, To: e.To})
 		}
-		return jsonResult(map[string]interface{}{"nodes": toNodes(records), "edges": es})
+		out["edges"] = es
+		return jsonResult(out)
 	case "tag":
 		if a.Ref == "" {
 			return errResult(fmt.Errorf("ref (tag name) is required for tag"))
@@ -665,21 +725,31 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		if err != nil {
 			return errResult(err)
 		}
-		return jsonResult(toNodes(records))
+		return jsonResult(nodeEnvelope(records))
 	case "dangling":
 		edges, err := store.GetDanglingEdges()
 		if err != nil {
 			return errResult(err)
 		}
-		type edge struct {
-			From string `json:"from"`
-			To   string `json:"to"`
+		total := len(edges)
+		if total > a.Limit {
+			edges = edges[:a.Limit]
 		}
 		es := make([]edge, 0, len(edges))
 		for _, e := range edges {
-			es = append(es, edge{From: e.From, To: e.To})
+			// The source concept's path, so a dangling link can be opened and
+			// fixed without a second lookup per row.
+			from := edge{From: e.From, To: e.To}
+			if n, err := store.GetNode(e.From); err == nil && n != nil {
+				from.FromPath = relPath(cfg, n.FilePath)
+			}
+			es = append(es, from)
 		}
-		return jsonResult(es)
+		out := map[string]interface{}{"dangling": es, "total": total}
+		if total > len(es) {
+			out["truncated"] = true
+		}
+		return jsonResult(out)
 	}
 	return errResult(fmt.Errorf("unknown action %q", a.Action))
 }

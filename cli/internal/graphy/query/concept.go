@@ -80,13 +80,17 @@ func withBundle(s *store.Store, nodeID, conceptID, relPath string) (*Concept, er
 // then failed with "run `graphy export okfw`": advice that could never work,
 // because re-exporting will never produce a concept for a file. The answerable
 // question for a path is "what in here has been documented".
-func ConceptsForFile(s *store.Store, path string) ([]Concept, error) {
-	nodes, err := FileNodes(s, path)
+//
+// Bounded by FileNodes' own limit: the concepts are a subset of the entities,
+// already thinned by --min-degree, so a file that trips the cap is one whose
+// listing was never going to be readable anyway.
+func ConceptsForFile(s *store.Store, path string, limit int) ([]Concept, error) {
+	res, err := FileNodes(s, path, limit)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Concept, 0, len(nodes))
-	for _, n := range nodes {
+	out := make([]Concept, 0, len(res.Nodes))
+	for _, n := range res.Nodes {
 		c, err := ConceptFor(s, n.ID)
 		if err != nil {
 			return nil, err

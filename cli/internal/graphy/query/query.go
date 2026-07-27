@@ -106,7 +106,11 @@ func fileNode(s *store.Store, path string) (*model.Node, error) {
 // This is the "I am editing this file, what is in it" question. The mapping has
 // always been in the store's file records; nothing exposed it, so an agent
 // holding a path had to guess a symbol name to get into the graph at all.
-func FileNodes(s *store.Store, path string) ([]model.Node, error) {
+// A limit of 0 uses DefaultLimit.
+func FileNodes(s *store.Store, path string, limit int) (*FileNodesResult, error) {
+	if limit <= 0 {
+		limit = DefaultLimit
+	}
 	rec, err := s.GetFile(strings.TrimPrefix(filepath.ToSlash(path), "./"))
 	if err != nil {
 		return nil, err
@@ -130,7 +134,22 @@ func FileNodes(s *store.Store, path string) ([]model.Node, error) {
 		}
 		return out[i].ID < out[j].ID
 	})
-	return out, nil
+	res := &FileNodesResult{File: path, Total: len(out)}
+	if len(out) > limit {
+		out = out[:limit]
+		res.More = true
+	}
+	res.Nodes = out
+	return res, nil
+}
+
+// FileNodesResult is a bounded file listing, shaped like NeighborResult and
+// EdgeResult so truncation reads the same way everywhere.
+type FileNodesResult struct {
+	File  string       `json:"file"`
+	Nodes []model.Node `json:"nodes"`
+	Total int          `json:"total"`
+	More  bool         `json:"truncated"`
 }
 
 // Direction selects which way an expansion or edge listing travels.
@@ -513,11 +532,12 @@ func confRank(c model.Confidence) int {
 // Rationale edges point AT the entity, so this is an incoming `explains`
 // filter — deterministic, unlike routing "why is X like this" through the
 // natural-language planner, which was the only way to ask from the CLI.
-func Rationale(s *store.Store, id string) (*EdgeResult, error) {
+// A limit of 0 uses DefaultLimit.
+func Rationale(s *store.Store, id string, limit int) (*EdgeResult, error) {
 	return Edges(s, id, EdgeQuery{
 		Direction: In,
 		Relations: []model.Relation{model.RelExplains},
-		Limit:     DefaultLimit,
+		Limit:     limit,
 		// A rationale written in a test file still explains its subject.
 		IncludeTests: true,
 	})

@@ -2,9 +2,12 @@ package index
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/blevesearch/bleve/v2"
 )
 
 // Fixture ids, named so failures are readable.
@@ -415,4 +418,116 @@ func TestSearchResultIsStale(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSearchSnippetsCarryNoMarkupAndAreDeterministic covers two defects that
+// shared one line. Bleve's default "html" highlighter runs html.EscapeString
+// over the text *surrounding* each match, so a snippet of a markdown concept
+// containing & or < came back corrupted, not merely tagged — stripping <mark>
+// in Go would not have fixed it. And the field was chosen by ranging
+// hit.Fragments, a Go map, and breaking on the first entry.
+func TestSearchSnippetsCarryNoMarkupAndAreDeterministic(t *testing.T) {
+	idx, cleanup := freshIndex(t)
+	defer cleanup()
+	doc := &ConceptDoc{
+		ID:       "019680f0-7e00-7abc-8def-100000000000",
+		Title:    "Escaping",
+		Type:     "note",
+		Kind:     "note",
+		Body:     "The parser handles a & b and <html> tags when tokenizing input.",
+		FilePath: "/w/escaping.md",
+	}
+	if err := IndexDocument(idx, doc); err != nil {
+		t.Fatal(err)
+	}
+
+	var first string
+	for i := 0; i < 20; i++ {
+		results, _, err := Search(idx, SearchOptions{Query: "tokenizing"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) != 1 {
+			t.Fatalf("results = %d", len(results))
+		}
+		got := results[0].Snippet
+		if i == 0 {
+			first = got
+			continue
+		}
+		if got != first {
+			t.Fatalf("snippet differs between identical searches:\n%q\n%q", first, got)
+		}
+	}
+	for _, bad := range []string{"<mark>", "&amp;", "&lt;", "<start>"} {
+		if strings.Contains(first, bad) {
+			t.Errorf("snippet contains %s: %q", bad, first)
+		}
+	}
+	if !strings.Contains(first, "a & b") {
+		t.Errorf("snippet lost the literal text: %q", first)
+	}
+}
+
+// TestSearchPrefersTheDescriptionOverAFragment: the OKF one-sentence summary
+// exists to say what a concept is, was indexed, and was never returned.
+func TestSearchPrefersTheDescriptionOverAFragment(t *testing.T) {
+	idx, cleanup := freshIndex(t)
+	defer cleanup()
+	if err := IndexDocument(idx, &ConceptDoc{
+		ID: "019680f0-7e00-7abc-8def-100000000001", Title: "Auth", Type: "note", Kind: "note",
+		Description: "How the session token is minted, signed and rotated.",
+		Body:        "a long body mentioning tokens somewhere in the middle of it",
+		FilePath:    "/w/auth.md",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	results, _, err := Search(idx, SearchOptions{Query: "tokens"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("results = %d", len(results))
+	}
+	if results[0].Description == "" {
+		t.Error("description was not returned")
+	}
+	if results[0].Snippet != results[0].Description {
+		t.Errorf("snippet = %q, want the description", results[0].Snippet)
+	}
+}
+
+// TestFormatSearchResultsAnnouncesWithheldRows: it printed the true total and
+// then listed only the capped slice, so a 57-hit search read as if all 57 were
+// on screen.
+func TestFormatSearchResultsAnnouncesWithheldRows(t *testing.T) {
+	results := []SearchResult{{ID: "a", Title: "A"}, {ID: "b", Title: "B"}}
+
+	out := FormatSearchResults(results, 57)
+	if !strings.Contains(out, "55 more") {
+		t.Errorf("withheld rows not announced:\n%s", out)
+	}
+	if !strings.Contains(out, "--offset 2") {
+		t.Errorf("continuation offset not given:\n%s", out)
+	}
+
+	// A paged call must suggest the right next offset, not restart from 0.
+	if out := FormatSearchResultsFrom(results, 57, 20); !strings.Contains(out, "--offset 22") {
+		t.Errorf("paged continuation offset is wrong:\n%s", out)
+	}
+	// And a complete page says nothing.
+	if out := FormatSearchResults(results, 2); strings.Contains(out, "more") {
+		t.Errorf("a complete page claimed truncation:\n%s", out)
+	}
+}
+
+
+// freshIndex is an empty index for tests that assert on a single document.
+func freshIndex(t *testing.T) (bleve.Index, func()) {
+	t.Helper()
+	idx, err := OpenOrCreateIndex(filepath.Join(t.TempDir(), "idx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return idx, func() { idx.Close() }
 }

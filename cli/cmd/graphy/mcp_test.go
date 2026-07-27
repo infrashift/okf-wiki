@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graphy/build"
 	"okfw/cli/internal/graphy/export"
+	"okfw/cli/internal/graphy/query"
 	"okfw/cli/internal/graphy/store"
 	"okfw/cli/internal/graphy/workspace"
 )
@@ -489,5 +491,101 @@ func TestMCPExplainOmitsTheConstantEndpoint(t *testing.T) {
 	}
 	if !strings.Contains(out, `"node":`) {
 		t.Errorf("card edges lost their other end: %s", out)
+	}
+}
+
+// TestMCPReportWithholdsLargeSectionsAndNamesThem: the no-argument default
+// returned the whole report — 35KB, ~9k tokens on this repository, of which one
+// listing section was 95%.
+func TestMCPReportWithholdsLargeSectionsAndNamesThem(t *testing.T) {
+	s := mcpTestServer(t)
+
+	var big strings.Builder
+	big.WriteString("# Graph Report\n\n## Stats\n\n- nodes: 7\n\n## Communities\n\n")
+	for i := 0; i < 800; i++ {
+		fmt.Fprintf(&big, "### community %d — a subsystem with a long descriptive label\n", i)
+	}
+	big.WriteString("\n## Rationale\n\nOne decision.\n")
+
+	w, err := workspace.Discover(s.startDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(w.ReportPath(), []byte(big.String()), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, isErr := callTool(t, s, "graphy_report", `{}`)
+	if isErr {
+		t.Fatalf("graphy_report errored: %s", out)
+	}
+	if strings.Contains(out, "### community 400") {
+		t.Error("the large listing section was returned")
+	}
+	if !strings.Contains(out, "## Stats") || !strings.Contains(out, "## Rationale") {
+		t.Errorf("the small sections were dropped:\n%s", out)
+	}
+	// A cap that does not say how to lift it reads as "that is all there is".
+	if !strings.Contains(out, "withheld") || !strings.Contains(out, "Communities") {
+		t.Errorf("withheld sections were not named:\n%s", out)
+	}
+	if !strings.Contains(out, `section`) {
+		t.Errorf("the argument that fetches them was not given:\n%s", out)
+	}
+
+	// And the named section still comes back in full.
+	out, isErr = callTool(t, s, "graphy_report", `{"section":"Communities"}`)
+	if isErr || !strings.Contains(out, "### community 400") {
+		t.Errorf("an explicit section did not return the listing: %v", isErr)
+	}
+}
+
+// TestMCPRationaleMatchesTheCLI is the assertion whose absence let the two
+// drift: the tool reimplemented in Go what query.Rationale already did, with no
+// limit and bodies clipped to 400 characters where the CLI kept all 2000.
+func TestMCPRationaleMatchesTheCLI(t *testing.T) {
+	s := mcpTestServer(t)
+	out, isErr := callTool(t, s, "graphy_rationale", `{"entity":"run"}`)
+	if isErr {
+		t.Fatalf("graphy_rationale errored: %s", out)
+	}
+	var got struct {
+		Rationale []struct {
+			ID   string `json:"id"`
+			Body string `json:"body"`
+		} `json:"rationale"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not the declared shape: %v\n%s", err, out)
+	}
+
+	w, err := workspace.Discover(s.startDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	n, err := query.ResolveEntity(st, "run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := query.Rationale(st, n.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rationale) != len(res.Hits) {
+		t.Fatalf("tool returned %d entries, CLI %d", len(got.Rationale), len(res.Hits))
+	}
+	for i, h := range res.Hits {
+		if got.Rationale[i].ID != h.Other.ID {
+			t.Errorf("entry %d: tool %s, CLI %s", i, got.Rationale[i].ID, h.Other.ID)
+		}
+		// Unclipped: in this tool the body is the answer, not context.
+		if got.Rationale[i].Body != h.Other.Body {
+			t.Errorf("entry %d body differs — the tool clipped what was asked for", i)
+		}
 	}
 }

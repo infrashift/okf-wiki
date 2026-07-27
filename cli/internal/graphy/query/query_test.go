@@ -246,14 +246,14 @@ func TestResolveEntityAcceptsAFilePath(t *testing.T) {
 	}
 }
 
-func TestFileNodesOrdersBySourcePosition(t *testing.T) {
+func TestFileNodesIsOrderedAndBounded(t *testing.T) {
 	s := traverseFixture(t)
-	nodes, err := FileNodes(s, "svc/svc.go")
+	res, err := FileNodes(s, "svc/svc.go", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
-	for _, n := range nodes {
+	for _, n := range res.Nodes {
 		got = append(got, n.ID)
 	}
 	want := []string{"F", "TYPE", "WHY", "HUB"} // lines 1, 3, 9, 10
@@ -266,8 +266,19 @@ func TestFileNodesOrdersBySourcePosition(t *testing.T) {
 			break
 		}
 	}
-	if _, err := FileNodes(s, "nope.go"); err == nil {
+	if _, err := FileNodes(s, "nope.go", 0); err == nil {
 		t.Error("want an error for a file that was never extracted")
+	}
+
+	// A generated or vendored file can declare hundreds of entities, and this
+	// is the tool an agent uses to enter the graph from the file it is editing.
+	capped, err := FileNodes(s, "svc/svc.go", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped.Nodes) != 2 || !capped.More || capped.Total != 4 {
+		t.Errorf("nodes=%d truncated=%v total=%d, want 2/true/4",
+			len(capped.Nodes), capped.More, capped.Total)
 	}
 }
 
@@ -382,7 +393,7 @@ func TestNeighborsIsDeterministicAndBounded(t *testing.T) {
 // by phrasing the question in natural language and hoping the planner agreed.
 func TestRationaleIsADeterministicFilter(t *testing.T) {
 	s := traverseFixture(t)
-	res, err := Rationale(s, "HUB")
+	res, err := Rationale(s, "HUB", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,7 +492,7 @@ func TestConceptsForFileReturnsTheEntitiesDocumentedInIt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ConceptsForFile(s, "svc/svc.go")
+	got, err := ConceptsForFile(s, "svc/svc.go", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +505,7 @@ func TestConceptsForFileReturnsTheEntitiesDocumentedInIt(t *testing.T) {
 
 	// A file whose entities are all undocumented is empty, not an error: that
 	// is the case the caller has to phrase as "below --min-degree".
-	got, err = ConceptsForFile(s, "cmd/main.go")
+	got, err = ConceptsForFile(s, "cmd/main.go", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
