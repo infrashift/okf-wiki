@@ -106,12 +106,13 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "search",
-			"description": "Search wiki concepts. Returns [{id,title,path,project,tags,snippet,node_id}]; path is wiki-relative (use with read), node_id crosses back into graphy.",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,node_id}]}; path is wiki-relative (use with read), node_id crosses back into graphy. Filter kind:\"code\" for graphy's exported entities or kind:\"note\" for hand-written concepts.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
 				"tag":     str("filter by tag"),
-				"kind":    enum("filter by kind", "note", "daily-note", "issue"),
+				"kind":    enum("filter by kind; \"code\" is graphy's exported code graph, the rest are hand-written", "note", "daily-note", "issue", "code"),
+				"type":    str("filter by OKF free-form type, e.g. code-function, code-community"),
 				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
 				"node_id": str("find the concept documenting this graphy code-graph node id"),
@@ -285,9 +286,14 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
 }
 
 type mcpHit struct {
-	ID      string   `json:"id"`
-	Title   string   `json:"title"`
-	Path    string   `json:"path"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Path  string `json:"path"`
+	// Kind and Type say what a hit *is*. A bundle holds hand-written notes and
+	// graphy's exported code concepts side by side, and without these the two
+	// were indistinguishable in the payload itself.
+	Kind    string   `json:"kind,omitempty"`
+	Type    string   `json:"type,omitempty"`
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Snippet string   `json:"snippet,omitempty"`
@@ -302,6 +308,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Project string `json:"project"`
 		Tag     string `json:"tag"`
 		Kind    string `json:"kind"`
+		Type    string `json:"type"`
 		Status  string `json:"status"`
 		Stale   bool   `json:"stale"`
 		NodeID  string `json:"node_id"`
@@ -324,6 +331,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Query:        a.Q,
 		Project:      a.Project,
 		Kind:         a.Kind,
+		Type:         a.Type,
 		Status:       a.Status,
 		Stale:        a.Stale,
 		GraphyNodeID: a.NodeID,
@@ -343,6 +351,8 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			ID:      r.ID,
 			Title:   r.Title,
 			Path:    relPath(cfg, r.FilePath),
+			Kind:    r.Kind,
+			Type:    r.Type,
 			Project: r.Project,
 			Tags:    r.Tags,
 			Snippet: r.Snippet,

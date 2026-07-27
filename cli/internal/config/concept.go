@@ -138,6 +138,12 @@ func (z *Concept) GetKind() string {
 	case "note", "daily-note", "issue":
 		return z.Type
 	}
+	// A concept carrying a graphy block was written by `graphy export okfw`.
+	// Classify it on read so bundles exported before `kind: code` existed are
+	// still separable from hand-written notes, without rewriting a file.
+	if z.Graphy != nil {
+		return "code"
+	}
 	return "note"
 }
 

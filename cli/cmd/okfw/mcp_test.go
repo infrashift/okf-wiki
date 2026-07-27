@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
 )
 
@@ -223,5 +224,64 @@ func TestMCPBodyWriting(t *testing.T) {
 	// the rewritten note must still validate
 	if !strings.Contains(text, `type: "note"`) {
 		t.Errorf("frontmatter lost after set_body:\n%s", text)
+	}
+}
+
+// TestMCPSearchSeparatesCodeConceptsFromNotes: a bundle holds hand-written
+// notes and graphy's exported code concepts side by side. Every exported
+// concept used to index as kind "note", so the agent's one lever for "my notes,
+// not the code graph" silently returned both — and the payload gave it no way
+// to tell them apart afterwards either.
+func TestMCPSearchSeparatesCodeConceptsFromNotes(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, isErr := callTool(t, s, "create", `{"title":"Handwritten Note","body":"about alpha"}`); isErr {
+		t.Fatal("create failed")
+	}
+	p := writeConceptFile(t, cfg.RootPath, "alpha--0001.md", `---
+id: "019680f0-7e00-7abc-8def-100000000000"
+title: "Alpha"
+type: "code-function"
+kind: "code"
+tags: []
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+graphy:
+  node_id: "go:function:a.go#Alpha"
+---
+
+# Alpha
+`)
+	if err := bundle.AutoIndex(cfg, p); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		args, want, notWant string
+	}{
+		{`{"kind":"note"}`, "Handwritten Note", "Alpha"},
+		{`{"kind":"code"}`, "Alpha", "Handwritten Note"},
+		{`{"type":"code-function"}`, "Alpha", "Handwritten Note"},
+	} {
+		out, isErr := callTool(t, s, "search", tc.args)
+		if isErr {
+			t.Fatalf("search %s errored: %s", tc.args, out)
+		}
+		if !strings.Contains(out, tc.want) {
+			t.Errorf("search %s missing %q: %s", tc.args, tc.want, out)
+		}
+		if strings.Contains(out, tc.notWant) {
+			t.Errorf("search %s should not return %q: %s", tc.args, tc.notWant, out)
+		}
+	}
+
+	// And a hit says what it is, so a mixed result set is legible.
+	out, _ := callTool(t, s, "search", `{"kind":"code"}`)
+	if !strings.Contains(out, `"kind":"code"`) || !strings.Contains(out, `"type":"code-function"`) {
+		t.Errorf("hits do not carry kind/type: %s", out)
 	}
 }

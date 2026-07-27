@@ -504,3 +504,38 @@ func TestIndexedIDsOnABundleWithNoIndexIsEmptyNotAnError(t *testing.T) {
 		t.Error("IndexedIDs created the search index it was only meant to read")
 	}
 }
+
+// TestIndexFileClassifiesAGraphyConceptAsCode: a concept exported before
+// `kind: code` existed carries no kind key, and its free-form type
+// ("code-function") misses GetKind's legacy switch — so it indexed as "note"
+// and `okfw search --kind note` returned the whole code export.
+func TestIndexFileClassifiesAGraphyConceptAsCode(t *testing.T) {
+	root := t.TempDir()
+	p := writeConcept(t, root, "alpha--0001.md", `---
+id: "019680f0-7e00-7abc-8def-100000000000"
+title: "Alpha"
+type: "code-function"
+tags: []
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+graphy:
+  node_id: "go:function:a.go#Alpha"
+---
+
+# Alpha
+`)
+	f := &fakeIndexer{}
+	if err := IndexFile(f, p); err != nil {
+		t.Fatal(err)
+	}
+	doc := f.docs["019680f0-7e00-7abc-8def-100000000000"]
+	if doc == nil {
+		t.Fatal("nothing was indexed")
+	}
+	if doc.Kind != "code" {
+		t.Errorf("kind = %q, want code", doc.Kind)
+	}
+	if doc.Type != "code-function" {
+		t.Errorf("type = %q, want the free-form type preserved", doc.Type)
+	}
+}

@@ -2262,3 +2262,88 @@ func conceptIDWithNodeID(t *testing.T, cfg *config.Config, dir, nodeID string) s
 	t.Fatalf("no concept carries node id %s", nodeID)
 	return ""
 }
+
+// TestExportAdoptsAConceptTheWikiMoved: cmd/okfw imports no graphy package, so
+// `okfw move` cannot update the exports bucket. The record's path then fails to
+// stat, a directory-scoped recovery scan missed the file, adoptRenames skipped
+// it, and the export created a duplicate — two concepts carrying the same
+// graphy.node_id, so `okfw search --node-id` returned two hits.
+func TestExportAdoptsAConceptTheWikiMoved(t *testing.T) {
+	s, cfg := fixture(t)
+	opts := OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1}
+
+	res, err := ToOkfw("/repo/demo", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const nodeID = "go:function:a.go#Alpha"
+	before := conceptIDWithNodeID(t, cfg, res.Dir, nodeID)
+
+	// What `okfw move` does: relocate the concept, leaving the record stale.
+	from := conceptPathWithNodeID(t, cfg, res.Dir, nodeID)
+	to := filepath.Join(cfg.RootPath, "moved-elsewhere.md")
+	if _, err := bundle.MoveConcept(cfg, from, to); err != nil {
+		t.Fatal(err)
+	}
+
+	res2, err := ToOkfw("/repo/demo", s, opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res2.Created != 0 {
+		t.Errorf("re-export created %d concepts: the moved one was duplicated", res2.Created)
+	}
+	if res2.Relocated == 0 {
+		t.Error("the moved concept was not reported as relocated")
+	}
+
+	// Exactly one file in the whole bundle may carry that node id.
+	found := nodeIDOccurrences(t, cfg, nodeID)
+	if len(found) != 1 {
+		t.Errorf("node id %s is on %d concepts: %v", nodeID, len(found), found)
+	}
+	// And it kept its identity, so children's `parent:` still resolves.
+	if after := conceptIDWithNodeID(t, cfg, res2.Dir, nodeID); after != before {
+		t.Errorf("concept id changed across the move: %s -> %s", before, after)
+	}
+}
+
+func conceptPathWithNodeID(t *testing.T, cfg *config.Config, dir, nodeID string) string {
+	t.Helper()
+	root := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
+	for name, content := range conceptFiles(t, cfg, dir) {
+		z, err := config.ParseFrontmatter(content)
+		if err == nil && z.Graphy != nil && z.Graphy.NodeID == nodeID {
+			return filepath.Join(root, name)
+		}
+	}
+	t.Fatalf("no concept file carries node id %s", nodeID)
+	return ""
+}
+
+// nodeIDOccurrences walks the whole bundle, which is the only scope in which
+// "was it duplicated" is a meaningful question.
+func nodeIDOccurrences(t *testing.T, cfg *config.Config, nodeID string) []string {
+	t.Helper()
+	var found []string
+	err := filepath.Walk(cfg.RootPath, func(p string, fi os.FileInfo, err error) error {
+		if err != nil || fi.IsDir() || !strings.HasSuffix(p, ".md") {
+			return err
+		}
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err == nil && z.Graphy != nil && z.Graphy.NodeID == nodeID {
+			rel, _ := filepath.Rel(cfg.RootPath, p)
+			found = append(found, filepath.ToSlash(rel))
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(found)
+	return found
+}

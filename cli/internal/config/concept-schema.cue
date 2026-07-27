@@ -90,7 +90,12 @@
 
 	// --- okfw extensions ---
 	id:        #ConceptID // okfw-required; OKF derives concept identity from the file path
-	kind:      *"note" | "daily-note" | "issue"
+	// "code" is written only by `graphy export okfw`; `okfw create` cannot
+	// produce one. Without it every exported concept indexed as "note" — the
+	// free-form `type` is "code-function" and so misses GetKind's legacy
+	// switch — which left `kind: note` silently returning the whole code
+	// export alongside the hand-written notes it was meant to select.
+	kind:      *"note" | "daily-note" | "issue" | "code"
 	project?:  string
 	parent?:   #ConceptID
 	created:   #ISOTime

@@ -327,10 +327,11 @@ Examples:
   okfw search "authentication"              # Full-text search
   okfw search --project myproject           # Filter by project
   okfw search --tag golang --tag api        # Filter by tags (AND)
-  okfw search --type todo                   # Filter by type
-  okfw search --status open --priority high # Filter todos by status and priority
-  okfw search --due-before 2026-03-01       # Todos due before a date
-  okfw search --due-after 2026-02-01        # Todos due after a date
+  okfw search --kind note                   # Hand-written concepts only
+  okfw search --kind code                   # graphy's exported code graph only
+  okfw search --type code-rationale         # Filter by OKF free-form type
+  okfw search --status draft                # Filter by lifecycle status
+  okfw search --stale                       # Concepts past their stale_after
   okfw search "auth" --project myproject    # Combined search
   okfw search --node-id go:function:a.go#F  # The concept documenting a graphy node`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -781,7 +782,7 @@ Examples:
 
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
 	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
-	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/todo/daily-note/issue)")
+	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/daily-note/issue/code)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")

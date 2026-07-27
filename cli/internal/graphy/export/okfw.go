@@ -76,6 +76,10 @@ type OkfwResult struct {
 	Unchanged int // skipped: rendered content identical to what's on disk
 	Renamed   int // adopted from a vanished node via rename/move detection
 	Recovered int // re-attached from body markers after a lost exports mapping
+	// Relocated counts concepts found elsewhere in the bundle and moved back
+	// under the export directory — `okfw move` cannot update the exports
+	// bucket, so without this the next export would create a duplicate.
+	Relocated int
 	Rekeyed   int // community concept adopted under a new exports key or label
 	Deleted   int
 	Dir       string // bundle-relative concept directory
@@ -269,16 +273,30 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			}
 		}
 		if recovered == nil {
-			if recovered, err = scanExisting(cfg, dir); err != nil {
+			if recovered, err = scanExisting(cfg); err != nil {
 				return nil, err
 			}
 		}
 		if p, ok := recovered[it.rid]; ok {
+			// A concept found outside the export directory was moved by the
+			// wiki side, which cannot update the exports bucket. Bring it back
+			// before recording it, or its links to its siblings dangle.
+			relocated := bundle.RelDir(p.relPath) != dir
+			if relocated {
+				if p, err = relocateInto(cfg, p, dir, it.title); err != nil {
+					return nil, err
+				}
+			}
 			if err := s.PutExport(it.key, store.ExportRecord{ConceptID: p.conceptID, RelPath: p.relPath}); err != nil {
 				return nil, err
 			}
 			placed[it.key] = p
-			res.Recovered++
+			liveRel[p.relPath] = true
+			if relocated {
+				res.Relocated++
+			} else {
+				res.Recovered++
+			}
 			continue
 		}
 		pending = append(pending, i)
@@ -947,6 +965,11 @@ func renderConcept(prev *config.Concept, it item, opts OkfwOptions, parentID, co
 	fmt.Fprintf(&b, "id: %q\n", prev.ID)
 	fmt.Fprintf(&b, "title: %q\n", it.title)
 	fmt.Fprintf(&b, "type: %q\n", it.conceptType)
+	// Every exported concept is kind "code". Without it GetKind falls through
+	// the legacy `type` switch — "code-function" matches nothing — and returns
+	// "note", so `okfw search --kind note` handed back the entire code export
+	// mixed in with the hand-written notes it was asked for.
+	b.WriteString("kind: \"code\"\n")
 	if it.description != "" {
 		fmt.Fprintf(&b, "description: %q\n", it.description)
 	}
@@ -1228,35 +1251,43 @@ func parseNodeID(id string) (lang, kind, file, qual string, ok bool) {
 	return parts[0], parts[1], rest[:i], rest[i+1:], true
 }
 
-// scanExisting rebuilds rid → placement from the concepts already in the
-// export directory, using the frontmatter graphy block (marker comment as
-// fallback). This is the recovery path for a lost .graphy/graph.db.
+// scanExisting rebuilds rid → placement from the concepts in the bundle, using
+// the frontmatter graphy block (marker comment as fallback). This is the
+// recovery path for a lost .graphy/graph.db.
+//
+// The walk covers the whole bundle, not just the export directory. `okfw move`
+// relocates a concept without telling graphy — cmd/okfw imports no graphy
+// package and cannot touch the exports bucket — so a directory-scoped scan
+// found nothing, adoptRenames skipped it (its record's path no longer stats),
+// and the export created a *duplicate*: two files carrying the same
+// graphy.node_id, and `okfw search --node-id` returning two hits.
 //
 // A file that is not a recoverable concept is skipped, but an I/O failure is
 // returned: recovery that silently degrades into "found nothing" creates a
 // duplicate concept for every entity in the bundle.
-func scanExisting(cfg *config.Config, dir string) (map[string]placement, error) {
+func scanExisting(cfg *config.Config) (map[string]placement, error) {
 	out := map[string]placement{}
-	root := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
-	entries, err := os.ReadDir(root)
-	if os.IsNotExist(err) {
-		return out, nil // nothing exported here yet
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".md") || bundle.IsReservedBase(name) {
-			continue
-		}
-		content, err := os.ReadFile(filepath.Join(root, name))
+	root := cfg.RootPath
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
-			return nil, err
+			return err
+		}
+		if fi.IsDir() {
+			if bundle.SkipWalkDir(root, p, fi.Name()) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+			return nil
+		}
+		content, err := os.ReadFile(p)
+		if err != nil {
+			return err
 		}
 		z, err := config.ParseFrontmatter(content)
 		if err != nil || z.ID == "" {
-			continue // not a concept we can recover from
+			return nil // not a concept we can recover from
 		}
 		rid := ""
 		if z.Graphy != nil {
@@ -1268,11 +1299,46 @@ func scanExisting(cfg *config.Config, dir string) (map[string]placement, error) 
 			}
 		}
 		if rid == "" {
-			continue
+			return nil
 		}
-		out[rid] = placement{conceptID: z.ID, relPath: dir + "/" + name}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		out[rid] = placement{conceptID: z.ID, relPath: filepath.ToSlash(rel)}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return map[string]placement{}, nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// relocateInto moves a recovered concept back under the export directory.
+//
+// Recovering it where it lies is not an option: linkTo emits a bare
+// "./<file>.md" for every reference, so a concept outside dir is unreachable
+// from its siblings and they from it — the same split checkProjectDir refuses
+// for a changed --project. MoveConcept repairs inbound links at both ends, and
+// the concept keeps its id, its created stamp and its history.
+func relocateInto(cfg *config.Config, p placement, dir, title string) (placement, error) {
+	absDir := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
+	if err := os.MkdirAll(absDir, 0755); err != nil {
+		return p, err
+	}
+	name := bundle.NoteFilename(absDir, title, p.conceptID)
+	from := filepath.Join(cfg.RootPath, filepath.FromSlash(p.relPath))
+	to := filepath.Join(absDir, name)
+	if from == to {
+		return p, nil
+	}
+	if _, err := bundle.MoveConcept(cfg, from, to); err != nil {
+		return p, fmt.Errorf("relocating %s into %s: %w", p.relPath, dir, err)
+	}
+	return placement{conceptID: p.conceptID, relPath: dir + "/" + name}, nil
 }
 
 // nodeBody renders a node concept's entity card.

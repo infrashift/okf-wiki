@@ -403,6 +403,9 @@ idempotent: concept ids and filenames stay stable across runs.`,
 			if res.Recovered > 0 {
 				adopted = append(adopted, fmt.Sprintf("%d recovered", res.Recovered))
 			}
+			if res.Relocated > 0 {
+				adopted = append(adopted, fmt.Sprintf("%d moved back from elsewhere in the bundle", res.Relocated))
+			}
 			if len(adopted) > 0 {
 				fmt.Printf("Adopted existing concepts: %s\n", strings.Join(adopted, ", "))
 			}
