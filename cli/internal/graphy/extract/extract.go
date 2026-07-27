@@ -115,6 +115,8 @@ func (s *Session) Extract(file detect.File, src []byte) (*Result, error) {
 	if s.opts.Rationale.Enabled {
 		attachRationale(file, src, res, s.opts.Rationale)
 	}
+	// After rationale, so a rationale node in a test file is marked too.
+	attachTests(file, res)
 	return res, nil
 }
 

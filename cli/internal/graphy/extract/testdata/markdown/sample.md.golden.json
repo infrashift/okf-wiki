@@ -58,14 +58,40 @@
   ],
   "Refs": [
     {
-      "from": "markdown:doc:testdata/markdown/sample.md#",
+      "from": "markdown:heading:testdata/markdown/sample.md#sample-document",
       "name": "testdata/markdown/design.md",
-      "relation": "references"
+      "relation": "references",
+      "line": 3
     },
     {
-      "from": "markdown:doc:testdata/markdown/sample.md#",
+      "from": "markdown:heading:testdata/markdown/sample.md#sample-document",
       "name": "testdata/src/main.go",
-      "relation": "references"
+      "relation": "references",
+      "line": 3
+    },
+    {
+      "from": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "name": "Bootstrap",
+      "relation": "references",
+      "line": 9
+    },
+    {
+      "from": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "name": "store.Open",
+      "relation": "references",
+      "line": 9
+    },
+    {
+      "from": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "name": "testdata/src/main.go#L42",
+      "relation": "references",
+      "line": 10
+    },
+    {
+      "from": "markdown:heading:testdata/markdown/sample.md#architecture",
+      "name": "Architecture",
+      "relation": "references",
+      "line": 20
     }
   ]
 }

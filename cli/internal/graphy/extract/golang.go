@@ -98,6 +98,9 @@ func (g *goExtractor) Extract(file detect.File, src []byte) (*Result, error) {
 			}
 			qual := name.Utf8Text(src)
 			n := g.defNode(kind, qual, qual, &def, src, file)
+			if kind == model.KindInterface {
+				n.Members = goInterfaceMethods(def.ChildByFieldName("type"), src)
+			}
 			defByStart[def.StartByte()] = n.ID
 			res.Nodes = append(res.Nodes, n)
 			res.Edges = append(res.Edges, containsEdge(fn.ID, n.ID, file.Path, n.Span.StartLine))
@@ -155,6 +158,30 @@ func (g *goExtractor) defNode(kind model.Kind, label, qual string, def *ts.Node,
 		Signature: signatureOf(def, src),
 		Doc:       firstDocLine(docAnchor, src),
 	}
+}
+
+// goInterfaceMethods lists an interface's declared method names, in source
+// order. Embedded interfaces are skipped: their method sets are not visible
+// here, and guessing at them would claim implementations that do not hold.
+//
+// The names are what makes implements inference possible at all — Go's
+// interface satisfaction is structural, so there is no declaration anywhere
+// naming the implementor, and the only evidence is the two method sets.
+func goInterfaceMethods(iface *ts.Node, src []byte) []string {
+	if iface == nil || iface.Kind() != "interface_type" {
+		return nil
+	}
+	var out []string
+	for i := uint(0); i < iface.NamedChildCount(); i++ {
+		child := iface.NamedChild(i)
+		if child.Kind() != "method_elem" {
+			continue // embedded interface, type constraint, or comment
+		}
+		if name := child.ChildByFieldName("name"); name != nil {
+			out = append(out, name.Utf8Text(src))
+		}
+	}
+	return out
 }
 
 // goReceiverType extracts a method's receiver type name, stripping pointers

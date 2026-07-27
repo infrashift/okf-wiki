@@ -3,6 +3,7 @@ package extract
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"okfw/cli/internal/graph"
@@ -614,6 +615,20 @@ func attachADR(file detect.File, src []byte, res *Result, opts RationaleOptions)
 		}
 		add(graph.NormalizeTarget(href, fromDir))
 	}
+
+	// The markdown extractor already turned these same names into heading-owned
+	// `references` refs. For an ADR that is strictly worse information: an
+	// `explains` edge says the document justifies the entity, which is what
+	// parents the exported concept and what graphy_rationale filters on, while a
+	// duplicate `references` edge only doubles the graph's edge count and the
+	// bundle's bullet count. Drop the duplicates and keep the stronger relation.
+	res.Refs = slices.DeleteFunc(res.Refs, func(r model.Ref) bool {
+		if r.Relation != model.RelReferences {
+			return false
+		}
+		name, _ := strings.CutSuffix(r.Name, "()")
+		return seen[name] || seen[r.Name]
+	})
 }
 
 // adrContent pulls the title, one-line summary and body out of a decision

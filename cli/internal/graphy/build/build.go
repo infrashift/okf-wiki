@@ -15,6 +15,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"okfw/cli/internal/graphy/analyze"
@@ -42,7 +43,7 @@ type Options struct {
 // extractorVersion is bumped whenever extraction output changes shape. It
 // feeds the fingerprint below, so upgrading graphy re-extracts rather than
 // leaving pre-upgrade results in the per-file cache.
-const extractorVersion = 2
+const extractorVersion = 3
 
 // metaExtractFingerprintKey holds the fingerprint of the last build's
 // extraction configuration.
@@ -424,6 +425,14 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 	}); err != nil {
 		return err
 	}
+	// spanIndex returns a file's declaration node ids, built on demand: only
+	// line-anchored links need it, and most repos have none.
+	fileNodeIDs := map[string][]string{}
+	for _, rec := range recs {
+		fileNodeIDs[rec.Path] = rec.NodeIDs
+	}
+	spanIndex := func(path string) []string { return fileNodeIDs[path] }
+
 	goModule := goModuleName(w.Root)
 	dirHasFiles := map[string]bool{}
 	for path := range fileFirstNode {
@@ -449,6 +458,10 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 			addEdge(e)
 		}
 		lang := detect.Language(rec.Path)
+		var pkgDirs map[string]string
+		if lang == "go" {
+			pkgDirs = goPackageDirs(rec, goModule, dirHasFiles)
+		}
 		for _, ref := range rec.Refs {
 			switch ref.Relation {
 			case model.RelReferences, model.RelExplains:
@@ -457,7 +470,16 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 				// index — terraform addresses (var.x, aws_instance.web), CUE
 				// definitions (#Concept) and the entities an ADR names all
 				// resolve like code symbols, inheriting the confidence ladder.
-				if target, ok := fileFirstNode[ref.Name]; ok {
+				name, anchorLine := splitLineAnchor(ref.Name)
+				if target, ok := fileFirstNode[name]; ok {
+					// A "#L42" anchor says the link is about one entity, not the
+					// file: aim at whatever declaration encloses that line, and
+					// fall back to the file node when nothing does.
+					if anchorLine > 0 {
+						if inner := enclosingNode(spanIndex(name), nodes, anchorLine); inner != "" {
+							target = inner
+						}
+					}
 					addEdge(model.Edge{
 						Source: ref.FromID, Target: target,
 						Relation: ref.Relation, Confidence: model.ConfExtracted,
@@ -465,16 +487,22 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 					})
 					stats.RefsResolved++
 				} else {
-					candidates := lookupSymbol(symbols, lang, ref.Name)
-					if len(candidates) == 0 && ref.Relation == model.RelExplains {
-						candidates = anyLang[ref.Name]
+					candidates, match := lookupSymbol(symbols, lang, name)
+					// Prose names entities without knowing their language: an ADR
+					// and a design doc are both markdown, so a language-keyed
+					// lookup can never hit a Go symbol. Having named the entity
+					// deliberately, this is not a blind tail match, so it keeps
+					// the full ladder — including AMBIGUOUS when the name is
+					// genuinely shared.
+					if len(candidates) == 0 && (ref.Relation == model.RelExplains || lang == "markdown") {
+						candidates, match = anyLang[name], matchFull
 						if len(candidates) == 0 {
-							if i := strings.LastIndex(ref.Name, "."); i >= 0 && i+1 < len(ref.Name) {
-								candidates = anyLang[ref.Name[i+1:]]
+							if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
+								candidates, match = anyLang[name[i+1:]], matchTail
 							}
 						}
 					}
-					resolveCandidates(ref, rec.Path, candidates, nodes, addEdge, stats)
+					resolveCandidates(ref, rec.Path, candidates, match, nodes, addEdge, stats)
 				}
 
 			case model.RelImports:
@@ -485,6 +513,18 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 					File: rec.Path, Line: ref.Line,
 				})
 				stats.RefsResolved++
+
+			case model.RelTests:
+				// A test's subject is production code by definition. Without
+				// this, TestFoo in one package resolves onto TestFoo's helper
+				// in another test package as readily as onto Foo, and the
+				// suite ends up testing itself.
+				candidates, match := lookupSymbol(symbols, lang, ref.Name)
+				candidates = rejectTests(candidates, nodes)
+				if len(candidates) == 0 {
+					candidates, match = testPrefixMatch(symbols, nodes, lang, ref.Name)
+				}
+				resolveCandidates(ref, rec.Path, candidates, match, nodes, addEdge, stats)
 
 			case model.RelDefines:
 				// Reversed: the resolved type owns ref.FromID (the method).
@@ -500,11 +540,30 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 				}
 
 			default: // calls and other symbol-shaped refs
-				candidates := lookupSymbol(symbols, lang, ref.Name)
-				resolveCandidates(ref, rec.Path, candidates, nodes, addEdge, stats)
+				candidates, match := lookupSymbol(symbols, lang, ref.Name)
+				// A Go call qualified by a package this file imports keeps its
+				// qualifier: scoping to that package's directory turns what
+				// would be a blind tail match into an exact one.
+				if match == matchTail && pkgDirs != nil {
+					if dir, ok := pkgDirs[goPackageQualifier(ref.Name)]; ok {
+						if scoped := scopeToPackage(candidates, nodes, dir); len(scoped) > 0 {
+							candidates, match = scoped, matchFull
+						}
+					}
+				}
+				resolveCandidates(ref, rec.Path, candidates, match, nodes, addEdge, stats)
 			}
 		}
 	}
+
+	// Structural interface satisfaction, after the ref loop because it reads the
+	// `defines` edges that loop produced.
+	goImplements(nodes, edges, addEdge)
+
+	// Declared dependencies, read from the manifests rather than inferred from
+	// imports. Runs after the ref loop so it reuses the external nodes import
+	// resolution already synthesized instead of creating rivals to them.
+	manifestDeps(w.Root, synthetic, addEdge)
 
 	// Persist synthetic nodes under their pseudo file record.
 	ids := make([]string, 0, len(synthetic))
@@ -529,7 +588,16 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 
 // resolveCandidates applies the confidence ladder to a symbol-shaped ref:
 // same-file → EXTRACTED, unique global → INFERRED, 2..cap → AMBIGUOUS, else drop.
-func resolveCandidates(ref model.Ref, siteFile string, candidates []string, nodes map[string]model.Node, addEdge func(model.Edge), stats *Stats) {
+//
+// A tail-only match takes a stricter path. AMBIGUOUS is meant to record genuine
+// uncertainty between plausible targets, but a bare-tail hit has already thrown
+// away the qualifier that said which one was meant — so its extra candidates are
+// not rival readings of the reference, they are unrelated symbols that happen to
+// share a method name. Fanning out over them manufactures edges: every
+// `err.Error()` call in a repo landed on *every* type with an Error method,
+// which on this codebase made three error types the largest, most-connected
+// entities in the graph and the most expensive concepts in the exported bundle.
+func resolveCandidates(ref model.Ref, siteFile string, candidates []string, match symbolMatch, nodes map[string]model.Node, addEdge func(model.Edge), stats *Stats) {
 	if len(candidates) == 0 {
 		stats.RefsDropped++
 		return
@@ -559,6 +627,8 @@ func resolveCandidates(ref model.Ref, siteFile string, candidates []string, node
 	case len(candidates) == 1:
 		emit(candidates, model.ConfInferred)
 		stats.RefsResolved++
+	case match == matchTail:
+		stats.RefsDropped++
 	case len(candidates) <= ambiguousCap:
 		emit(candidates, model.ConfAmbiguous)
 		stats.RefsAmbiguous++
@@ -570,7 +640,9 @@ func resolveCandidates(ref model.Ref, siteFile string, candidates []string, node
 // resolveUnique returns a single owner id for a name: same-file first, then a
 // unique global match; "" when unresolvable.
 func resolveUnique(symbols map[string][]string, nodes map[string]model.Node, lang, name, siteFile string) (string, model.Confidence) {
-	candidates := lookupSymbol(symbols, lang, name)
+	// The match kind is irrelevant here: this ladder already demands uniqueness,
+	// so it can never fan out over a tail match's extra candidates.
+	candidates, _ := lookupSymbol(symbols, lang, name)
 	var sameFile []string
 	for _, id := range candidates {
 		if nodes[id].File == siteFile {
@@ -586,15 +658,285 @@ func resolveUnique(symbols map[string][]string, nodes map[string]model.Node, lan
 	return "", model.ConfInferred
 }
 
-// lookupSymbol tries the full (possibly qualified) name, then its bare tail.
-func lookupSymbol(symbols map[string][]string, lang, name string) []string {
+// symbolMatch records how a symbol lookup hit, because the two ways carry very
+// different amounts of evidence.
+type symbolMatch int
+
+const (
+	matchNone symbolMatch = iota
+	// matchFull: the ref's full (possibly qualified) name is a declared symbol.
+	matchFull
+	// matchTail: only the bare name after the last "." matched, so the
+	// qualifier — the receiver or package that says *which* symbol was meant —
+	// was discarded to get the hit.
+	matchTail
+)
+
+// lookupSymbol tries the full (possibly qualified) name, then its bare tail,
+// reporting which one hit.
+func lookupSymbol(symbols map[string][]string, lang, name string) ([]string, symbolMatch) {
 	if ids := symbols[lang+"\x00"+name]; len(ids) > 0 {
-		return ids
+		return ids, matchFull
 	}
 	if i := strings.LastIndex(name, "."); i >= 0 && i+1 < len(name) {
-		return symbols[lang+"\x00"+name[i+1:]]
+		if ids := symbols[lang+"\x00"+name[i+1:]]; len(ids) > 0 {
+			return ids, matchTail
+		}
 	}
-	return nil
+	return nil, matchNone
+}
+
+// goPackageDirs maps the conventional package qualifier of each of a Go file's
+// imports to the repo-relative directory it resolves to.
+//
+// This is what lets a qualified call keep its qualifier: `store.Open` can be
+// scoped to the one package named `store` that this file actually imports,
+// instead of falling back to a bare-name lookup that would match every `Open`
+// in the repo. Aliased imports are not captured by the extractor, so they
+// simply do not scope — the call falls through to the tail rule.
+func goPackageDirs(rec store.FileRecord, goModule string, dirHasFiles map[string]bool) map[string]string {
+	if goModule == "" {
+		return nil
+	}
+	var dirs map[string]string
+	for _, ref := range rec.Refs {
+		if ref.Relation != model.RelImports {
+			continue
+		}
+		rel, ok := strings.CutPrefix(ref.Name, goModule)
+		if !ok {
+			continue // third-party or stdlib: not in this repo
+		}
+		rel = strings.TrimPrefix(rel, "/")
+		if rel == "" || !dirHasFiles[rel] {
+			continue
+		}
+		qual := rel
+		if i := strings.LastIndex(qual, "/"); i >= 0 {
+			qual = qual[i+1:]
+		}
+		if dirs == nil {
+			dirs = map[string]string{}
+		}
+		dirs[qual] = rel
+	}
+	return dirs
+}
+
+// goImplements infers `implements` edges by comparing method sets.
+//
+// Go has no syntax that names an implementor: satisfaction is structural, so
+// unlike TypeScript's `implements` clause there is nothing for an extractor to
+// read. The evidence is entirely in the two method sets, which only exist after
+// resolution has reversed the `defines` refs into type→method edges — hence a
+// post-pass rather than an extractor rule.
+//
+// Under-reporting is deliberate where it happens. Methods promoted from an
+// embedded struct are not tracked, and an interface that embeds another
+// interface contributes no members, so both cases simply produce no edge. The
+// alternative — assuming the unseen half matches — would claim relationships
+// that are not there, and an absent edge is a far cheaper error than a false one.
+func goImplements(nodes map[string]model.Node, edges map[string]model.Edge, addEdge func(model.Edge)) {
+	methods := map[string]map[string]bool{} // type id → bare method names
+	for _, e := range edges {
+		if e.Relation != model.RelDefines {
+			continue
+		}
+		m, ok := nodes[e.Target]
+		if !ok {
+			continue
+		}
+		name := m.Label
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:]
+		}
+		if methods[e.Source] == nil {
+			methods[e.Source] = map[string]bool{}
+		}
+		methods[e.Source][name] = true
+	}
+
+	var ifaces, types []string
+	for id, n := range nodes {
+		// An interface with no listed members is either `any` or embeds
+		// something unseen; either way every type would "satisfy" it.
+		if n.Language == "go" && n.Kind == model.KindInterface && len(n.Members) > 0 && !n.External {
+			ifaces = append(ifaces, id)
+		}
+	}
+	for id := range methods {
+		if n := nodes[id]; n.Language == "go" && !n.External {
+			types = append(types, id)
+		}
+	}
+	// Sorted so the edge set never depends on map iteration order.
+	sort.Strings(ifaces)
+	sort.Strings(types)
+
+	for _, ifaceID := range ifaces {
+		iface := nodes[ifaceID]
+		for _, typeID := range types {
+			if typeID == ifaceID {
+				continue
+			}
+			if !coversMethods(methods[typeID], iface.Members) {
+				continue
+			}
+			t := nodes[typeID]
+			addEdge(model.Edge{
+				Source: typeID, Target: ifaceID,
+				Relation: model.RelImplements, Confidence: model.ConfInferred,
+				File: t.File, Line: t.Span.StartLine,
+			})
+		}
+	}
+}
+
+// coversMethods reports whether have contains every name in want.
+func coversMethods(have map[string]bool, want []string) bool {
+	if len(have) == 0 {
+		return false
+	}
+	for _, name := range want {
+		if !have[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// testPrefixMatch resolves a test-name subject by its longest CamelCase prefix
+// that names a real symbol.
+//
+// Exact matching only catches TestFoo and TestType_Method, but the dominant Go
+// convention states the scenario in the name — TestWriteIndexFilesStampsOkfVersionAtRootOnly
+// tests WriteIndexFiles. Without this those tests contribute no `tests` edge at
+// all and appear only as ordinary callers, which is precisely the distinction
+// the relation exists to draw.
+//
+// Longest-first is what keeps it honest: a shorter prefix is a weaker claim, and
+// stopping at the first hit means TestWriteIndexFiles… resolves to
+// WriteIndexFiles rather than to a hypothetical Write. Prefixes only break at an
+// upper-case boundary, so no match is ever made on half a word.
+func testPrefixMatch(symbols map[string][]string, nodes map[string]model.Node, lang, name string) ([]string, symbolMatch) {
+	bounds := camelBoundaries(name)
+	for i := len(bounds) - 1; i >= 0; i-- {
+		prefix := name[:bounds[i]]
+		// Short prefixes are common words that match something generic rather
+		// than the subject: TestRunIndexMd would otherwise claim to test "Run",
+		// and TestFileCommandsAreRegistered to test "File".
+		if len(prefix) < minTestPrefix {
+			continue
+		}
+		// The convention capitalizes the subject's first letter regardless of
+		// its export status, so runInit becomes TestRunInit. Trying the
+		// lower-cased spelling is what lets the longest — and therefore most
+		// specific — prefix win before a short generic one can.
+		for _, cand := range []string{prefix, lowerFirst(prefix)} {
+			if ids := rejectTests(symbols[lang+"\x00"+cand], nodes); len(ids) > 0 {
+				// A prefix is weaker evidence than the whole name, so it never
+				// fans out: the tail tier drops anything it cannot pin down.
+				return ids, matchTail
+			}
+		}
+	}
+	return nil, matchNone
+}
+
+// minTestPrefix is the shortest subject name a test-name prefix may claim.
+const minTestPrefix = 5
+
+// lowerFirst lower-cases an ASCII initial.
+func lowerFirst(s string) string {
+	if s == "" || s[0] < 'A' || s[0] > 'Z' {
+		return s
+	}
+	return string(s[0]+('a'-'A')) + s[1:]
+}
+
+// camelBoundaries returns the indices at which an upper-case letter starts a new
+// word, excluding index 0.
+func camelBoundaries(s string) []int {
+	var out []int
+	for i := 1; i < len(s); i++ {
+		if s[i] >= 'A' && s[i] <= 'Z' {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+// rejectTests drops candidates declared in test files.
+func rejectTests(candidates []string, nodes map[string]model.Node) []string {
+	var out []string
+	for _, id := range candidates {
+		if !nodes[id].Test {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// scopeToPackage narrows candidates to those declared in dir. Returns nil when
+// nothing survives, so the caller can fall back rather than drop the ref.
+func scopeToPackage(candidates []string, nodes map[string]model.Node, dir string) []string {
+	var out []string
+	for _, id := range candidates {
+		if f := nodes[id].File; f != "" && dirOf(f) == dir {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// splitLineAnchor separates a "path#L42" reference into its path and line.
+// Returns line 0 when there is no anchor.
+func splitLineAnchor(name string) (string, int) {
+	i := strings.LastIndex(name, "#L")
+	if i < 0 {
+		return name, 0
+	}
+	line, err := strconv.Atoi(name[i+2:])
+	if err != nil || line < 1 {
+		return name, 0
+	}
+	return name[:i], line
+}
+
+// enclosingNode picks the declaration among ids whose span covers line, taking
+// the tightest one so a method inside a type wins over the type. Returns "" when
+// no declaration covers the line — the caller then keeps the file node, which is
+// the honest answer for a link into a comment or a blank stretch.
+func enclosingNode(ids []string, nodes map[string]model.Node, line int) string {
+	best, bestSize := "", 0
+	for _, id := range ids {
+		n, ok := nodes[id]
+		if !ok || n.Span.StartLine == 0 || !model.Indexable(n) {
+			continue
+		}
+		end := n.Span.EndLine
+		if end == 0 {
+			end = n.Span.StartLine
+		}
+		if line < n.Span.StartLine || line > end {
+			continue
+		}
+		if size := end - n.Span.StartLine; best == "" || size < bestSize {
+			best, bestSize = id, size
+		}
+	}
+	return best
+}
+
+// goPackageQualifier returns the package part of a `pkg.Name` reference. A Go
+// package-qualified call always has exactly one dot, so anything else (a method
+// chain, a field access) is not a package reference.
+func goPackageQualifier(name string) string {
+	pkg, rest, ok := strings.Cut(name, ".")
+	if !ok || pkg == "" || rest == "" || strings.Contains(rest, ".") {
+		return ""
+	}
+	return pkg
 }
 
 // resolveImport returns (creating on demand) the node an import edge targets:

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -736,15 +737,49 @@ func TestMarkdownExtractShape(t *testing.T) {
 		t.Errorf("headings = %d, want 2 (%+v)", headings, res.Nodes)
 	}
 
-	var targets []string
+	// References come from links AND from backticked identifiers in prose, each
+	// owned by the H1/H2 that encloses it.
+	byOwner := map[string]map[string]bool{}
 	for _, r := range res.Refs {
-		if r.Relation == model.RelReferences {
-			targets = append(targets, r.Name)
+		if r.Relation != model.RelReferences {
+			continue
+		}
+		if byOwner[r.FromID] == nil {
+			byOwner[r.FromID] = map[string]bool{}
+		}
+		byOwner[r.FromID][r.Name] = true
+		if r.Line == 0 {
+			t.Errorf("ref %q has no line", r.Name)
 		}
 	}
-	want := map[string]bool{"docs/design.md": true, "src/main.go": true}
-	if len(targets) != 2 || !want[targets[0]] || !want[targets[1]] {
-		t.Errorf("link targets = %v, want docs/design.md + src/main.go", targets)
+	const (
+		h1 = "markdown:heading:docs/sample.md#sample-document"
+		h2 = "markdown:heading:docs/sample.md#architecture"
+	)
+	wantByOwner := map[string]map[string]bool{
+		h1: {"docs/design.md": true, "src/main.go": true},
+		h2: {
+			"Bootstrap":  true, // a backticked identifier in prose
+			"store.Open": true, // "()" trimmed: prose writes calls, the index does not
+			// A line anchor survives so resolution can aim at the declaration
+			// on that line rather than at the whole file.
+			"src/main.go#L42": true,
+			// Prose under the H3 belongs to the enclosing H2, since only H1/H2
+			// become nodes.
+			"Architecture": true,
+		},
+	}
+	if !reflect.DeepEqual(byOwner, wantByOwner) {
+		t.Errorf("references by owner =\n  %v\nwant\n  %v", byOwner, wantByOwner)
+	}
+	// Everything deliberately excluded: an external link, a flag, a path, an
+	// English filler word, and an identifier inside a fenced block.
+	for owner, names := range byOwner {
+		for _, unwanted := range []string{"example.com", "--min-degree", "cmd/graphy/main.go", "the", "FencedIdentifier"} {
+			if names[unwanted] {
+				t.Errorf("%s: %q should not be a reference", owner, unwanted)
+			}
+		}
 	}
 }
 

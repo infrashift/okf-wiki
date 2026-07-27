@@ -114,6 +114,39 @@ func Language(path string) string {
 	return langByExt[strings.ToLower(filepath.Ext(path))]
 }
 
+// testDirSegments are directory names that make everything beneath them tests,
+// in the ecosystems that organize tests by directory rather than by filename.
+//
+// "testdata" is deliberately absent: by Go's own convention it holds fixture
+// *inputs*, not test code. Sample files there are the subject of a test, not a
+// test, and marking them would say a repo's fixtures specify its behaviour.
+var testDirSegments = map[string]bool{
+	"__tests__": true, "test": true, "tests": true, "spec": true,
+}
+
+// IsTestPath reports whether a repo-relative path holds tests, by the naming
+// conventions each ecosystem's own tooling uses.
+//
+// Path shape is the only signal available before parsing, and it is the one the
+// language runtimes themselves use: `go test` keys on _test.go, pytest on
+// test_*.py, jest on *.test.* and __tests__/.
+func IsTestPath(path string) bool {
+	base := path[strings.LastIndex(path, "/")+1:]
+	name := strings.TrimSuffix(base, filepath.Ext(base))
+	switch {
+	case strings.HasSuffix(name, "_test"), strings.HasPrefix(name, "test_"):
+		return true
+	case strings.HasSuffix(name, ".test"), strings.HasSuffix(name, ".spec"):
+		return true
+	}
+	for _, seg := range strings.Split(path, "/") {
+		if testDirSegments[strings.ToLower(seg)] {
+			return true
+		}
+	}
+	return false
+}
+
 // List discovers, filters, and hashes the extractable files under root.
 // Only files with a supported language are returned, sorted by git/walk order.
 func List(root string) ([]File, error) {

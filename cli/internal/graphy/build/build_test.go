@@ -109,8 +109,10 @@ func TestBuildResolvesAcrossFilesAndConfidences(t *testing.T) {
 	if c := edges["go:file:main.go# -imports-> go:external:#fmt"]; c != model.ConfInferred {
 		t.Errorf("external import missing: %v", edges)
 	}
-	// Doc link to a code file: EXTRACTED reference onto main.go's file node.
-	if c := edges["markdown:doc:docs/guide.md# -references-> go:file:main.go#"]; c != model.ConfExtracted {
+	// Doc link to a code file: EXTRACTED reference onto main.go's file node,
+	// owned by the enclosing H1 rather than the document, so a section links to
+	// what it describes.
+	if c := edges["markdown:heading:docs/guide.md#guide -references-> go:file:main.go#"]; c != model.ConfExtracted {
 		t.Errorf("doc->code reference missing: %v", edges)
 	}
 	// Config path value resolves to the code file it names.
@@ -500,4 +502,324 @@ func qualOfTest(nodeID string) string {
 		return nodeID[i+1:]
 	}
 	return ""
+}
+
+// TestBuildDropsAmbiguousTailMatchesInsteadOfFanningOut: three types each with
+// an Error method, and a caller doing err.Error(). The bare-tail lookup finds
+// all three, but the qualifier that said which one was meant has already been
+// discarded — so these are not rival readings of the call, they are two
+// unrelated methods that happen to share a name. Fanning out AMBIGUOUS over
+// them made the three error types the largest, most-connected entities in this
+// repo's own graph and the most expensive concepts in its exported bundle.
+func TestBuildDropsAmbiguousTailMatchesInsteadOfFanningOut(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/amb\n\ngo 1.23\n")
+	write(t, root, "errs/errs.go", `package errs
+
+type A struct{}
+
+func (a *A) Error() string { return "a" }
+
+type B struct{}
+
+func (b *B) Error() string { return "b" }
+
+type C struct{}
+
+func (c *C) Error() string { return "c" }
+`)
+	write(t, root, "caller/caller.go", `package caller
+
+func Report(err error) string {
+	return err.Error()
+}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	for id, conf := range edgeSet(t, s) {
+		if strings.Contains(id, "-calls->") && strings.Contains(id, ".Error") {
+			t.Errorf("err.Error() fanned out onto a declared method: %s (%s)", id, conf)
+		}
+	}
+	// And the error methods keep only their structural edges (contains from the
+	// file, defines from their type) rather than becoming call hubs.
+	for _, q := range []string{"A.Error", "B.Error", "C.Error"} {
+		id := "go:method:errs/errs.go#" + q
+		in, err := s.InEdges(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range in {
+			if e.Relation == model.RelCalls {
+				t.Errorf("%s has an incoming call edge from %s (%s)", q, e.Source, e.Confidence)
+			}
+		}
+	}
+}
+
+// TestBuildScopesQualifiedGoCallsToTheImportedPackage: the flip side of the
+// rule above. A call qualified by a package the file actually imports keeps its
+// qualifier, so it resolves exactly instead of being dropped as an ambiguous
+// tail match — even though two packages declare New.
+func TestBuildScopesQualifiedGoCallsToTheImportedPackage(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/scope\n\ngo 1.23\n")
+	write(t, root, "store/store.go", "package store\n\nfunc New() int { return 1 }\n")
+	write(t, root, "cache/cache.go", "package cache\n\nfunc New() int { return 2 }\n")
+	write(t, root, "app/app.go", `package app
+
+import "example.com/scope/store"
+
+func Boot() int {
+	return store.New()
+}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	const want = "go:function:app/app.go#Boot -calls-> go:function:store/store.go#New"
+	if _, ok := edges[want]; !ok {
+		t.Errorf("qualified call did not resolve to the imported package\nedges: %v", edges)
+	}
+	const wrong = "go:function:app/app.go#Boot -calls-> go:function:cache/cache.go#New"
+	if _, ok := edges[wrong]; ok {
+		t.Errorf("qualified call leaked into a package the file does not import")
+	}
+}
+
+// TestBuildInfersGoImplements: Go interface satisfaction is structural, so no
+// declaration anywhere names the implementor and the only evidence is the two
+// method sets. Before this, Go contributed zero implements edges.
+func TestBuildInfersGoImplements(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/impl\n\ngo 1.23\n")
+	write(t, root, "api/api.go", `package api
+
+// Store reads and writes.
+type Store interface {
+	Get(k string) string
+	Put(k, v string) error
+}
+
+// Reader only reads.
+type Reader interface {
+	Get(k string) string
+}
+
+// Empty is satisfied by everything and must never produce an edge.
+type Empty interface{}
+`)
+	write(t, root, "mem/mem.go", `package mem
+
+type Memory struct{}
+
+func (m *Memory) Get(k string) string { return "" }
+
+func (m *Memory) Put(k, v string) error { return nil }
+
+type ReadOnly struct{}
+
+func (r *ReadOnly) Get(k string) string { return "" }
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	want := []string{
+		"go:struct:mem/mem.go#Memory -implements-> go:interface:api/api.go#Store",
+		"go:struct:mem/mem.go#Memory -implements-> go:interface:api/api.go#Reader",
+		"go:struct:mem/mem.go#ReadOnly -implements-> go:interface:api/api.go#Reader",
+	}
+	for _, e := range want {
+		if edges[e] != model.ConfInferred {
+			t.Errorf("missing %s\nedges: %v", e, edges)
+		}
+	}
+	// A partial method set is not satisfaction.
+	if _, ok := edges["go:struct:mem/mem.go#ReadOnly -implements-> go:interface:api/api.go#Store"]; ok {
+		t.Error("ReadOnly lacks Put but was reported as implementing Store")
+	}
+	// An empty interface would otherwise be implemented by every type alive.
+	for id := range edges {
+		if strings.Contains(id, "#Empty") && strings.Contains(id, "-implements->") {
+			t.Errorf("empty interface produced %s", id)
+		}
+	}
+}
+
+// TestBuildLinksTestsToSubjects covers the tests relation and the Test marking.
+func TestBuildLinksTestsToSubjects(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/tl\n\ngo 1.23\n")
+	write(t, root, "calc/calc.go", `package calc
+
+func Add(a, b int) int { return a + b }
+
+func runTotals() int { return 0 }
+
+type Machine struct{}
+
+func (m *Machine) Run() int { return 0 }
+`)
+	write(t, root, "calc/calc_test.go", `package calc
+
+import "testing"
+
+func TestAdd(t *testing.T) {}
+
+func TestMachine_Run(t *testing.T) {}
+
+func TestAdd_returnsZeroOnEmpty(t *testing.T) {}
+
+func TestRunTotalsIgnoresNegatives(t *testing.T) {}
+
+func helperNotATest() {}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	for _, e := range []string{
+		"go:function:calc/calc_test.go#TestAdd -tests-> go:function:calc/calc.go#Add",
+		// TestType_Method: the underscore stands in for the symbol index's dot.
+		"go:function:calc/calc_test.go#TestMachine_Run -tests-> go:method:calc/calc.go#Machine.Run",
+		// A lowercase suffix is a subtest label, not a method name.
+		"go:function:calc/calc_test.go#TestAdd_returnsZeroOnEmpty -tests-> go:function:calc/calc.go#Add",
+		// The dominant convention states the scenario in the name, so the
+		// subject is the longest CamelCase prefix that names a real symbol —
+		// lower-cased first letter included, since the convention capitalizes
+		// unexported subjects too.
+		"go:function:calc/calc_test.go#TestRunTotalsIgnoresNegatives -tests-> go:function:calc/calc.go#runTotals",
+	} {
+		if _, ok := edges[e]; !ok {
+			t.Errorf("missing %s\nedges: %v", e, edges)
+		}
+	}
+
+	// Test entities are marked, production ones are not — degree and the
+	// community partition both read this.
+	for id, wantTest := range map[string]bool{
+		"go:function:calc/calc_test.go#TestAdd":        true,
+		"go:function:calc/calc_test.go#helperNotATest": true,
+		"go:function:calc/calc.go#Add":                 false,
+	} {
+		n, err := s.GetNode(id)
+		if err != nil || n == nil {
+			t.Fatalf("missing node %s: %v", id, err)
+		}
+		if n.Test != wantTest {
+			t.Errorf("%s Test = %v, want %v", id, n.Test, wantTest)
+		}
+	}
+}
+
+// TestBuildReadsManifestDependencies: every call into third-party code is
+// dropped by resolution, so a manifest is the only place a graph can learn what
+// the repo relies on but does not own.
+func TestBuildReadsManifestDependencies(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", `module example.com/dep
+
+go 1.23
+
+require (
+	github.com/spf13/cobra v1.8.0
+	github.com/tree-sitter/tree-sitter-go v0.25.0
+)
+
+require golang.org/x/sys v0.20.0 // indirect
+`)
+	write(t, root, "main.go", `package main
+
+import (
+	"github.com/spf13/cobra"
+	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
+)
+
+func main() { _ = cobra.Command{}; _ = tsgo.Language }
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	const owner = "go:module:go.mod#example.com/dep"
+	for _, dep := range []string{"github.com/spf13/cobra", "github.com/tree-sitter/tree-sitter-go"} {
+		e := owner + " -depends_on-> go:external:#" + dep
+		if edges[e] != model.ConfExtracted {
+			t.Errorf("missing %s\nedges: %v", e, edges)
+		}
+	}
+	// Indirect requirements are the build's dependencies, not this repo's.
+	for id := range edges {
+		if strings.Contains(id, "golang.org/x/sys") {
+			t.Errorf("indirect requirement leaked: %s", id)
+		}
+	}
+	// A module and the subpackage actually imported are the same dependency
+	// spelled two ways; joining them is what stops the module looking unused.
+	const sub = "go:external:#github.com/tree-sitter/tree-sitter-go -contains-> go:external:#github.com/tree-sitter/tree-sitter-go/bindings/go"
+	if _, ok := edges[sub]; !ok {
+		t.Errorf("module does not own its imported subpackage\nedges: %v", edges)
+	}
+	// The declared version reaches the node even though import resolution
+	// created it first.
+	n, err := s.GetNode("go:external:#github.com/spf13/cobra")
+	if err != nil || n == nil {
+		t.Fatalf("cobra node missing: %v", err)
+	}
+	if n.Doc != "v1.8.0" {
+		t.Errorf("cobra version = %q, want v1.8.0", n.Doc)
+	}
 }

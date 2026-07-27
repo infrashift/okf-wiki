@@ -56,6 +56,15 @@ const (
 	// one direction for the whole kind means an entity's reasoning always
 	// shows up under its incoming edges.
 	RelExplains Relation = "explains"
+	// RelTests points from a test to the entity it exercises. It is separate
+	// from RelCalls because a test calling a function and a caller calling it
+	// mean different things: one is a usage, the other is a specification, and
+	// "what tests this?" is a question an agent asks constantly while "which of
+	// my callers happens to be a test?" is not.
+	RelTests Relation = "tests"
+	// RelDependsOn points from a repository to a declared third-party
+	// dependency, read from a package manifest rather than from source.
+	RelDependsOn Relation = "depends_on"
 )
 
 // Confidence tags how an edge was established.
@@ -98,6 +107,16 @@ type Node struct {
 	Community int    `json:"community"`
 	Degree    int    `json:"degree"`
 	External  bool   `json:"external,omitempty"` // unresolved import target
+	// Test marks an entity declared in a test file. This is worth recording
+	// even where no `tests` edge could be derived: test files are a large
+	// fraction of a repo, they inflate Degree (which --min-degree reads as
+	// significance) and they pull the community partition toward mirroring the
+	// test suite rather than the system under test.
+	Test bool `json:"is_test,omitempty"`
+	// Members lists an interface's method names, in declaration order. Only
+	// interface nodes populate it; it exists so implementation matching can
+	// compare method sets without re-parsing.
+	Members []string `json:"members,omitempty"`
 }
 
 // Edge is a typed, confidence-tagged relationship between two nodes.
@@ -203,9 +222,10 @@ type GraphJSON struct {
 }
 
 // SchemaVersion is the current graph.json schema version. Bumped to 2 when
-// the rationale kind, the explains relation and Node.Body were added — the
+// the rationale kind, the explains relation and Node.Body were added, and to 3
+// for the tests and depends_on relations plus Node.Test and Node.Members — the
 // document is advertised as portable, so new vocabulary is a contract change.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // EncodeGraphJSON writes a deterministic (sorted) graph.json document.
 func EncodeGraphJSON(w io.Writer, root string, nodes []Node, edges []Edge, communities int, files int) error {

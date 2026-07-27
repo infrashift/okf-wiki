@@ -44,7 +44,10 @@
       "signature": "Mood interface {",
       "doc": "Mood is how a greeting feels.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "members": [
+        "Feel"
+      ]
     },
     {
       "id": "go:type:testdata/go/sample.go#Alias",
@@ -111,6 +114,27 @@
       "signature": "func format(prefix, name string) string",
       "community": 0,
       "degree": 0
+    },
+    {
+      "id": "go:interface:testdata/go/sample.go#Speaker",
+      "label": "Speaker",
+      "kind": "interface",
+      "language": "go",
+      "source_file": "testdata/go/sample.go",
+      "source_location": {
+        "start_line": 37,
+        "start_col": 6,
+        "end_line": 40,
+        "end_col": 2
+      },
+      "signature": "Speaker interface {",
+      "doc": "Speaker is anything that can greet and name itself.",
+      "community": 0,
+      "degree": 0,
+      "members": [
+        "Greet",
+        "Name"
+      ]
     }
   ],
   "Edges": [
@@ -161,6 +185,14 @@
       "confidence": "EXTRACTED",
       "site_file": "testdata/go/sample.go",
       "site_line": 32
+    },
+    {
+      "source": "go:file:testdata/go/sample.go#",
+      "target": "go:interface:testdata/go/sample.go#Speaker",
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "site_file": "testdata/go/sample.go",
+      "site_line": 37
     }
   ],
   "Refs": [

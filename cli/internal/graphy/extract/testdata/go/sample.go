@@ -32,3 +32,9 @@ func (g *Greeter) Greet(name string) string {
 func format(prefix, name string) string {
 	return fmt.Sprintf("%s, %s!", prefix, name)
 }
+
+// Speaker is anything that can greet and name itself.
+type Speaker interface {
+	Greet(name string) string
+	Name() string
+}
