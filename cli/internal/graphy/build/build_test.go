@@ -823,3 +823,387 @@ func main() { _ = cobra.Command{}; _ = tsgo.Language }
 		t.Errorf("cobra version = %q, want v1.8.0", n.Doc)
 	}
 }
+
+// TestBuildResolvesCallsThroughAStructField pins the defect that made
+// `graphy callers` useless on real Go code: a call through a struct field
+// (`s.engine.Evaluate`) reaches the symbol index as the bare tail `Evaluate`,
+// and the tail rule drops it whenever more than one type declares that method.
+//
+// This is the dominant shape for one subsystem reaching another, and it fails
+// hardest on the names worth querying — central verbs like Evaluate and
+// Validate are exactly the ones that recur across layers. Measured on a real
+// 24k-LOC repo, `Engine.Evaluate` and `Engine.Validate` resolved zero callers
+// while single-owner names resolved 32 and 45.
+func TestBuildResolvesCallsThroughAStructField(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/recv\n\ngo 1.23\n")
+	write(t, root, "engine/engine.go", `package engine
+
+type Engine struct{}
+
+// Evaluate is the entry point under test.
+func (e *Engine) Evaluate(in string) string { return in }
+`)
+	// A second Evaluate is what makes the bare tail ambiguous, and is why the
+	// old rule dropped the call rather than tagging it AMBIGUOUS.
+	write(t, root, "client/client.go", `package client
+
+type Client struct{}
+
+func (c *Client) Evaluate(in string) string { return in }
+`)
+	write(t, root, "server/server.go", `package server
+
+import "example.com/recv/engine"
+
+type Server struct {
+	engine *engine.Engine
+}
+
+func (s *Server) handle(in string) string {
+	return s.engine.Evaluate(in)
+}
+
+func (s *Server) delegate(in string) string {
+	return s.handle(in)
+}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	stats, err := Run(w, s, Options{})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	const want = "go:method:server/server.go#Server.handle -calls-> go:method:engine/engine.go#Engine.Evaluate"
+	if _, ok := edges[want]; !ok {
+		t.Errorf("call through a struct field did not resolve\nwant: %s\nedges: %v", want, edges)
+	}
+	// The whole point of scoping is that it does not fan out: the identically
+	// named method on an unrelated type must not also be claimed.
+	const wrong = "go:method:server/server.go#Server.handle -calls-> go:method:client/client.go#Client.Evaluate"
+	if _, ok := edges[wrong]; ok {
+		t.Errorf("receiver scoping leaked onto an unrelated type's same-named method")
+	}
+	// A bare `s.method()` call names the receiver's own type.
+	const own = "go:method:server/server.go#Server.delegate -calls-> go:method:server/server.go#Server.handle"
+	if _, ok := edges[own]; !ok {
+		t.Errorf("call on the method's own receiver did not resolve\nwant: %s", own)
+	}
+	if stats.RefsReceiverScoped == 0 {
+		t.Error("RefsReceiverScoped not counted")
+	}
+}
+
+// TestReceiverScopingRequiresTheReceiverVariable keeps the rule sound: the head
+// segment must be the enclosing method's receiver. Without that check any
+// `x.engine.Evaluate` would be read as the enclosing type's `engine` field no
+// matter what `x` actually is.
+func TestReceiverScopingRequiresTheReceiverVariable(t *testing.T) {
+	nodes := map[string]model.Node{
+		"m": {ID: "m", Label: "Server.handle", Kind: model.KindMethod, Language: "go", Recv: "s"},
+		"f": {ID: "f", Label: "Boot", Kind: model.KindFunction, Language: "go"},
+	}
+	fields := map[string]map[string]string{"Server": {"engine": "Engine"}}
+
+	first := func(ids []string) string {
+		if len(ids) == 0 {
+			return ""
+		}
+		return ids[0]
+	}
+	if got := first(goReceiverQualified(model.Ref{FromID: "m", Name: "s.engine.Evaluate"}, nodes, fields, nil)); got != "Engine.Evaluate" {
+		t.Errorf("receiver call: got %q, want Engine.Evaluate", got)
+	}
+	if got := goReceiverQualified(model.Ref{FromID: "m", Name: "other.engine.Evaluate"}, nodes, fields, nil); got != nil {
+		t.Errorf("non-receiver head must not scope: got %q", got)
+	}
+	if got := goReceiverQualified(model.Ref{FromID: "f", Name: "s.engine.Evaluate"}, nodes, fields, nil); got != nil {
+		t.Errorf("plain function has no receiver: got %q", got)
+	}
+	if got := goReceiverQualified(model.Ref{FromID: "m", Name: "s.a.b.Evaluate"}, nodes, fields, nil); got != nil {
+		t.Errorf("deep chain must not be followed: got %q", got)
+	}
+	if got := goReceiverQualified(model.Ref{FromID: "m", Name: "s.unknown.Evaluate"}, nodes, fields, nil); got != nil {
+		t.Errorf("unknown field must not scope: got %q", got)
+	}
+}
+
+// TestReceiverScopingFollowsMethodPromotion: `b.Get()` on a type that embeds
+// S3Backend names S3Backend.Get, and nothing on the outer type declares it.
+// Without promotion this shape resolved before the fix (via the same-file
+// shortcut) and would have regressed to nothing after it.
+func TestReceiverScopingFollowsMethodPromotion(t *testing.T) {
+	nodes := map[string]model.Node{
+		"m": {ID: "m", Label: "Wrapper.Checksum", Kind: model.KindMethod, Language: "go", Recv: "b"},
+	}
+	fields := map[string]map[string]string{
+		"Wrapper": {"S3Backend": "S3Backend", "name": "string"},
+	}
+	got := goReceiverQualified(model.Ref{FromID: "m", Name: "b.Get"}, nodes, fields, nil)
+	want := []string{"Wrapper.Get", "S3Backend.Get"}
+	if len(got) != len(want) {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("candidate %d: got %q, want %q (own type must be tried first)", i, got[i], want[i])
+		}
+	}
+	// A named field is not embedded and must not be a promotion candidate.
+	if got := goReceiverQualified(model.Ref{FromID: "m", Name: "b.Missing"}, nodes, fields, nil); len(got) != 2 {
+		t.Errorf("only embedded types promote: got %q", got)
+	}
+}
+
+// TestGoStructFieldIndexDropsClashingNames: a struct name declared by two
+// packages is dropped rather than guessed. Picking one would attach calls to
+// whichever sorted first — a wrong edge carrying the same confidence as a
+// right one.
+func TestGoStructFieldIndexDropsClashingNames(t *testing.T) {
+	nodes := map[string]model.Node{
+		"a": {ID: "a", Label: "Config", Kind: model.KindStruct, Language: "go", File: "x/x.go", Fields: map[string]string{"db": "DBa"}},
+		"b": {ID: "b", Label: "Config", Kind: model.KindStruct, Language: "go", File: "y/y.go", Fields: map[string]string{"db": "DBb"}},
+		"c": {ID: "c", Label: "Server", Kind: model.KindStruct, Language: "go", File: "z/z.go", Fields: map[string]string{"e": "Engine"}},
+	}
+	idx := goStructFieldIndex(nodes)
+	if _, ok := idx["Config"]; ok {
+		t.Error("clashing struct name must be dropped, not guessed")
+	}
+	if idx["Server"]["e"] != "Engine" {
+		t.Errorf("unambiguous struct lost: %v", idx["Server"])
+	}
+}
+
+// TestBuildResolvesCallsThroughALocalVariable covers the other half of Go's
+// receiver qualifiers: `eng := engine.New(); eng.Evaluate()`. No amount of
+// struct knowledge reaches this shape — the receiver is a local, so the type
+// comes from the declaration, and for the constructor idiom that means reading
+// the callee's result type from another file.
+func TestBuildResolvesCallsThroughALocalVariable(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/local\n\ngo 1.23\n")
+	write(t, root, "engine/engine.go", `package engine
+
+type Engine struct{}
+
+func NewEngine() (*Engine, error) { return &Engine{}, nil }
+
+func (e *Engine) Evaluate(in string) string { return in }
+`)
+	// A second Evaluate makes the bare tail ambiguous, so nothing below can
+	// resolve by luck.
+	write(t, root, "client/client.go", `package client
+
+type Client struct{}
+
+func (c *Client) Evaluate(in string) string { return in }
+`)
+	write(t, root, "app/app.go", `package app
+
+import "example.com/local/engine"
+
+// constructor result
+func viaConstructor() string {
+	eng, err := engine.NewEngine()
+	if err != nil {
+		return ""
+	}
+	return eng.Evaluate("x")
+}
+
+// composite literal
+func viaLiteral() string {
+	eng := &engine.Engine{}
+	return eng.Evaluate("x")
+}
+
+// typed var
+func viaVar() string {
+	var eng *engine.Engine
+	return eng.Evaluate("x")
+}
+
+// parameter
+func viaParam(eng *engine.Engine) string {
+	return eng.Evaluate("x")
+}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	edges := edgeSet(t, s)
+	for _, fn := range []string{"viaConstructor", "viaLiteral", "viaVar", "viaParam"} {
+		want := "go:function:app/app.go#" + fn + " -calls-> go:method:engine/engine.go#Engine.Evaluate"
+		if _, ok := edges[want]; !ok {
+			t.Errorf("%s: local receiver did not resolve\nwant: %s", fn, want)
+		}
+		wrong := "go:function:app/app.go#" + fn + " -calls-> go:method:client/client.go#Client.Evaluate"
+		if _, ok := edges[wrong]; ok {
+			t.Errorf("%s: local scoping leaked onto an unrelated type", fn)
+		}
+	}
+}
+
+// TestGoResolveLocalsRefusesToGuess: a constructor whose name is ambiguous, or
+// which returns nothing named, leaves the variable untyped rather than picking
+// a candidate. An untyped local drops the call — the status quo — while a
+// wrongly typed one manufactures a confident wrong edge.
+func TestGoResolveLocalsRefusesToGuess(t *testing.T) {
+	nodes := map[string]model.Node{
+		"caller": {ID: "caller", Label: "run", Kind: model.KindFunction, Language: "go",
+			Locals: []model.Local{
+				{Name: "a", Type: "()NewThing", Start: 2, End: 9},
+				{Name: "b", Type: "()NewDup", Start: 3, End: 9},
+				{Name: "c", Type: "()NewVoid", Start: 4, End: 9},
+				{Name: "d", Type: "Engine", Start: 5, End: 9},
+			}},
+		"nt":  {ID: "nt", Label: "NewThing", Kind: model.KindFunction, Language: "go", Returns: "Thing"},
+		"nd1": {ID: "nd1", Label: "NewDup", Kind: model.KindFunction, Language: "go", Returns: "DupA"},
+		"nd2": {ID: "nd2", Label: "NewDup", Kind: model.KindFunction, Language: "go", Returns: "DupB"},
+		"nv":  {ID: "nv", Label: "NewVoid", Kind: model.KindFunction, Language: "go"},
+	}
+	symbols := map[string][]string{
+		"go\x00NewThing": {"nt"},
+		"go\x00NewDup":   {"nd1", "nd2"},
+		"go\x00NewVoid":  {"nv"},
+	}
+	got := goResolveLocals(nodes, symbols)["caller"]
+	at := func(name string) string { return localTypeAt(got, name, 6) }
+	if at("a") != "Thing" {
+		t.Errorf("unique constructor: got %q, want Thing", at("a"))
+	}
+	if at("b") != "" {
+		t.Errorf("ambiguous constructor must not resolve: got %q", at("b"))
+	}
+	if at("c") != "" {
+		t.Errorf("constructor returning nothing named must not resolve: got %q", at("c"))
+	}
+	if at("d") != "Engine" {
+		t.Errorf("already-typed local lost: got %q", at("d"))
+	}
+}
+
+// TestLocalTypeAtHonoursShadowing: Go lets an inner scope rebind a name to a
+// different type. Flattening to "last declaration in source order wins"
+// mistypes every call in the inner scope when an outer redeclaration follows
+// it — and a mistyped receiver is a confident wrong edge, worse than a drop.
+func TestLocalTypeAtHonoursShadowing(t *testing.T) {
+	// func f() {            // 1
+	//   c := NewOuter()     // 2   Outer, lines 2..12
+	//   if x {              // 3
+	//     c := NewInner()   // 4   Inner, lines 4..6
+	//     c.Do()            // 5   -> Inner
+	//   }                   // 6
+	//   c.Do()              // 7   -> Outer
+	// }                     // 12
+	locals := []model.Local{
+		{Name: "c", Type: "Outer", Start: 2, End: 12},
+		{Name: "c", Type: "Inner", Start: 4, End: 6},
+	}
+	if got := localTypeAt(locals, "c", 5); got != "Inner" {
+		t.Errorf("inside the inner scope: got %q, want Inner", got)
+	}
+	if got := localTypeAt(locals, "c", 7); got != "Outer" {
+		t.Errorf("after the inner scope closes: got %q, want Outer", got)
+	}
+	if got := localTypeAt(locals, "c", 1); got != "" {
+		t.Errorf("before any declaration: got %q, want none", got)
+	}
+	if got := localTypeAt(locals, "nope", 5); got != "" {
+		t.Errorf("undeclared name: got %q, want none", got)
+	}
+	// Two declarations in the SAME scope: the later one wins from its line on.
+	seq := []model.Local{
+		{Name: "v", Type: "First", Start: 2, End: 10},
+		{Name: "v", Type: "Second", Start: 5, End: 10},
+	}
+	if got := localTypeAt(seq, "v", 3); got != "First" {
+		t.Errorf("before redeclaration: got %q, want First", got)
+	}
+	if got := localTypeAt(seq, "v", 6); got != "Second" {
+		t.Errorf("after redeclaration: got %q, want Second", got)
+	}
+}
+
+// TestBuildResolvesShadowedLocalsPerScope is the end-to-end proof: the same
+// variable name bound to two different types in one function must resolve each
+// call to the binding actually in scope at that line.
+func TestBuildResolvesShadowedLocalsPerScope(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "go.mod", "module example.com/shadow\n\ngo 1.23\n")
+	write(t, root, "a/a.go", `package a
+
+type Alpha struct{}
+
+func NewAlpha() *Alpha { return &Alpha{} }
+
+func (x *Alpha) Run() string { return "a" }
+`)
+	write(t, root, "b/b.go", `package b
+
+type Beta struct{}
+
+func NewBeta() *Beta { return &Beta{} }
+
+func (x *Beta) Run() string { return "b" }
+`)
+	// `v` is an Alpha at the outer level and a Beta inside the if. The outer
+	// call comes AFTER the inner one in source order, so a flat
+	// last-declaration-wins map would type the inner call as Alpha.
+	write(t, root, "app/app.go", `package app
+
+import (
+	"example.com/shadow/a"
+	"example.com/shadow/b"
+)
+
+func Run(flag bool) string {
+	v := a.NewAlpha()
+	if flag {
+		v := b.NewBeta()
+		return v.Run()
+	}
+	return v.Run()
+}
+`)
+	w, err := workspace.Init(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := store.Open(w.DBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := Run(w, s, Options{}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	edges := edgeSet(t, s)
+	for _, want := range []string{
+		"go:function:app/app.go#Run -calls-> go:method:a/a.go#Alpha.Run",
+		"go:function:app/app.go#Run -calls-> go:method:b/b.go#Beta.Run",
+	} {
+		if _, ok := edges[want]; !ok {
+			t.Errorf("missing edge for one of the two scopes\nwant: %s\nedges: %v", want, edges)
+		}
+	}
+}

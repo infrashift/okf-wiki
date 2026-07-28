@@ -27,7 +27,10 @@
       "signature": "Store struct {",
       "doc": "Store holds records.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "fields": {
+        "closed": "bool"
+      }
     },
     {
       "id": "go:method:testdata/go/rationale.go#Store.Put",
@@ -44,7 +47,23 @@
       "signature": "func (s *Store) Put(key string, value []byte) error",
       "doc": "Put writes a record.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "recv": "s",
+      "returns": "error",
+      "local_scopes": [
+        {
+          "name": "key",
+          "type": "string",
+          "start": 19,
+          "end": 30
+        },
+        {
+          "name": "value",
+          "type": "byte",
+          "start": 19,
+          "end": 30
+        }
+      ]
     },
     {
       "id": "go:function:testdata/go/rationale.go#helper",

@@ -27,7 +27,10 @@
       "signature": "Greeter struct {",
       "doc": "Greeter greets people.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "fields": {
+        "prefix": "string"
+      }
     },
     {
       "id": "go:interface:testdata/go/sample.go#Mood",
@@ -80,7 +83,16 @@
       "signature": "func NewGreeter(prefix string) *Greeter",
       "doc": "NewGreeter builds a Greeter.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "returns": "Greeter",
+      "local_scopes": [
+        {
+          "name": "prefix",
+          "type": "string",
+          "start": 23,
+          "end": 25
+        }
+      ]
     },
     {
       "id": "go:method:testdata/go/sample.go#Greeter.Greet",
@@ -97,7 +109,17 @@
       "signature": "func (g *Greeter) Greet(name string) string",
       "doc": "Greet says hello.",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "recv": "g",
+      "returns": "string",
+      "local_scopes": [
+        {
+          "name": "name",
+          "type": "string",
+          "start": 28,
+          "end": 30
+        }
+      ]
     },
     {
       "id": "go:function:testdata/go/sample.go#format",
@@ -113,7 +135,22 @@
       },
       "signature": "func format(prefix, name string) string",
       "community": 0,
-      "degree": 0
+      "degree": 0,
+      "returns": "string",
+      "local_scopes": [
+        {
+          "name": "prefix",
+          "type": "string",
+          "start": 32,
+          "end": 34
+        },
+        {
+          "name": "name",
+          "type": "string",
+          "start": 32,
+          "end": 34
+        }
+      ]
     },
     {
       "id": "go:interface:testdata/go/sample.go#Speaker",

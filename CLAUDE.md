@@ -250,6 +250,72 @@ a package the file imports is scoped to that package's directory first
 here: AMBIGUOUS fell from 14.1% of edges to 3.7%, while INFERRED *rose*, because
 the scoping recovers real cross-package calls.
 
+**A receiver qualifier is recovered the same way, and it is what makes
+`graphy callers` answer at all.** A call through a struct field —
+`s.engine.Evaluate(...)`, the dominant shape for one subsystem reaching another
+— reaches the index as the bare tail `Evaluate` and is dropped whenever a second
+type declares that name. That drop lands hardest on the entities worth querying:
+central verbs like Evaluate and Validate recur across layers *because* they are
+central. Measured on a 24k-LOC Go repo before the fix, `Engine.Evaluate` and
+`Engine.Validate` each resolved **zero** callers while single-owner names
+resolved 32 and 45 — the flagship impact-analysis query returned nothing for
+every entry point anyone would ask about. `goReceiverQualified` rewrites
+`recv.field.Method` into `FieldType.Method` using the enclosing method's receiver
+type and `Node.Fields` (struct field → bare type name, from the extractor), and
+`recv.Method` into `RecvType.Method`. It runs *after* package scoping so an
+import qualifier always wins, and it requires the head segment to equal
+`Node.Recv` — without that check any `x.engine.Evaluate` would be read as the
+enclosing type's field regardless of what `x` is. `recv.Method` also tries the
+receiver's **embedded** types, in declaration order, because Go promotion means
+`b.Get()` can name `S3Backend.Get` with nothing on the outer type saying so.
+Deeper chains (`a.b.c.Method`) are deliberately not followed.
+
+**The other half of a receiver qualifier is a local**, and struct knowledge
+cannot reach it: `eng := engine.NewEngine(); eng.Evaluate()`. `Node.Locals` maps
+a body's variable names to their types from the three declaration forms that
+state one without inference — parameters, `var x T`, and `x := &T{}` — plus the
+constructor idiom `x := NewT()`, recorded as the sentinel `()NewT` because the
+constructor almost always lives in another file and extraction is per-file.
+`goResolveLocals` substitutes the callee's `Node.Returns` (its **first** result
+type: Go constructors return `(*T, error)`) once every node is known, and
+refuses to guess — an ambiguous or unknown callee leaves the variable untyped,
+which merely restores the old drop, whereas guessing would manufacture a
+confident wrong edge.
+
+**Locals are scope-ranged, because Go lets an inner scope rebind a name to a
+different type.** Each `model.Local` carries the line range over which it is the
+binding for its name, and `localTypeAt` takes the innermost declaration covering
+the call's line (narrowest range wins, since scopes nest; ties go to the later
+declaration). A flat name→type map cannot express this, and "last declaration in
+source order wins" is actively wrong: on this repo it typed all three
+`err.Error()` calls in a table of `t.Run` subtests as the *last* subtest's error
+type, which deduped to **one edge pointing at the wrong type** where the scoped
+version emits three correct ones. `func_literal` is a scope kind precisely so
+`t.Run(func(t *testing.T){…})` closures separate; `if`/`for`/`switch` are scopes
+too, since their initializers bind beyond the braces that follow.
+
+Measured across the changes on one 24k-LOC Go repo (edges / Go methods with ≥1
+resolved caller / AMBIGUOUS): baseline **4038 / 138 / 26** → receiver fields +
+the same-file fix **4035 / 136 / 26** → local typing **4214 / 144 / 26** →
+scope-ranged locals **4216 / 144 / 26**. The second step *lowers* the method
+count on purpose — it removes 17 false callers while adding 14 true ones.
+AMBIGUOUS never moves at any step, and no true edge is ever lost; every gain
+lands in INFERRED, which is what a cross-file inference should be.
+
+One storage note: `Node.Locals` is keyed `local_scopes` in JSON, not `locals`.
+An earlier shape wrote an object under `locals`, and `Run` decodes **every**
+stored record via `EachFile` *before* a `--full` purge can replace them — so
+reusing the key would make an existing store fail to decode instead of
+rebuilding itself. An unknown key is ignored; a type mismatch is fatal.
+
+**The same-file shortcut requires a full match**, for the same reason. It used to
+run first unconditionally, so a tail-only hit whose bare name happened to be
+declared in the same file was stamped EXTRACTED — the *highest* confidence — on
+the strength of a qualifier that had already been thrown away. `defer
+resp.Body.Close()` in a file declaring a `Close` method became "this method calls
+Close, EXTRACTED", and `err.Error()` did the same thing the tail rule exists to
+prevent.
+
 **Cross-artifact linking beyond code.** Markdown emits `references` refs for
 backticked identifiers in prose, not only for links — links only resolve when a
 doc names a *path*, which this repo's 38 documents did exactly once. Refs are

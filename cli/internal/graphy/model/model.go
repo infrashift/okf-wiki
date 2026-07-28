@@ -158,6 +158,50 @@ type Node struct {
 	// interface nodes populate it; it exists so implementation matching can
 	// compare method sets without re-parsing.
 	Members []string `json:"members,omitempty"`
+	// Fields maps a struct's field names to the bare name of each field's type
+	// ("engine" -> "Engine"), for struct nodes only. Recv is a method's
+	// receiver *variable* name ("s" in "func (s *Server) Handle()").
+	//
+	// Together they are what lets resolution recover the meaning of a receiver
+	// qualifier. A call through a struct field — `s.engine.Evaluate(...)`, the
+	// dominant shape for reaching one subsystem from another — otherwise
+	// reaches the symbol index as the bare tail `Evaluate`, and is dropped
+	// whenever more than one type declares a method by that name. That drop
+	// hits hardest on exactly the names worth querying, because central verbs
+	// like Evaluate and Validate are the ones that recur across layers.
+	Fields map[string]string `json:"fields,omitempty"`
+	Recv   string            `json:"recv,omitempty"`
+	// Returns is the bare name of a function's or method's first result type
+	// ("Engine" for `func NewEngine(...) (*Engine, error)`). Locals maps a
+	// function body's variable names to what they hold: either a bare type
+	// name, or "()F" meaning "the first result of calling F", which resolution
+	// resolves through Returns once every node is known.
+	//
+	// Together these type the other half of Go's receiver qualifiers — the
+	// `eng := engine.New(); eng.Evaluate()` shape, which no amount of struct
+	// knowledge can reach because the receiver is a local, not a field.
+	Returns string `json:"returns,omitempty"`
+	// Locals is scope-ranged so that shadowing resolves correctly: the same
+	// name can appear more than once with different types, and a call site
+	// takes the innermost declaration whose range covers its line. A flat
+	// name→type map cannot express that, and "last one in source order wins"
+	// gets an inner-scope call wrong whenever an outer declaration follows it.
+	//
+	// The JSON key is deliberately not "locals": an earlier shape wrote an
+	// object under that name, and `EachFile` decodes every stored record
+	// *before* a --full purge can replace it, so reusing the key would make an
+	// existing store fail to decode instead of rebuilding.
+	Locals []Local `json:"local_scopes,omitempty"`
+}
+
+// Local is one variable declaration and the line range over which it is the
+// binding for its name. Start is the declaration line; End is the last line of
+// the block, statement or function body that encloses it.
+type Local struct {
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Start int    `json:"start"`
+	End   int    `json:"end"`
 }
 
 // Edge is a typed, confidence-tagged relationship between two nodes.

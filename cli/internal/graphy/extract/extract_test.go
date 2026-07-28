@@ -789,3 +789,26 @@ func TestMarkdownExtractShape(t *testing.T) {
 func TestGoRationaleGolden(t *testing.T)   { golden(t, "go", "rationale.go") }
 func TestYAMLRationaleGolden(t *testing.T) { golden(t, "yaml", "rationale.yaml") }
 func TestADRGolden(t *testing.T)           { golden(t, "markdown", "0001-use-bbolt.md") }
+
+// TestGoBareTypeName: field types reach resolution as a bare declared name,
+// because the symbol index is keyed that way — `*engine.Engine` and `Engine`
+// name the same declaration. Types with no single name yield "" and simply
+// never scope anything.
+func TestGoBareTypeName(t *testing.T) {
+	for in, want := range map[string]string{
+		"*engine.Engine":      "Engine",
+		"engine.Engine":       "Engine",
+		"Engine":              "Engine",
+		"[]*Policy":           "Policy",
+		"map[string]*Rule":    "Rule",
+		"Store[T]":            "Store",
+		"*store.Store[K, V]":  "Store",
+		"func(int) error":     "",
+		"struct{ x int }":     "",
+		"chan map[string]int": "",
+	} {
+		if got := goBareTypeName(in); got != want {
+			t.Errorf("goBareTypeName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

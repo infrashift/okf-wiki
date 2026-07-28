@@ -43,7 +43,7 @@ type Options struct {
 // extractorVersion is bumped whenever extraction output changes shape. It
 // feeds the fingerprint below, so upgrading graphy re-extracts rather than
 // leaving pre-upgrade results in the per-file cache.
-const extractorVersion = 3
+const extractorVersion = 6
 
 // metaExtractFingerprintKey holds the fingerprint of the last build's
 // extraction configuration.
@@ -113,6 +113,11 @@ type Stats struct {
 	RefsResolved  int
 	RefsAmbiguous int
 	RefsDropped   int
+	// RefsReceiverScoped counts calls through a receiver qualifier that were
+	// recovered into an exact match instead of being dropped as a bare tail.
+	// Counted separately because it is the difference between "what calls this
+	// entry point" answering and returning nothing.
+	RefsReceiverScoped int
 	// ClusterAlgorithm is the detector that produced Communities.
 	ClusterAlgorithm string
 	// Failures lists files that could not be extracted. The build continues
@@ -453,6 +458,9 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 		edges[key] = e
 	}
 
+	structFields := goStructFieldIndex(nodes)
+	localTypes := goResolveLocals(nodes, symbols)
+
 	for _, rec := range recs {
 		for _, e := range rec.Edges {
 			addEdge(e)
@@ -551,6 +559,20 @@ func resolve(w *workspace.Workspace, s *store.Store, stats *Stats) error {
 						}
 					}
 				}
+				// Likewise for a receiver qualifier: `s.engine.Evaluate` inside a
+				// method of Server, where Server declares `engine *engine.Engine`,
+				// names Engine.Evaluate exactly. Runs after package scoping so an
+				// import qualifier always wins — `engine.New` is the package, not
+				// a field.
+				if match == matchTail && lang == "go" {
+					for _, qual := range goReceiverQualified(ref, nodes, structFields, localTypes) {
+						if ids := symbols[lang+"\x00"+qual]; len(ids) > 0 {
+							candidates, match = ids, matchFull
+							stats.RefsReceiverScoped++
+							break
+						}
+					}
+				}
 				resolveCandidates(ref, rec.Path, candidates, match, nodes, addEdge, stats)
 			}
 		}
@@ -621,7 +643,16 @@ func resolveCandidates(ref model.Ref, siteFile string, candidates []string, matc
 		}
 	}
 	switch {
-	case len(sameFile) == 1:
+	// The same-file shortcut requires a full match. A tail-only hit reaches
+	// here with its qualifier already discarded, so a same-named symbol
+	// sharing the file is coincidence, not evidence — and this branch would
+	// stamp it EXTRACTED, the highest confidence of all. `defer
+	// resp.Body.Close()` in a file that also declares a Close method became
+	// "this method calls Close, EXTRACTED"; the qualifier that said the
+	// receiver was an http.Response.Body was gone by then. A genuine
+	// receiver-qualified call is promoted to matchFull upstream and still
+	// takes this branch.
+	case len(sameFile) == 1 && match == matchFull:
 		emit(sameFile, model.ConfExtracted)
 		stats.RefsResolved++
 	case len(candidates) == 1:
@@ -684,6 +715,175 @@ func lookupSymbol(symbols map[string][]string, lang, name string) ([]string, sym
 		}
 	}
 	return nil, matchNone
+}
+
+// goStructFieldIndex maps a Go struct's declared name to its field→type map.
+//
+// Keyed by name rather than node id because the call site names a field's type
+// only by name. A name declared by two packages is dropped rather than guessed:
+// picking one would attach a call to whichever struct sorted first, which is a
+// wrong edge presented with the same confidence as a right one.
+func goStructFieldIndex(nodes map[string]model.Node) map[string]map[string]string {
+	out := map[string]map[string]string{}
+	clashed := map[string]bool{}
+	for _, n := range nodes {
+		if n.Language != "go" || n.Kind != model.KindStruct || len(n.Fields) == 0 {
+			continue
+		}
+		if _, seen := out[n.Label]; seen {
+			clashed[n.Label] = true
+			continue
+		}
+		out[n.Label] = n.Fields
+	}
+	for name := range clashed {
+		delete(out, name)
+	}
+	return out
+}
+
+// goReceiverQualified rewrites a receiver-qualified call into the qualified
+// names of the method it may actually name, best first, or nil when it cannot.
+//
+// It handles the two shapes that carry enough evidence:
+//
+//	s.field.Method()  inside a method of T, where T declares `field U` → U.Method
+//	s.Method()        inside a method of T, s being T's receiver         → T.Method
+//
+// Both require the head segment to be the enclosing method's receiver variable.
+// That check is what keeps this sound: without it, any `x.engine.Evaluate` would
+// be read as the enclosing type's `engine` field regardless of what `x` is.
+// Deeper chains (`a.b.c.Method`) are not followed — each additional hop needs
+// the previous hop's type to itself be a repo struct, and the evidence thins
+// faster than the payoff grows.
+//
+// A list rather than one name because of **method promotion**: `b.Get()` on a
+// type that embeds S3Backend names S3Backend.Get, and no declaration on the
+// outer type says so. Embedded types are therefore tried after the receiver's
+// own type, in declaration order. Promotion is only consulted when the
+// receiver's own type has no such method, which is exactly when Go itself
+// would promote.
+func goReceiverQualified(ref model.Ref, nodes map[string]model.Node, structFields map[string]map[string]string, locals map[string][]model.Local) []string {
+	from, ok := nodes[ref.FromID]
+	if !ok {
+		return nil
+	}
+	parts := strings.Split(ref.Name, ".")
+	if len(parts) < 2 || len(parts) > 3 {
+		return nil
+	}
+
+	// What the head segment names: the enclosing method's receiver, or a local
+	// (parameter, typed var, or a variable holding a constructed value).
+	var headType string
+	switch {
+	case from.Kind == model.KindMethod && from.Recv != "" && parts[0] == from.Recv:
+		dot := strings.LastIndexByte(from.Label, '.')
+		if dot < 0 {
+			return nil
+		}
+		headType = from.Label[:dot]
+	default:
+		headType = localTypeAt(locals[ref.FromID], parts[0], ref.Line)
+	}
+	if headType == "" {
+		return nil
+	}
+
+	method := parts[len(parts)-1]
+	if len(parts) == 3 {
+		fieldType, ok := structFields[headType][parts[1]]
+		if !ok {
+			return nil
+		}
+		return []string{fieldType + "." + method}
+	}
+	// x.Method(): x's own type first, then anything it embeds.
+	out := []string{headType + "." + method}
+	for _, emb := range goEmbeddedTypes(structFields[headType]) {
+		out = append(out, emb+"."+method)
+	}
+	return out
+}
+
+// goEmbeddedTypes lists a struct's embedded type names, sorted so the candidate
+// order does not vary run to run. Embedded fields are recorded under their own
+// type name by the extractor, which is what makes them identifiable here.
+func goEmbeddedTypes(fields map[string]string) []string {
+	var out []string
+	for name, typ := range fields {
+		if name == typ {
+			out = append(out, typ)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// callPrefix mirrors extract.callPrefix: the marker an unresolved local
+// carries until its callee's return type is known.
+const callPrefix = "()"
+
+// goResolveLocals turns each definition's raw local map into resolved bare type
+// names, substituting "()F" for the first result type of F.
+//
+// The constructor almost always lives in another file, so this cannot happen
+// during extraction: `eng := engine.NewEngine(...)` only becomes `eng is an
+// Engine` once NewEngine's node is in hand. A callee that is ambiguous, absent,
+// or returns nothing named is dropped rather than guessed — the variable simply
+// stays untyped, which is the pre-existing behaviour.
+func goResolveLocals(nodes map[string]model.Node, symbols map[string][]string) map[string][]model.Local {
+	// Bare type names are not node ids; resolve a callee to its Returns.
+	returnsOf := func(callee string) string {
+		ids, _ := lookupSymbol(symbols, "go", callee)
+		if len(ids) != 1 {
+			return "" // ambiguous or unknown: no guess
+		}
+		return nodes[ids[0]].Returns
+	}
+	out := map[string][]model.Local{}
+	for id, n := range nodes {
+		if n.Language != "go" || len(n.Locals) == 0 {
+			continue
+		}
+		var resolved []model.Local
+		for _, l := range n.Locals {
+			if callee, ok := strings.CutPrefix(l.Type, callPrefix); ok {
+				l.Type = returnsOf(callee)
+			}
+			if l.Type != "" {
+				resolved = append(resolved, l)
+			}
+		}
+		if len(resolved) > 0 {
+			out[id] = resolved
+		}
+	}
+	return out
+}
+
+// localTypeAt returns the type bound to name at line, honouring shadowing: the
+// innermost declaration whose range covers the line wins, and among equally
+// tight ranges the latest declaration at or before the line does.
+//
+// "Innermost" is the narrowest covering range because Go scopes nest — an inner
+// block's range is strictly inside its parent's.
+func localTypeAt(locals []model.Local, name string, line int) string {
+	best := ""
+	bestSpan, bestStart := 0, 0
+	for _, l := range locals {
+		if l.Name != name || l.Start > line || l.End < line {
+			continue
+		}
+		span := l.End - l.Start
+		switch {
+		case best == "",
+			span < bestSpan,                         // tighter scope: inner wins
+			span == bestSpan && l.Start > bestStart: // same scope: later declaration wins
+			best, bestSpan, bestStart = l.Type, span, l.Start
+		}
+	}
+	return best
 }
 
 // goPackageDirs maps the conventional package qualifier of each of a Go file's
