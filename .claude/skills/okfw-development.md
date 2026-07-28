@@ -14,7 +14,7 @@ globs:
 make build                    # Build ./okfw binary
 make test                     # Go tests + CUE schema validation
 go test ./cli/... -count=1    # All Go tests
-go test ./cli/internal/graphdb/... -v  # Single package, verbose
+go test ./cli/internal/search/... -v  # Single package, verbose
 go build ./cli/cmd/okfw/      # Just compile, no binary output
 make lint                     # go vet + staticcheck
 make fmt                      # go fmt + cue fmt
@@ -27,15 +27,14 @@ All CLI commands live in a single file: `cli/cmd/okfw/main.go`. Commands are def
 Wikis are per-project `.okfw/` directories, created by `okfw init` and
 discovered by searching upward from the current working directory (like git
 finds `.git`). There is no config file. Fixed artifact names inside `.okfw/`:
-`.index/` (Bleve), `.graph.db` (bbolt),
-`ephemeral/` (exports). `okfw connect` verifies the wiki; `okfw root` prints
-its path.
+`ephemeral/` (exports) — the only generated directory. okfw keeps no derived
+state: search and the link graph are computed from the concepts on demand.
+`okfw connect` verifies the wiki; `okfw root` prints its path.
 
 Internal packages:
 - `cli/internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
-- `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, ASCII tree, Mermaid rendering, link extraction)
-- `cli/internal/graphdb/` — Persistent graph store (bbolt). Store, Sync, queries (backlinks, cluster, tag, dangling), CUE edge validation
-- `cli/internal/index/` — Bleve full-text search (`ConceptDoc` mapping, search with filters)
+- `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, ASCII tree, Mermaid rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
+- `cli/internal/search/` — Concept search: scan, filter on frontmatter, rank by weighted field match. No index
 - `cli/internal/templates/` — Embedded markdown templates via `//go:embed`
 
 ## Key Types
@@ -55,21 +54,9 @@ type Node struct {
     Children, Links []string
 }
 
-// cli/internal/graphdb/graphdb.go
-type NodeRecord struct {  // persisted to bbolt
-    ID, Title, FilePath, Project, Parent string
-    Tags, Links []string
-    ModTime int64
-}
-type EdgeRecord struct {
-    From, Predicate, To string  // predicates: links_to, parent_of, child_of, tagged
-}
-```
-
 ## CUE Schemas
 
 - `cli/internal/config/concept-schema.cue` — #Concept
-- `cli/internal/graphdb/edge-schema.cue` — #Edge (from UUID, predicate enum, to string)
 
 Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.New()`, unify with data, validate with `cue.Concrete(true)`.
 
@@ -88,7 +75,7 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 2. Add flags after the command definition
 3. Register with `rootCmd.AddCommand(myCmd)`
 4. Discover the wiki with `config.Discover` inside RunE (searches upward from the cwd for `.okfw/`; error out with `okfw init` advice when none is found)
-5. For graph operations, open the store at the wiki's `.graph.db` (e.g. `graphdb.Open(filepath.Join(wikiRoot, ".graph.db"))`)
+5. For graph operations, build the graph with `bundle.LoadGraph(cfg.RootPath)` — it scans the concepts; there is no store to open
 
 ## Testing Pattern
 
@@ -96,7 +83,7 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 // Use t.TempDir() for test databases and concept files
 func TestMyFeature(t *testing.T) {
     dir := t.TempDir()
-    store, _ := graphdb.Open(filepath.Join(dir, "test.db"))
+    g, _ := bundle.LoadGraph(bundleRoot)
     defer store.Close()
     // ... write test concepts, sync, query, assert
 }

@@ -20,10 +20,9 @@ cli/cmd/okfw/main.go         — okfw Cobra CLI entry point (all commands)
 cli/cmd/graphy/              — graphy CLI (build/query/path/explain/report/export/install/mcp)
 cli/internal/config/         — .okfw discovery, CUE schema, concept parsing
 cli/internal/bundle/         — Shared bundle write-path (concept creation, frontmatter,
-                               index/graph sync) used by BOTH binaries
+                               index.md listings, link-graph load) used by BOTH binaries
 cli/internal/graph/          — In-memory graph + rendering (ASCII tree, Mermaid)
-cli/internal/graphdb/        — okfw persistent graph store (bbolt, 4 predicates)
-cli/internal/index/          — Bleve full-text search index
+cli/internal/search/         — okfw concept search: scan + rank, no index
 cli/internal/agentskill/     — Shared agent-skill installer (tool-neutral; used by
                                BOTH binaries, so okfw need not import graphy)
 cli/internal/okfwskills/     — okfw's SKILL.md / CLAUDE.md-block templates
@@ -85,6 +84,25 @@ depth, because those four are ordinary words that name real source packages —
 matching `build/` at any depth silently erased this repo's own
 `cli/internal/graphy/build` package from the graph, and invisibly, since a file
 `detect` never lists is not a file that *failed* to extract;
+`graphy export okfw` **mirrors the source tree**: a concept is placed under
+`graphy/<project>/<dir-of-its-source-file>/`, because a concept's OKF id is its
+path minus `.md` (§4) and a flat export made every id an opaque handle. Nested,
+the id is self-describing and agrees with `resource:`, so a search hit locates
+the code before the concept is opened. Communities, the `code-graph` overview
+and entities with no source file stay at the export root, which is where the
+tree's parents belong. The precondition was `linkTo`: it emitted a bare
+`./<file>.md`, which only resolves inside one flat directory — every generated
+link is now wiki-root-relative (`/graphy/...`), and
+`TestExportLinksAreBundleRelative` both forbids `](./` and stats every target.
+Bundles written flat migrate in place on the next export (`Migrated`, kept apart
+from `Relocated` so a one-time layout change does not read as the wiki having
+moved hundreds of concepts by hand); the migration runs **after**
+`checkProjectDir`, since it moves concepts between directories and running it
+first would silently perform the split that check exists to refuse. It is
+`bundle.MoveConcept`, so ids, created stamps and inbound links all survive —
+796 concepts migrated here with 0 created. One-time cost is real: that export
+took 4m35s against 0.2s for the steady-state no-op, because each move repairs
+inbound links across the whole bundle.
 `graphy export okfw` is idempotent via the store's exports bucket, recoverable
 from the `<!-- graphy:node … -->` body markers if `.graphy/` is lost, and
 stamps exported concepts with `type: code-<entity>`, `resource:` (source
@@ -386,7 +404,7 @@ root) alongside each `ExportRecord`, because a record holds a *bundle-relative*
 path and nothing else identified the bundle — so the mapping could not be turned
 into a path anyone could open. `graphy concept` crosses graph→wiki;
 `okfw search --node-id` crosses back, which requires `graphy.node_id` to reach
-the Bleve index as a keyword field. Every node graphy's MCP tools return carries
+search's frontmatter scan. Every node graphy's MCP tools return carries
 its `concept` path. `cmd/graphy`'s `TestSkillDocumentsEveryCommand` /
 `TestSkillPromisesOnlyRealCommands` check the agent skill against the registered
 command set in both directions: the skill advertised impact analysis for months
@@ -394,19 +412,15 @@ while no command answered it, and that drift is now a test failure. `cmd/okfw`
 has the same pair plus `TestUpdateToolMatchesTheCLIWriters`, which is why
 `main()`'s command tree is extracted into `rootCmd()`.
 
-**`syncBundle` reconciles, it does not replay.** It takes both what pass 2 wrote
-and *every* concept the run placed, and unions in anything the Bleve index or
-the graph db is missing. Keying only off what was written meant a lost
-`.okfw/.index` was never rebuilt: a re-export finds every concept byte-identical,
-writes nothing, and so indexed nothing — leaving `okfw search --node-id` dead
-for good. It also **creates** `.graph.db` when absent (with a full walk, so
-hand-written concepts are in it too) and says so, because the whole exported
-tree — one `parent:` edge per concept — was otherwise invisible to every okfw
-graph command until a `graph-sync` nothing mentioned. Conversely
-`graphdb.OpenExisting` is what the four `okfw graph-query` subcommands use:
-`bolt.Open` *creates* the file, and every command that chooses between the store
-and a filesystem scan by whether it exists then answered from the empty store,
-permanently, from one read-only query.
+**`syncBundle` refreshes the `index.md` listings and nothing else.** It used to
+reconcile two derived stores — the Bleve index and a bbolt link graph — against
+every concept an export placed, changed or not, because either could be missing
+for reasons the export could not see. That was the sharpest edge in the seam: a
+lost `.okfw/.index` was never rebuilt, since a re-export found every concept
+byte-identical, wrote nothing and so indexed nothing, leaving
+`okfw search --node-id` dead for good. Both stores are gone — search and the
+link graph are computed from the files — so an export that writes correct files
+has nothing left to keep in step and that failure mode cannot recur.
 
 `scanExisting` walks the **whole bundle**, and a concept found outside the
 export directory is moved back through `bundle.MoveConcept`. `okfw move` cannot
@@ -490,9 +504,9 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 ## Wiki Layout (fixed, inside `.okfw/`)
 
 - Concept markdown at the top level (subdirs via `--path` or an explicit `--project`); `daily/YYYY/MM/` for daily notes
-- `.index/` (Bleve search index), `.graph.db` (bbolt graph), `ephemeral/` (export scratch) — all gitignored via `.okfw/.gitignore` written by `okfw init`
+- `ephemeral/` (export scratch) is the only generated directory, gitignored via `.okfw/.gitignore` written by `okfw init`. There is no search index and no graph database: both were removed, and `okfw init` must not reintroduce them to the ignore list
 - `okfw connect` / `okfw root` verify or print the discovered wiki; commands error with "run `okfw init`" advice when none is found
-- `--path`/`--project` reject any segment starting with `.`: a concept written into `.index/` or `.todos/` would be invisible to every walk, since `SkipWalkDir` skips dot-directories
+- `--path`/`--project` reject any segment starting with `.`: a concept written into a dot-directory would be invisible to every walk, since `SkipWalkDir` skips dot-directories
 
 ## Key Conventions
 
@@ -520,28 +534,53 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - `WriteIndexFiles` also prunes listings for directories that no longer hold
   concepts (and the emptied directory), or a delete would leave a generated
   `index.md` still advertising what used to be there.
+- **A directory listing past `indexEnumerateLimit` (50) groups by `type` instead
+  of naming every concept.** OKF section 8 gives `index.md` one job — showing
+  what is available *before* opening documents — and an exhaustive listing stops
+  doing that job exactly when a directory grows big enough for the question to
+  matter. A graphy export put 900 concepts in one directory and produced a
+  112KB, ~28,000-token "preview" of concepts averaging ~1,200 tokens: reading it
+  cost 23x reading what it previewed, and 5x the whole MCP tool-definition
+  prefix. Grouped, the same listing is 8.7KB (~2,200 tokens) and carries the
+  directory's shape — `code-function (503)`, `code-method (170)`,
+  `code-community (92)`. Each group names up to `indexPerTypeLimit` (10)
+  concepts, counts what it withheld, and gives the `okfw search --type` that
+  returns the rest — the same discipline `graphy report` applies to large
+  sections and concept bodies apply to `--max-edges`.
+  Small directories still enumerate: for a hand-written `knowledge/` of 18
+  concepts, naming them all is the more useful listing.
 - `bundle.DeleteConceptFile` is `DeleteConcept` without the `index.md` refresh,
   for callers deleting in bulk — `WriteIndexFiles` walks the whole bundle, so
   running it per deletion turns a sweep into quadratic work. Every such caller
   owes one refresh afterwards (`graphy export okfw`'s stale sweep does this in
   its single `syncBundle` pass).
-- The Bleve index is pruned by `bundle.PruneIndex`, wired into `graph-sync`.
-  Nothing used to prune it, so a deleted concept stayed in `okfw search` results
-  forever — `search` reports index hits without stat-ing the file. Bulk writers
-  use `bundle.IndexFiles` (one open/close for the batch) and reconcile against
-  `bundle.IndexedIDs`, which must **not** create the index it only reads.
-- Search snippets use a registered plain highlighter, not bleve's default. The
-  default is `html`, whose formatter runs `html.EscapeString` over the text
-  *surrounding* each match — so a snippet of a markdown concept came back with
-  `&amp;` and `&lt;` in it. That was corruption, not markup, and stripping the
-  `<mark>` tags would not have fixed it. The highlighted field is pinned on the
-  request too: it used to be whichever key ranging `hit.Fragments` yielded
-  first, which is a Go map.
+- **Search and the link graph are computed from the files, not cached.**
+  `search.Search` walks the bundle, filters on frontmatter and ranks by a
+  weighted field match; `bundle.LoadGraph` builds the link graph the same way.
+  Measured on a 918-concept bundle: search ~50ms, a graph query ~300ms, against
+  13MB + 4.7MB of derived state that the caches used to cost. The point was
+  never the megabytes — it was that a cache is a second source of truth. Every
+  rule that once existed to stop it drifting (prune on delete, sync after a bulk
+  write, open-existing rather than create, reconcile rather than replay) was a
+  rule about the cache, and all of them are gone with it. Scanning is linear in
+  bundle size, so this is the first design choice to revisit past roughly tens
+  of thousands of concepts.
+- Ranking is deliberately kept. The dominant agent pattern is search then read
+  under a small result cap, so the caller needs the *best* few hits rather than
+  the first few in directory order. `scoreConcept` weights title over tags over
+  description over body, damps repeated body matches, and adds a coverage bonus
+  for matching every term — the property BM25 saturation buys, obtained by
+  rewarding coverage instead of damping frequency.
+- Search snippets are plain text. The bleve implementation this replaces used the
+  default `html` highlighter, whose formatter ran `html.EscapeString` over the
+  text *surrounding* each match, so a snippet of a markdown concept came back
+  containing `&amp;` and `&lt;`. That was corruption, not markup. Keep snippets
+  as raw body text.
 - CUE schemas enforce all validation (concept frontmatter, graph edges)
 - bbolt (BoltDB) is the persistent graph store — single-file, read-optimized, pure Go
-- Bleve is the full-text search engine — separate from the graph store
-- The graph store is optional — commands fall back to filesystem scanning when `.graph.db` doesn't exist
-- Run `okfw graph-sync` to build/update the persistent graph for O(1) backlink lookups
+- okfw carries no database. bbolt remains a dependency of **graphy** only, for
+  its own `.graphy/graph.db`; okfw's binary dropped 25 modules and 8MB when
+  Bleve went
 - Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing, auto-maintained by okfw on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
 - The Neovim plugin uses snacks.nvim for pickers (not telescope), and needs `plenary.job` at **runtime**, not only for tests
 - `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated
@@ -554,8 +593,7 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   CLI's frontmatter mutators rather than reimplementing them. `read` takes
   `section`/`offset`/`limit` and caps at 200 lines rather than dumping a whole
   concept; `search` takes `node_id` — the wiki→graph half of the bridge, which
-  needs `graphy.node_id` indexed as a Bleve keyword field (`bundle.IndexFile`
-  populates it from the frontmatter extension block) — plus `type`, `offset`,
+  reads `graphy.node_id` straight from the frontmatter extension block — plus `type`, `offset`,
   and `kind: "code"` for separating graphy's export from hand-written notes
 - Both binaries install an agent skill through `cli/internal/agentskill`
   (`okfw install` / `graphy install`), which owns the platform mechanics —

@@ -1,33 +1,15 @@
 ---
-description: Graph traversal, backlinks, and relationship queries using OKF Wiki's persistent graph database
+description: Graph traversal, backlinks, and relationship queries over an OKF Wiki's links
 globs:
   - "cli/internal/graph/**"
-  - "cli/internal/graphdb/**"
+  - "cli/internal/graph/**"
 ---
 
 # Skill: Graph Database & Relationship Queries
 
-The `okfw` CLI has a persistent graph database (bbolt) for fast relationship traversal and backlink discovery. The graph store is optional — commands fall back to filesystem scanning when it doesn't exist.
+The `okfw` CLI answers relationship queries by building the link graph from the concepts on disk. There is no database and no sync step: the graph always matches the files. Building it costs roughly 300ms on a 900-concept bundle.
 
 ## Graph Sync
-
-Before using indexed queries, sync the graph database from the filesystem:
-
-```bash
-# Full sync (adds new, updates changed, purges deleted concepts)
-okfw graph-sync
-
-# Sync from explicit path
-okfw graph-sync path/to/.okfw
-
-# Sync + validate edge integrity (CUE schema + referential integrity)
-okfw graph-sync --validate
-```
-
-Output shows: `Graph synced: N total, N added, N updated, N deleted`
-With `--validate`: reports dangling edges (links to non-existent concepts) and any structurally invalid edges.
-
-The graph database is stored at `.graph.db` inside the wiki (`.okfw/.graph.db`), which every command discovers automatically by searching upward from the current working directory. There is no configuration.
 
 ## Graph Visualization
 
@@ -56,12 +38,12 @@ okfw backlinks ./path/to/concept.md
 okfw backlinks <id> --json
 ```
 
-## Graph Queries (require graph-sync first)
+## Graph Queries
 
 All subcommands support `--json` for machine-readable output.
 
 ```bash
-# Backlinks via graph-query (same as backlinks command but always uses DB)
+# Backlinks via graph-query (same as the backlinks command)
 okfw graph-query backlinks <id>
 
 # N-depth cluster: find all connected concepts within N hops

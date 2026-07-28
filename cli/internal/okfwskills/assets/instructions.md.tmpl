@@ -1,8 +1,10 @@
 ## Project knowledge base (okfw)
 
 {{ .Repo }} keeps a local-first OKF wiki in `.okfw/`: markdown concepts with
-YAML frontmatter, linked to each other. Search, the link graph and the
-generated `index.md` listings are maintained on every change.
+YAML frontmatter, linked to each other. The files are the whole database —
+search and the link graph are computed from them on demand, so there is no
+index to build and nothing to sync. Each directory's `index.md` is generated
+and gives a cheap overview before you open anything (OKF section 8).
 
 - **Search before you derive.** `okfw search "<query>"` / `okfw_search`. The
   wiki holds what the code does not say — why things are built the way they

@@ -7,8 +7,7 @@ import (
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/gitctx"
 	"okfw/cli/internal/graph"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
+	"okfw/cli/internal/search"
 	"okfw/cli/internal/templates"
 	"os"
 	"os/exec"
@@ -185,17 +184,8 @@ wiki exists.`,
 				return nil
 			})
 
-			indexed := "no"
-			if _, err := os.Stat(cfg.IndexPath); err == nil {
-				indexed = "yes"
-			}
-			graphed := "no"
-			if _, err := os.Stat(filepath.Join(cfg.RootPath, cfg.GraphPath)); err == nil {
-				graphed = "yes"
-			}
-
 			fmt.Printf("Connected: %s\n", cfg.RootPath)
-			fmt.Printf("  concepts: %d | search index: %s | graph db: %s\n", concepts, indexed, graphed)
+			fmt.Printf("  concepts: %d\n", concepts)
 			return nil
 		},
 	}
@@ -264,67 +254,6 @@ Use with: okfw create "title" --template <name>`,
 		},
 	}
 
-	var indexCmd = &cobra.Command{
-		Use:   "index [file_path]",
-		Short: "Index a concept for searching",
-		Long: `Index a single concept file or all concepts in a directory.
-
-If given a file, indexes that file.
-If given a directory, indexes all .md files recursively.`,
-		Args: cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-			if err != nil {
-				return fmt.Errorf("failed to open index: %w", err)
-			}
-			defer idx.Close()
-
-			path := args[0]
-			info, err := os.Stat(path)
-			if err != nil {
-				return fmt.Errorf("failed to stat path: %w", err)
-			}
-
-			var files []string
-			if info.IsDir() {
-				err = filepath.Walk(path, func(p string, fi os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					if fi.IsDir() && bundle.SkipWalkDir(path, p, fi.Name()) {
-						return filepath.SkipDir
-					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
-						files = append(files, p)
-					}
-					return nil
-				})
-				if err != nil {
-					return fmt.Errorf("failed to walk directory: %w", err)
-				}
-			} else {
-				files = []string{path}
-			}
-
-			indexed := 0
-			for _, filePath := range files {
-				if err := bundle.IndexFile(idx, filePath); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to index %s: %v\n", filePath, err)
-					continue
-				}
-				indexed++
-			}
-
-			fmt.Printf("Indexed %d file(s)\n", indexed)
-			return nil
-		},
-	}
-
 	var typeFlag string
 	var kindFlag string
 	var staleFlag bool
@@ -352,13 +281,7 @@ Examples:
 				return err
 			}
 
-			idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-			if err != nil {
-				return fmt.Errorf("failed to open index: %w", err)
-			}
-			defer idx.Close()
-
-			opts := index.SearchOptions{
+			opts := search.Options{
 				Project:      projectFlag,
 				Type:         typeFlag,
 				Kind:         kindFlag,
@@ -374,19 +297,19 @@ Examples:
 				opts.Query = strings.Join(args, " ")
 			}
 
-			results, total, err := index.Search(idx, opts)
+			results, total, err := search.Search(cfg.RootPath, opts)
 			if err != nil {
 				return fmt.Errorf("search failed: %w", err)
 			}
 
 			if jsonFlag {
-				jsonOutput, err := index.SearchResultsToJSON(results)
+				jsonOutput, err := search.ResultsToJSON(results)
 				if err != nil {
 					return fmt.Errorf("failed to format JSON: %w", err)
 				}
 				fmt.Println(jsonOutput)
 			} else {
-				fmt.Print(index.FormatSearchResultsFrom(results, total, offsetFlag))
+				fmt.Print(search.FormatResultsFrom(results, total, offsetFlag))
 			}
 
 			return nil
@@ -395,7 +318,6 @@ Examples:
 
 	var graphStartFlag string
 	var graphDepthFlag int
-	var graphSyncFlag bool
 	var graphASCIIFlag bool
 
 	var graphCmd = &cobra.Command{
@@ -409,9 +331,8 @@ markdown. Use --ascii for a plain-text tree that reads directly in a terminal.
 The diagram goes to stdout so it can be piped; a summary line
 (N nodes, M edges) goes to stderr so it does not pollute piped output.
 
-If no path is given, the discovered wiki root is used.
-When a graph database (.graph.db) exists, it is used for fast queries.
-Use --sync to force a fresh sync before querying.
+If no path is given, the discovered wiki root is used. The graph is built
+from the concepts on disk each time, so it always matches them.
 
 Examples:
   okfw graph                             # Mermaid diagram from the wiki root
@@ -419,8 +340,7 @@ Examples:
   okfw graph path/to/dir                 # All concepts in a directory
   okfw graph --start 20260213-abc-123    # Centered on a specific concept
   okfw graph --depth 3                   # Traverse up to 3 hops from start
-  okfw graph --limit 20                  # Show up to 20 nodes (default: 10)
-  okfw graph --sync                      # Sync graph DB before querying`,
+  okfw graph --limit 20                  # Show up to 20 nodes (default: 10)`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
@@ -433,43 +353,15 @@ Examples:
 				path = args[0]
 			}
 
-			// Try to use persistent graph store.
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			_, dbErr := os.Stat(dbPath)
-			useStore := dbErr == nil || graphSyncFlag
-
-			var nodes []*graph.Node
-			var edges []graph.Edge
-			if useStore {
-				store, err := graphdb.Open(dbPath)
-				if err != nil {
-					return err
-				}
-				defer store.Close()
-
-				if graphSyncFlag || os.IsNotExist(dbErr) {
-					result, err := store.Sync(path)
-					if err != nil {
-						return fmt.Errorf("graph sync failed: %w", err)
-					}
-					fmt.Fprintf(os.Stderr, "Synced: %d added, %d updated, %d deleted\n", result.Added, result.Updated, result.Deleted)
-				}
-
-				nodes, edges, err = queryStore(store, graphStartFlag, graphLimitFlag, graphDepthFlag)
-				if err != nil {
-					return err
-				}
-			} else {
-				g, err := buildGraphFromPath(path, cfg.RootPath)
-				if err != nil {
-					return err
-				}
-				nodes, err = queryGraph(g, graphStartFlag, graphLimitFlag, graphDepthFlag)
-				if err != nil {
-					return err
-				}
-				edges = g.GetEdges(nodes)
+			g, err := bundle.LoadGraphFrom(path, cfg.RootPath)
+			if err != nil {
+				return err
 			}
+			nodes, err := queryGraph(g, graphStartFlag, graphLimitFlag, graphDepthFlag)
+			if err != nil {
+				return err
+			}
+			edges := g.GetEdges(nodes)
 
 			if graphASCIIFlag {
 				fmt.Println(graph.GenerateASCIITree(nodes, edges, graphStartFlag))
@@ -526,8 +418,7 @@ Examples:
 		Short: "Find all notes that link to a concept",
 		Long: `Find all concepts that contain links to the specified concept.
 
-Links are detected in the format [[id]] or [[id|title]].
-When a graph database exists, uses O(1) indexed lookup instead of filesystem scan.
+Links are vanilla markdown links to bundle-relative or relative paths.
 
 Examples:
   okfw backlinks 202602131045           # Find backlinks by ID
@@ -566,88 +457,21 @@ Examples:
 			}
 
 			var backlinks []Backlink
-
-			// Try indexed lookup via graph store.
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			if _, err := os.Stat(dbPath); err == nil {
-				store, err := graphdb.Open(dbPath)
-				if err != nil {
-					return err
-				}
-				defer store.Close()
-
-				nodes, err := store.GetBacklinks(targetID)
-				if err != nil {
-					return fmt.Errorf("backlink query failed: %w", err)
-				}
-				for _, n := range nodes {
-					backlinks = append(backlinks, Backlink{
-						ID:       n.ID,
-						Title:    n.Title,
-						Project:  n.Project,
-						FilePath: n.FilePath,
-					})
-				}
-				// Get target title if we don't have it yet.
-				if targetTitle == "" {
-					if target, _ := store.GetNode(targetID); target != nil {
-						targetTitle = target.Title
-					}
-				}
-			} else {
-				// Fall back to filesystem scan.
-				searchPath := cfg.RootPath
-				if searchPath == "" {
-					searchPath, _ = os.Getwd()
-				}
-				if _, err := os.Stat(searchPath); os.IsNotExist(err) {
-					searchPath, _ = os.Getwd()
-				}
-
-				var files []string
-				err = filepath.Walk(searchPath, func(p string, fi os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					if fi.IsDir() && bundle.SkipWalkDir(searchPath, p, fi.Name()) {
-						return filepath.SkipDir
-					}
-					if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
-						files = append(files, p)
-					}
-					return nil
+			g, err := bundle.LoadGraph(cfg.RootPath)
+			if err != nil {
+				return err
+			}
+			for _, n := range g.Backlinks(targetID) {
+				backlinks = append(backlinks, Backlink{
+					ID:       n.ID,
+					Title:    n.Title,
+					Project:  n.Project,
+					FilePath: n.FilePath,
 				})
-				if err != nil {
-					return fmt.Errorf("failed to walk directory: %w", err)
-				}
-
-				for _, filePath := range files {
-					content, err := os.ReadFile(filePath)
-					if err != nil {
-						continue
-					}
-
-					body := config.ExtractBody(content)
-					absPath, _ := filepath.Abs(filePath)
-					links := config.ResolveBodyLinkIDs(body, absPath, searchPath)
-
-					for _, linkID := range links {
-						if linkID == targetID {
-							z, err := config.ParseFrontmatter(content)
-							if err != nil {
-								continue
-							}
-
-							absPath, _ := filepath.Abs(filePath)
-							backlinks = append(backlinks, Backlink{
-								ID:       z.ID,
-								Title:    z.Title,
-								Project:  z.Project,
-								FilePath: absPath,
-							})
-							break
-						}
-					}
+			}
+			if targetTitle == "" {
+				if target := g.GetNode(targetID); target != nil {
+					targetTitle = target.Title
 				}
 			}
 
@@ -711,29 +535,13 @@ Examples:
 				path = args[0]
 			}
 
-			// Use the persistent graph store when it exists (indexed backlink
-			// lookups); otherwise fall back to a filesystem walk.
-			var nodes []*graph.Node
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			if _, dbErr := os.Stat(dbPath); dbErr == nil {
-				store, err := graphdb.Open(dbPath)
-				if err != nil {
-					return err
-				}
-				defer store.Close()
-				nodes, _, err = queryStore(store, exportStartFlag, exportLimitFlag, exportDepthFlag)
-				if err != nil {
-					return err
-				}
-			} else {
-				g, err := buildGraphFromPath(path, cfg.RootPath)
-				if err != nil {
-					return err
-				}
-				nodes, err = queryGraph(g, exportStartFlag, exportLimitFlag, exportDepthFlag)
-				if err != nil {
-					return err
-				}
+			g, err := bundle.LoadGraphFrom(path, cfg.RootPath)
+			if err != nil {
+				return err
+			}
+			nodes, err := queryGraph(g, exportStartFlag, exportLimitFlag, exportDepthFlag)
+			if err != nil {
+				return err
 			}
 
 			// Map each exported concept's bundle-relative path to its ID so that
@@ -813,7 +621,6 @@ Examples:
 	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific concept ID")
 	graphCmd.Flags().IntVar(&graphDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
 	graphCmd.Flags().BoolVar(&graphASCIIFlag, "ascii", false, "Render a plain-text tree instead of Mermaid")
-	graphCmd.Flags().BoolVar(&graphSyncFlag, "sync", false, "Sync graph database before querying")
 
 	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of notes to export")
 	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Start export from a specific concept ID")
@@ -1081,80 +888,6 @@ Examples:
 		},
 	}
 
-	// --- graph-sync command ---
-	var graphSyncValidateFlag bool
-
-	var graphSyncCmd = &cobra.Command{
-		Use:   "graph-sync [path]",
-		Short: "Sync the persistent graph database from filesystem",
-		Long: `Walk the bundle directory and synchronize the persistent graph database.
-
-Adds new notes, updates changed notes, and purges deleted notes.
-The graph database enables fast O(1) backlink lookups and indexed traversals.
-
-Examples:
-  okfw graph-sync                    # Sync from configured root
-  okfw graph-sync path/to/dir  # Sync from explicit path
-  okfw graph-sync --validate         # Sync and validate edge integrity`,
-		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
-			if err != nil {
-				return err
-			}
-
-			path := cfg.RootPath
-			if len(args) > 0 {
-				path = args[0]
-			}
-
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.Open(dbPath)
-			if err != nil {
-				return err
-			}
-			defer store.Close()
-
-			// Ensure graph DB is gitignored.
-			ensureGitignore(cfg.RootPath, cfg.GraphPath)
-
-			result, err := store.Sync(path)
-			if err != nil {
-				return fmt.Errorf("sync failed: %w", err)
-			}
-
-			fmt.Printf("Graph synced: %d total, %d added, %d updated, %d deleted\n",
-				result.Total, result.Added, result.Updated, result.Deleted)
-
-			// The graph purges deleted concepts; the search index has no
-			// equivalent, so prune it here or a removed concept keeps turning
-			// up in `okfw search` forever.
-			pruned, err := bundle.PruneIndex(cfg)
-			if err != nil {
-				return fmt.Errorf("failed to prune the search index: %w", err)
-			}
-			if pruned > 0 {
-				fmt.Printf("Search index pruned: %d stale entr%s removed\n",
-					pruned, map[bool]string{true: "y", false: "ies"}[pruned == 1])
-			}
-
-			if result.Dangling > 0 {
-				fmt.Printf("Warning: %d dangling edge(s) detected\n", result.Dangling)
-			}
-
-			if graphSyncValidateFlag {
-				integrity, err := store.ValidateIntegrity()
-				if err != nil {
-					return fmt.Errorf("integrity check failed: %w", err)
-				}
-				fmt.Print(integrity.String())
-			}
-
-			return nil
-		},
-	}
-	graphSyncCmd.Flags().BoolVar(&graphSyncValidateFlag, "validate", false, "Run CUE edge validation and report integrity issues")
-
 	// --- graph-query command ---
 	var graphQueryDepthFlag int
 	var graphQueryLimitFlag int
@@ -1184,17 +917,11 @@ Examples:
 				return err
 			}
 
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.OpenExisting(dbPath)
+			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			defer store.Close()
-
-			nodes, err := store.GetBacklinks(args[0])
-			if err != nil {
-				return err
-			}
+			nodes := g.Backlinks(args[0])
 
 			if graphQueryJSONFlag {
 				data, _ := json.Marshal(nodes)
@@ -1223,22 +950,20 @@ Examples:
 				return err
 			}
 
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.OpenExisting(dbPath)
+			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			defer store.Close()
-
-			nodes, edges, err := store.GetCluster(args[0], graphQueryDepthFlag, graphQueryLimitFlag)
-			if err != nil {
-				return err
+			if g.GetNode(args[0]) == nil {
+				return fmt.Errorf("node %q not found", args[0])
 			}
+			nodes := g.FindConnected(args[0], graphQueryLimitFlag, graphQueryDepthFlag)
+			edges := g.GetEdges(nodes)
 
 			if graphQueryJSONFlag {
 				result := struct {
-					Nodes []graphdb.NodeRecord `json:"nodes"`
-					Edges []graphdb.EdgeRecord `json:"edges"`
+					Nodes []*graph.Node `json:"nodes"`
+					Edges []graph.Edge  `json:"edges"`
 				}{Nodes: nodes, Edges: edges}
 				data, _ := json.Marshal(result)
 				fmt.Println(string(data))
@@ -1264,17 +989,11 @@ Examples:
 				return err
 			}
 
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.OpenExisting(dbPath)
+			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			defer store.Close()
-
-			nodes, err := store.GetByTag(args[0])
-			if err != nil {
-				return err
-			}
+			nodes := g.ByTag(args[0])
 
 			if graphQueryJSONFlag {
 				data, _ := json.Marshal(nodes)
@@ -1303,17 +1022,11 @@ Examples:
 				return err
 			}
 
-			dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-			store, err := graphdb.OpenExisting(dbPath)
+			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			defer store.Close()
-
-			edges, err := store.GetDanglingEdges()
-			if err != nil {
-				return err
-			}
+			edges := g.Dangling()
 
 			if graphQueryJSONFlag {
 				data, _ := json.Marshal(edges)
@@ -1323,7 +1036,7 @@ Examples:
 					fmt.Println("No dangling edges found")
 				} else {
 					for _, e := range edges {
-						fmt.Printf("  %s -[%s]-> %s (target not found)\n", e.From, e.Predicate, e.To)
+						fmt.Printf("  %s -[%s]-> %s (target not found)\n", e.From, e.Label, e.To)
 					}
 					fmt.Printf("\nFound %d dangling edge(s)\n", len(edges))
 				}
@@ -1366,10 +1079,8 @@ Example client configuration (Claude Code):
 	rootCmd.AddCommand(indexMdCmd)
 	rootCmd.AddCommand(logCmd)
 	rootCmd.AddCommand(templatesCmd)
-	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(searchCmd)
 	rootCmd.AddCommand(graphCmd)
-	rootCmd.AddCommand(graphSyncCmd)
 	rootCmd.AddCommand(graphQueryCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(setProjectCmd)
@@ -1392,84 +1103,6 @@ Example client configuration (Claude Code):
 }
 
 // parseConceptForGraph parses a concept file and returns a graph node
-func parseConceptForGraph(filePath, bundleRoot string) (*graph.Node, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
-	}
-
-	z, err := config.ParseFrontmatter(content)
-	if err != nil {
-		return nil, err
-	}
-
-	// Validate this is a real concept (must have an ID)
-	if z.ID == "" {
-		return nil, fmt.Errorf("not a valid concept: no id field")
-	}
-
-	absPath, _ := filepath.Abs(filePath)
-
-	// Resolve vanilla markdown links in the body to target concept IDs.
-	body := config.ExtractBody(content)
-	links := config.ResolveBodyLinkIDs(body, absPath, bundleRoot)
-
-	return &graph.Node{
-		ID:       z.ID,
-		Title:    z.Title,
-		FilePath: absPath,
-		Project:  z.Project,
-		Parent:   z.Parent,
-		Links:    links,
-	}, nil
-}
-
-// buildGraphFromPath walks the directory for .md files (skipping hidden dirs and ephemeral/),
-// parses each as a concept, and returns a fully-built graph.
-func buildGraphFromPath(path, bundleRoot string) (*graph.Graph, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("failed to stat path %q: %w", path, err)
-	}
-
-	var files []string
-	if info.IsDir() {
-		err = filepath.Walk(path, func(p string, fi os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
-			if fi.IsDir() && bundle.SkipWalkDir(path, p, fi.Name()) {
-				return filepath.SkipDir
-			}
-			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
-				files = append(files, p)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("failed to walk directory: %w", err)
-		}
-	} else {
-		files = []string{path}
-	}
-
-	g := graph.New()
-	for _, filePath := range files {
-		node, err := parseConceptForGraph(filePath, bundleRoot)
-		if err != nil {
-			continue
-		}
-		g.AddNode(node)
-	}
-
-	if g.NodeCount() == 0 {
-		return nil, fmt.Errorf("no valid concepts found in %s", path)
-	}
-
-	g.BuildRelationships()
-	return g, nil
-}
-
 // runInit creates the .okfw wiki directory under target (a project root),
 // with a .gitignore for generated artifacts and an OKF root index.md.
 // A no-op with a message when the wiki already exists.
@@ -1485,8 +1118,6 @@ func runInit(target string) error {
 	}
 
 	gitignore := "# okfw generated artifacts\n" +
-		config.IndexDirName + "/\n" +
-		config.GraphDBName + "\n" +
 		"ephemeral/\n"
 	if err := os.WriteFile(filepath.Join(wikiDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("failed to write .gitignore: %w", err)
@@ -1520,43 +1151,6 @@ func queryGraph(g *graph.Graph, startID string, limit, depth int) ([]*graph.Node
 // node it uses the store's indexed cluster BFS (backlinks are O(1) lookups and
 // only the cluster is loaded); without one it must load the full graph to find
 // the most-connected starting node.
-func queryStore(store *graphdb.Store, startID string, limit, depth int) ([]*graph.Node, []graph.Edge, error) {
-	if startID != "" {
-		records, edgeRecords, err := store.GetCluster(startID, depth, limit)
-		if err != nil {
-			return nil, nil, err
-		}
-		nodes := make([]*graph.Node, 0, len(records))
-		for i := range records {
-			nr := &records[i]
-			nodes = append(nodes, &graph.Node{
-				ID:       nr.ID,
-				Title:    nr.Title,
-				FilePath: nr.FilePath,
-				Project:  nr.Project,
-				Parent:   nr.Parent,
-				Links:    nr.Links,
-			})
-		}
-		edges := make([]graph.Edge, 0, len(edgeRecords))
-		for _, e := range edgeRecords {
-			label := "link"
-			if e.Predicate == graphdb.PredicateChildOf {
-				label = "parent"
-			}
-			edges = append(edges, graph.Edge{From: e.From, To: e.To, Label: label})
-		}
-		return nodes, edges, nil
-	}
-
-	g, err := store.ToGraph()
-	if err != nil {
-		return nil, nil, err
-	}
-	nodes := g.FindAllConnected(limit, depth)
-	return nodes, g.GetEdges(nodes), nil
-}
-
 // prepareEphemeralDir wipes and recreates the ephemeral directory with a .gitignore.
 func prepareEphemeralDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {

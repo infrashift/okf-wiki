@@ -7,7 +7,7 @@ A fast, opinionated command-line tool for managing a local-first personal knowle
 ## Features
 
 - **CUE-validated schemas** - Frontmatter is validated against strict CUE schemas
-- **Bleve full-text search** - Fast, local search index with structured field queries
+- **Full-text search** - Scans and ranks the concepts; no index to build, so results always match the files
 - **Graph visualization** - ASCII tree showing note relationships
 - **Backlinks discovery** - Find all concepts that link to any concept
 - **Note templates** - Built-in templates for meetings, user stories, features, and more
@@ -95,10 +95,8 @@ The layout inside `.okfw/` is fixed:
 |------|-------------|
 | `*.md` (top level) | Concept markdown (subdirectories via `--path` or `--project`) |
 | `daily/YYYY/MM/` | Daily notes |
-| `.index/` | Bleve full-text search index (generated) |
-| `.graph.db` | Persistent graph database (generated) |
 | `ephemeral/` | Export scratch dir |
-| `.gitignore` | Ignores `.index/`, `.graph.db`, `ephemeral/` |
+| `.gitignore` | Ignores `ephemeral/` |
 
 Concept markdown is meant to be committed with the project; generated
 artifacts are gitignored.
@@ -152,9 +150,8 @@ okf-wiki/
 │   ├── cmd/okfw/        # CLI entry point
 │   ├── internal/
 │   │   ├── config/      # .okfw discovery and CUE schema validation
+│   │   ├── search/     # Scan-and-rank concept search
 │   │   ├── graph/       # Concept relationship graph
-│   │   ├── graphdb/     # Persistent graph store (bbolt)
-│   │   └── index/       # Bleve search index
 │   └── testdata/        # Test fixtures
 ├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload

@@ -26,8 +26,8 @@ import (
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
+	"okfw/cli/internal/graph"
+	"okfw/cli/internal/search"
 )
 
 const mcpProtocolVersion = "2024-11-05"
@@ -329,13 +329,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		a.Limit = 10
 	}
 
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return errResult(err)
-	}
-	defer idx.Close()
-
-	opts := index.SearchOptions{
+	opts := search.Options{
 		Query:        a.Q,
 		Project:      a.Project,
 		Kind:         a.Kind,
@@ -349,7 +343,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 	if a.Tag != "" {
 		opts.Tags = []string{a.Tag}
 	}
-	results, total, err := index.Search(idx, opts)
+	results, total, err := search.Search(cfg.RootPath, opts)
 	if err != nil {
 		return errResult(err)
 	}
@@ -697,17 +691,9 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		a.Limit = 10
 	}
 
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	_, statErr := os.Stat(dbPath)
-	store, err := graphdb.Open(dbPath)
+	g, err := bundle.LoadGraph(cfg.RootPath)
 	if err != nil {
 		return errResult(err)
-	}
-	defer store.Close()
-	if os.IsNotExist(statErr) {
-		if _, err := store.Sync(cfg.RootPath); err != nil {
-			return errResult(fmt.Errorf("graph sync failed: %w", err))
-		}
 	}
 
 	// backlinks/cluster take a concept ref; resolve paths to ids.
@@ -733,7 +719,7 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		}
 	}
 
-	toNodes := func(records []graphdb.NodeRecord) []mcpNode {
+	toNodes := func(records []*graph.Node) []mcpNode {
 		nodes := make([]mcpNode, 0, len(records))
 		for _, n := range records {
 			nodes = append(nodes, mcpNode{ID: n.ID, Title: n.Title, Path: relPath(cfg, n.FilePath)})
@@ -743,9 +729,9 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 	// nodeEnvelope caps a node list and says what it withheld. The limit was
 	// advertised in the schema and applied to exactly one of the four actions,
 	// so three were unbounded while claiming a default of 10. Capping here
-	// rather than in graphdb keeps the store's signatures — also used by
-	// `okfw graph-query` and the Neovim plugin — out of it.
-	nodeEnvelope := func(records []graphdb.NodeRecord) map[string]interface{} {
+	// rather than in the graph package keeps the query signatures — also used
+	// by `okfw graph-query` and the Neovim plugin — out of it.
+	nodeEnvelope := func(records []*graph.Node) map[string]interface{} {
 		total := len(records)
 		out := map[string]interface{}{"total": total}
 		if total > a.Limit {
@@ -764,16 +750,13 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 
 	switch a.Action {
 	case "backlinks":
-		records, err := store.GetBacklinks(id)
-		if err != nil {
-			return errResult(err)
-		}
-		return jsonResult(nodeEnvelope(records))
+		return jsonResult(nodeEnvelope(g.Backlinks(id)))
 	case "cluster":
-		records, edges, err := store.GetCluster(id, a.Depth, a.Limit)
-		if err != nil {
-			return errResult(err)
+		if g.GetNode(id) == nil {
+			return errResult(fmt.Errorf("node %q not found", id))
 		}
+		records := g.FindConnected(id, a.Limit, a.Depth)
+		edges := g.GetEdges(records)
 		out := nodeEnvelope(records)
 		es := make([]edge, 0, len(edges))
 		for _, e := range edges {
@@ -785,16 +768,9 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		if a.Ref == "" {
 			return errResult(fmt.Errorf("ref (tag name) is required for tag"))
 		}
-		records, err := store.GetByTag(a.Ref)
-		if err != nil {
-			return errResult(err)
-		}
-		return jsonResult(nodeEnvelope(records))
+		return jsonResult(nodeEnvelope(g.ByTag(a.Ref)))
 	case "dangling":
-		edges, err := store.GetDanglingEdges()
-		if err != nil {
-			return errResult(err)
-		}
+		edges := g.Dangling()
 		total := len(edges)
 		if total > a.Limit {
 			edges = edges[:a.Limit]
@@ -804,7 +780,7 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 			// The source concept's path, so a dangling link can be opened and
 			// fixed without a second lookup per row.
 			from := edge{From: e.From, To: e.To}
-			if n, err := store.GetNode(e.From); err == nil && n != nil {
+			if n := g.GetNode(e.From); n != nil {
 				from.FromPath = relPath(cfg, n.FilePath)
 			}
 			es = append(es, from)

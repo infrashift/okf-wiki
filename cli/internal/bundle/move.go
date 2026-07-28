@@ -8,13 +8,11 @@ import (
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graph"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
 )
 
 // Relocating and removing concepts. Both operations have to touch four things
 // that can otherwise drift apart: the file, the search index, the graph
-// database, and the index.md listings.
+// and the index.md listings.
 
 // RelHref returns the relative slash path that reaches target from fromDir, both
 // bundle-relative. Used to keep a relative markdown link pointing at the same
@@ -126,7 +124,7 @@ type DeleteResult struct {
 }
 
 // DeleteConcept removes a concept and everything derived from it: its search
-// index entry, its graph node, and its line in the index.md listings.
+// line in the index.md listings.
 //
 // Inbound links are reported, not repaired. OKF section 6.1 requires consumers to
 // tolerate a link whose target does not exist — it "may simply represent
@@ -176,42 +174,7 @@ func DeleteConceptFile(cfg *config.Config, absPath string) (*DeleteResult, error
 		return nil, err
 	}
 
-	if res.ID != "" {
-		if err := dropFromIndex(cfg, res.ID); err != nil {
-			return nil, err
-		}
-		if err := purgeFromGraph(cfg, res.ID); err != nil {
-			return nil, err
-		}
-	}
 	return res, nil
-}
-
-// dropFromIndex removes a concept from the search index, if one exists.
-func dropFromIndex(cfg *config.Config, id string) error {
-	if _, err := os.Stat(cfg.IndexPath); err != nil {
-		return nil
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
-	return index.DeleteDocument(idx, id)
-}
-
-// purgeFromGraph removes a concept's node from the graph database, if one exists.
-func purgeFromGraph(cfg *config.Config, id string) error {
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil
-	}
-	store, err := graphdb.Open(dbPath)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	return store.PurgeNode(id)
 }
 
 // MoveResult reports what a move touched.
@@ -341,12 +304,9 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		return nil, err
 	}
 
-	// 3. Re-sync everything whose content or location changed. The moved concept
-	//    keeps its id, so re-indexing overwrites the stale path in place.
+	// 3. Refresh the listings for everything whose content or location changed.
+	//    Nothing else needs re-syncing: search and the link graph read the files.
 	if err := AutoSync(cfg, newAbs); err != nil {
-		return nil, err
-	}
-	if err := syncGraphRemoval(cfg, oldAbs); err != nil {
 		return nil, err
 	}
 	for _, rel := range res.Rewrote {
@@ -355,21 +315,6 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		}
 	}
 	return res, nil
-}
-
-// syncGraphRemoval clears any graph node still recorded at a path that no longer
-// exists. Harmless when the node was already re-keyed by AutoSync.
-func syncGraphRemoval(cfg *config.Config, absPath string) error {
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil
-	}
-	store, err := graphdb.Open(dbPath)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	return store.SyncFile(absPath, cfg.RootPath)
 }
 
 // ReplaceBody swaps a concept's markdown body, leaving every byte of the

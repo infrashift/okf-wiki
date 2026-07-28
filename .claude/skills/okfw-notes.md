@@ -17,7 +17,7 @@ command discovers the wiki by searching upward from the current working
 directory (like git finds `.git`) and errors with init advice when none is
 found. `okfw connect` verifies the wiki and prints a summary; `okfw root`
 prints the discovered `.okfw` path. Generated artifacts inside `.okfw/`:
-`.index/` (search index), `.graph.db` (graph database), `ephemeral/` (exports)
+`ephemeral/` (exports) — the only generated directory
 — all gitignored; concept markdown is committed with the project.
 
 ## Concept Format
@@ -70,7 +70,8 @@ okfw templates
 
 ## Searching
 
-Requires index: `okfw index` (the wiki is discovered automatically) or `okfw index path/to/.okfw`
+No index to build: search scans the concepts and ranks them, so a concept is
+findable the moment it is written and gone the moment it is deleted.
 
 ```bash
 # Full-text search
@@ -117,8 +118,8 @@ okfw daily --list --week      # This week's daily notes
 
 ## Reorganizing and removing
 
-Use these rather than `mv`/`rm`: they keep the search index, graph database, and
-`index.md` listings in step, and repair links.
+Use these rather than `mv`/`rm`: they repair links at both ends and refresh the
+`index.md` listings.
 
 ```bash
 okfw move <ref> archive/              # into a directory (id is preserved)

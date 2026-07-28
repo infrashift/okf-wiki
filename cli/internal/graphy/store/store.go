@@ -633,6 +633,11 @@ func (s *Store) DeleteExport(nodeID string) error {
 }
 
 // EachExport iterates all export records keyed by node id.
+//
+// The callback runs inside a bbolt read transaction, so it must not call
+// PutExport or DeleteExport: opening a write transaction while this one is
+// held deadlocks with no error and no timeout. Collect the keys you want to
+// change and write them after EachExport returns.
 func (s *Store) EachExport(fn func(nodeID string, rec ExportRecord) error) error {
 	return s.db.View(func(tx *bolt.Tx) error {
 		return tx.Bucket([]byte("exports")).ForEach(func(k, v []byte) error {

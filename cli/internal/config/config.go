@@ -22,15 +22,11 @@ const WikiDirName = ".okfw"
 // Fixed locations inside the wiki directory. Storage is standardized — there
 // is no user configuration.
 const (
-	IndexDirName = ".index"    // Bleve search index
-	GraphDBName  = ".graph.db" // bbolt graph database
 )
 
 // Config carries the resolved paths of a discovered wiki.
 type Config struct {
 	RootPath  string // absolute path of the .okfw directory (the OKF bundle root)
-	IndexPath string // absolute path of the Bleve index
-	GraphPath string // graph database path, relative to RootPath
 }
 
 // ErrNoWiki is returned by Discover when no .okfw directory is found.
@@ -46,8 +42,6 @@ func (e *ErrNoWiki) Error() string {
 func ConfigFor(wikiDir string) *Config {
 	return &Config{
 		RootPath:  wikiDir,
-		IndexPath: filepath.Join(wikiDir, IndexDirName),
-		GraphPath: GraphDBName,
 	}
 }
 

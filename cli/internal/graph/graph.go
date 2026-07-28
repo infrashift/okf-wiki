@@ -17,6 +17,7 @@ type Node struct {
 	Parent   string   // Optional parent concept ID
 	Children []string // Child concept IDs
 	Links    []string // Target concept IDs resolved from markdown links in the body
+	Tags     []string // Frontmatter tags, for tag queries
 }
 
 // Graph represents the bundle link graph.

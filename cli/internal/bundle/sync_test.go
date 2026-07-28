@@ -8,22 +8,7 @@ import (
 	"testing"
 
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
 )
-
-// fakeIndexer records what IndexFile hands to bleve without building an index.
-type fakeIndexer struct {
-	docs map[string]*index.ConceptDoc
-}
-
-func (f *fakeIndexer) Index(id string, doc interface{}) error {
-	if f.docs == nil {
-		f.docs = map[string]*index.ConceptDoc{}
-	}
-	f.docs[id] = doc.(*index.ConceptDoc)
-	return nil
-}
 
 func writeConcept(t *testing.T, root, rel, content string) string {
 	t.Helper()
@@ -37,79 +22,6 @@ func writeConcept(t *testing.T, root, rel, content string) string {
 	return p
 }
 
-// --- IndexFile ---
-
-func TestIndexFileMapsFrontmatterToDoc(t *testing.T) {
-	root := t.TempDir()
-	const id = "019680f0-7e00-7abc-8def-1234567890ab"
-	p := writeConcept(t, root, "alpha--0001.md", "---\n"+
-		"id: \""+id+"\"\n"+
-		"title: \"Alpha\"\n"+
-		"type: \"note\"\n"+
-		"kind: \"issue\"\n"+
-		"description: \"A summary.\"\n"+
-		"project: \"proj\"\n"+
-		"tags:\n  - \"x\"\n"+
-		"created: \"2026-02-13T10:45:00Z\"\n"+
-		"timestamp: \"2026-02-13T10:45:00Z\"\n"+
-		"status: \"draft\"\n"+
-		"stale_after: \"2026-09-01\"\n"+
-		"---\n\nBody words here.\n")
-
-	f := &fakeIndexer{}
-	if err := IndexFile(f, p); err != nil {
-		t.Fatalf("IndexFile: %v", err)
-	}
-	doc := f.docs[id]
-	if doc == nil {
-		t.Fatalf("nothing indexed under %q; got %v", id, f.docs)
-	}
-	if doc.Title != "Alpha" || doc.Type != "note" || doc.Kind != "issue" {
-		t.Errorf("title/type/kind = %q/%q/%q", doc.Title, doc.Type, doc.Kind)
-	}
-	if doc.Description != "A summary." || doc.Project != "proj" {
-		t.Errorf("description/project = %q/%q", doc.Description, doc.Project)
-	}
-	if doc.Status != "draft" || doc.StaleAfter != "2026-09-01" {
-		t.Errorf("status/stale_after = %q/%q", doc.Status, doc.StaleAfter)
-	}
-	if !strings.Contains(doc.Body, "Body words here.") {
-		t.Errorf("body = %q", doc.Body)
-	}
-	if doc.FilePath != p {
-		t.Errorf("file path = %q, want %q", doc.FilePath, p)
-	}
-}
-
-// Notes written before `type` existed carry only `kind`; the indexed type falls
-// back to it so they stay filterable.
-func TestIndexFileFallsBackToKindForLegacyType(t *testing.T) {
-	root := t.TempDir()
-	const id = "019680f0-7e00-7abc-8def-1234567890ab"
-	p := writeConcept(t, root, "legacy--0001.md", "---\n"+
-		"id: \""+id+"\"\n"+
-		"title: \"Legacy\"\n"+
-		"kind: \"daily-note\"\n"+
-		"tags: []\n"+
-		"created: \"2026-02-13T10:45:00Z\"\n"+
-		"timestamp: \"2026-02-13T10:45:00Z\"\n"+
-		"---\n\nBody.\n")
-	f := &fakeIndexer{}
-	if err := IndexFile(f, p); err != nil {
-		t.Fatalf("IndexFile: %v", err)
-	}
-	if got := f.docs[id].Type; got != "daily-note" {
-		t.Errorf("Type = %q, want the kind fallback \"daily-note\"", got)
-	}
-}
-
-func TestIndexFileRejectsUnparseableFrontmatter(t *testing.T) {
-	root := t.TempDir()
-	p := writeConcept(t, root, "bad.md", "no frontmatter at all\n")
-	if err := IndexFile(&fakeIndexer{}, p); err == nil {
-		t.Error("expected an error for a file without frontmatter")
-	}
-}
 
 // --- WriteIndexFiles ---
 
@@ -238,84 +150,28 @@ func TestWriteIndexFilesIgnoresUnparseableAndHidden(t *testing.T) {
 
 // --- AutoSync ---
 
-func TestAutoSyncWithoutGraphDB(t *testing.T) {
+// TestAutoSyncRefreshesListingsOnly: AutoSync used to write a Bleve document
+// and a bbolt node as well. Both are gone, so the one thing it still owes the
+// bundle is the OKF index.md listing — and it must not create any other state.
+func TestAutoSyncRefreshesListingsOnly(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.ConfigFor(root)
 	p := writeConcept(t, root, "alpha--0001.md", GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "Alpha", "", nil))
 
-	// No .graph.db exists: AutoSync must index, refresh index.md, and not error.
 	if err := AutoSync(cfg, p); err != nil {
 		t.Fatalf("AutoSync: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "index.md")); err != nil {
 		t.Errorf("AutoSync should have written index.md: %v", err)
 	}
-	if _, err := os.Stat(cfg.IndexPath); err != nil {
-		t.Errorf("AutoSync should have created the search index: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(root, cfg.GraphPath)); err == nil {
-		t.Error("AutoSync must not create a graph database that did not exist")
-	}
-}
-
-func TestAutoSyncUpdatesExistingGraphDB(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.ConfigFor(root)
-	const id = "019680f0-7e00-7abc-8def-100000000000"
-	p := writeConcept(t, root, "alpha--0001.md", GenerateBasicNote(id, "Alpha", "", nil))
-
-	// Create the graph database so AutoSync takes the syncing branch.
-	store, err := graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatalf("graphdb.Open: %v", err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := AutoSync(cfg, p); err != nil {
-		t.Fatalf("AutoSync: %v", err)
-	}
-
-	store, err = graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	node, err := store.GetNode(id)
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
-	if node == nil || node.Title != "Alpha" {
-		t.Errorf("AutoSync did not record the node in the graph: %+v", node)
+	for _, gone := range []string{".index", ".graph.db"} {
+		if _, err := os.Stat(filepath.Join(root, gone)); err == nil {
+			t.Errorf("AutoSync created %s; derived stores were removed", gone)
+		}
 	}
 }
 
-func TestAutoIndexMakesConceptSearchable(t *testing.T) {
-	root := t.TempDir()
-	cfg := config.ConfigFor(root)
-	p := writeConcept(t, root, "findme--0001.md",
-		GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "Findable Title", "", nil))
 
-	if err := AutoIndex(cfg, p); err != nil {
-		t.Fatalf("AutoIndex: %v", err)
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer idx.Close()
-	results, total, err := index.Search(idx, index.SearchOptions{Query: "Findable"})
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if total != 1 || len(results) != 1 {
-		t.Fatalf("total=%d results=%d, want 1", total, len(results))
-	}
-	if results[0].Title != "Findable Title" {
-		t.Errorf("title = %q", results[0].Title)
-	}
-}
 
 // Emptying a directory used to leave its generated listing behind, still naming
 // the concepts that had been there.
@@ -401,141 +257,99 @@ func TestWriteIndexFilesKeepsTheRootListing(t *testing.T) {
 	}
 }
 
-// TestIndexFileCarriesTheGraphyNodeID: a generated concept records the code
-// entity it documents, and indexing it as a keyword is what makes the reverse
-// bridge (concept → graph node) a lookup rather than a full-text guess.
-func TestIndexFileCarriesTheGraphyNodeID(t *testing.T) {
-	root := t.TempDir()
-	p := writeConcept(t, root, "graphy/proj/alpha--019fa4c27a5d.md", `---
-id: "019fa4c2-7a5d-7851-9c72-372f3a48473f"
-title: "Alpha"
-type: "code-function"
-tags:
-  - "graphy"
-created: "2026-07-27T00:00:00Z"
-timestamp: "2026-07-27T00:00:00Z"
-graphy:
-  node_id: "go:function:a.go#Alpha"
-  entity: "function"
----
 
-# Alpha
-`)
-	f := &fakeIndexer{}
-	if err := IndexFile(f, p); err != nil {
-		t.Fatal(err)
-	}
-	doc := f.docs["019fa4c2-7a5d-7851-9c72-372f3a48473f"]
-	if doc == nil {
-		t.Fatalf("concept was not indexed: %#v", f.docs)
-	}
-	if doc.GraphyNodeID != "go:function:a.go#Alpha" {
-		t.Errorf("GraphyNodeID = %q, want the node id from frontmatter", doc.GraphyNodeID)
-	}
-}
 
-// TestIndexFileLeavesGraphyNodeIDEmptyForHandWrittenConcepts: the field is an
-// extension, and an ordinary concept must not acquire one.
-func TestIndexFileLeavesGraphyNodeIDEmptyForHandWrittenConcepts(t *testing.T) {
-	root := t.TempDir()
-	p := writeConcept(t, root, "note.md", `---
-id: "019fa4c2-7a5d-7851-9c72-372f3a48473e"
-title: "Hand written"
-type: "note"
-tags: []
-created: "2026-07-27T00:00:00Z"
-timestamp: "2026-07-27T00:00:00Z"
----
 
-# Hand written
-`)
-	f := &fakeIndexer{}
-	if err := IndexFile(f, p); err != nil {
-		t.Fatal(err)
-	}
-	doc := f.docs["019fa4c2-7a5d-7851-9c72-372f3a48473e"]
-	if doc == nil {
-		t.Fatalf("concept was not indexed: %#v", f.docs)
-	}
-	if doc.GraphyNodeID != "" {
-		t.Errorf("GraphyNodeID = %q, want empty", doc.GraphyNodeID)
-	}
-}
 
-// TestIndexFilesIndexesEveryFileInOnePass: the bulk path a large export needs,
-// where AutoIndex would reopen Bleve once per concept.
-func TestIndexFilesIndexesEveryFileInOnePass(t *testing.T) {
+
+// TestWriteIndexFilesSummarizesLargeDirectories: OKF section 8 gives index.md
+// one job — showing what is available *before* opening documents — and a
+// listing that names every concept stops doing it exactly when the directory
+// is big enough for the question to matter. A graphy export put 901 concepts
+// in one directory and produced a 28,000-token "preview" of concepts averaging
+// 1,200 tokens each.
+func TestWriteIndexFilesSummarizesLargeDirectories(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.ConfigFor(root)
-	var abs, want []string
+	// Two types, both past the per-type cap, and together past the enumerate
+	// limit so the grouped form is chosen.
+	for i := 0; i < 40; i++ {
+		id := fmt.Sprintf("019680f0-7e00-7abc-8def-1000000000%02d", i)
+		writeConcept(t, root, fmt.Sprintf("big/fn%02d--%02d.md", i, i),
+			conceptWithType(id, fmt.Sprintf("Func %02d", i), "code-function"))
+	}
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("019680f0-7e00-7abc-8def-2000000000%02d", i)
+		writeConcept(t, root, fmt.Sprintf("big/st%02d--%02d.md", i, i),
+			conceptWithType(id, fmt.Sprintf("Struct %02d", i), "code-struct"))
+	}
+	if _, err := WriteIndexFiles(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	got := readIndex(t, root, "big")
+
+	if !strings.Contains(got, "70 concepts, grouped by type") {
+		t.Errorf("no summary header:\n%s", got)
+	}
+	for _, want := range []string{"### code-function (40)", "### code-struct (30)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing group heading %q:\n%s", want, got)
+		}
+	}
+	// Withheld rows must be counted and must say how to get them.
+	for _, want := range []string{
+		"… 30 more — `okfw search --type code-function`",
+		"… 20 more — `okfw search --type code-struct`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing withheld notice %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "\n* ["); n != 2*indexPerTypeLimit {
+		t.Errorf("listed %d concepts, want %d (%d per type)", n, 2*indexPerTypeLimit, indexPerTypeLimit)
+	}
+	// The point of the exercise: the preview must be cheap.
+	if len(got) > 8000 {
+		t.Errorf("summarized index is %d bytes; it is meant to be a preview", len(got))
+	}
+}
+
+// TestWriteIndexFilesEnumeratesSmallDirectories: the summary form must not
+// kick in for ordinary hand-written directories, where naming every concept is
+// the more useful listing.
+func TestWriteIndexFilesEnumeratesSmallDirectories(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
 	for i := 0; i < 5; i++ {
-		id := fmt.Sprintf("019680f0-7e00-7abc-8def-10000000000%d", i)
-		abs = append(abs, writeConcept(t, root, fmt.Sprintf("c%d--000%d.md", i, i),
-			GenerateBasicNote(id, fmt.Sprintf("Concept %d", i), "", nil)))
-		want = append(want, id)
+		id := fmt.Sprintf("019680f0-7e00-7abc-8def-3000000000%02d", i)
+		writeConcept(t, root, fmt.Sprintf("small/n%02d--%02d.md", i, i),
+			conceptWithType(id, fmt.Sprintf("Note %02d", i), "note"))
 	}
-	if err := IndexFiles(cfg, abs); err != nil {
+	if _, err := WriteIndexFiles(cfg, root); err != nil {
 		t.Fatal(err)
 	}
-	got, err := IndexedIDs(cfg)
-	if err != nil {
-		t.Fatal(err)
+	got := readIndex(t, root, "small")
+	if strings.Contains(got, "grouped by type") {
+		t.Errorf("small directory was summarized:\n%s", got)
 	}
-	for _, id := range want {
-		if !got[id] {
-			t.Errorf("concept %s was not indexed", id)
+	for i := 0; i < 5; i++ {
+		if want := fmt.Sprintf("Note %02d", i); !strings.Contains(got, want) {
+			t.Errorf("missing %q from a full listing:\n%s", want, got)
 		}
 	}
 }
 
-// TestIndexedIDsOnABundleWithNoIndexIsEmptyNotAnError: a reconciling caller
-// must read "nothing is indexed", and must not create the index on the way
-// past — that is the same defect as opening a graph database to read it.
-func TestIndexedIDsOnABundleWithNoIndexIsEmptyNotAnError(t *testing.T) {
-	cfg := config.ConfigFor(t.TempDir())
-	got, err := IndexedIDs(cfg)
-	if err != nil {
-		t.Fatalf("IndexedIDs on an unindexed bundle errored: %v", err)
-	}
-	if len(got) != 0 {
-		t.Errorf("expected an empty set, got %d ids", len(got))
-	}
-	if _, err := os.Stat(cfg.IndexPath); err == nil {
-		t.Error("IndexedIDs created the search index it was only meant to read")
-	}
+func conceptWithType(id, title, typ string) string {
+	return "---\nid: \"" + id + "\"\ntitle: \"" + title + "\"\ntype: \"" + typ + "\"\n" +
+		"tags: []\ncreated: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n" +
+		"---\nbody\n"
 }
 
-// TestIndexFileClassifiesAGraphyConceptAsCode: a concept exported before
-// `kind: code` existed carries no kind key, and its free-form type
-// ("code-function") misses GetKind's legacy switch — so it indexed as "note"
-// and `okfw search --kind note` returned the whole code export.
-func TestIndexFileClassifiesAGraphyConceptAsCode(t *testing.T) {
-	root := t.TempDir()
-	p := writeConcept(t, root, "alpha--0001.md", `---
-id: "019680f0-7e00-7abc-8def-100000000000"
-title: "Alpha"
-type: "code-function"
-tags: []
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
-graphy:
-  node_id: "go:function:a.go#Alpha"
----
-
-# Alpha
-`)
-	f := &fakeIndexer{}
-	if err := IndexFile(f, p); err != nil {
+func readIndex(t *testing.T, root, dir string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(dir), "index.md"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	doc := f.docs["019680f0-7e00-7abc-8def-100000000000"]
-	if doc == nil {
-		t.Fatal("nothing was indexed")
-	}
-	if doc.Kind != "code" {
-		t.Errorf("kind = %q, want code", doc.Kind)
-	}
-	if doc.Type != "code-function" {
-		t.Errorf("type = %q, want the free-form type preserved", doc.Type)
-	}
+	return string(b)
 }

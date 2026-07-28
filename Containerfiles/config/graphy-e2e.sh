@@ -76,15 +76,15 @@ pass "tree-sitter extraction works in this image (CGo is linked correctly)"
 # ── Export into an okfw bundle and have okfw validate what graphy wrote.
 okfw init >/dev/null
 
-# A read-only graph query must not bring the graph database into existence.
-# bolt.Open creates the file, and every command that chooses between the store
-# and a filesystem scan by whether it exists then answered from the empty store
-# — permanently, from one query.
-if okfw graph-query dangling >/dev/null 2>&1; then
-	fail "okfw graph-query succeeded with no graph database"
-fi
-[ ! -f .okfw/.graph.db ] || fail "okfw graph-query created an empty graph database"
-pass "a read-only graph query does not create the graph database"
+# Graph queries read the concepts on disk. There is no store to create, so the
+# only thing to assert is the absence: a query must leave no derived state
+# behind. The removed bbolt store made this a live hazard — bolt.Open created
+# the file, and every command choosing between store and scan by whether it
+# existed then answered from the empty store, permanently, after one query.
+okfw graph-query dangling >/dev/null 2>&1 || true
+[ ! -e .okfw/.graph.db ] || fail "a graph query created a graph database"
+[ ! -e .okfw/.index ] || fail "a graph query created a search index"
+pass "graph queries create no derived state"
 # --min-degree 1 on a fixture this small: the default of 3 would export only the
 # few hub entities, leaving the bridge and traversal checks below with nothing
 # to resolve. It also exercises a non-default threshold.
@@ -106,12 +106,12 @@ pass "okfw validate --all accepts every graphy-generated concept"
 okfw validate --okf || fail "the exported bundle is not OKF-conformant"
 pass "the exported bundle is OKF-conformant"
 
-# The export must leave okfw's link graph usable. Without this the whole
-# exported tree — one `parent:` edge per concept — was invisible to okfw graph,
-# backlinks and graph-query until a graph-sync nothing mentioned.
-[ -f .okfw/.graph.db ] || fail "the export did not build the bundle's link graph"
-okfw graph-query dangling >/dev/null || fail "okfw graph-query cannot read the graph the export built"
-pass "the export builds a usable link graph"
+# The exported tree — one `parent:` edge per concept — must be traversable
+# immediately. It is read from the files, so no sync step stands between the
+# export and okfw graph, backlinks or graph-query.
+okfw graph-query dangling >/dev/null || fail "okfw graph-query cannot read the exported tree"
+[ ! -e .okfw/.graph.db ] || fail "the export created a graph database"
+pass "the exported tree is traversable with no sync step"
 
 # Code concepts must be separable from hand-written ones. Every exported concept
 # used to index as kind "note", so an agent asking for its notes got the whole
@@ -175,25 +175,25 @@ grep -q '"title":"Greet"' bridge.json || grep -q '"title": "Greet"' bridge.json 
 }
 pass "the node id round-trips: graphy concept -> okfw search --node-id"
 
-# The bridge must survive a lost search index. A re-export finds every concept
-# byte-identical and writes nothing, so keying the index refresh off what was
-# written left `okfw search --node-id` returning zero hits for good.
-rm -rf .okfw/.index
+# The bridge cannot be broken by losing derived state, because there is none to
+# lose. This used to be the sharpest edge in the seam: a re-export found every
+# concept byte-identical and wrote nothing, so a lost .okfw/.index left
+# `okfw search --node-id` returning zero hits for good.
 graphy export okfw --min-degree 1 >export3.log 2>&1 || {
 	cat export3.log >&2
-	fail "re-export after deleting the search index"
+	fail "re-export"
 }
 grep -qE '0 created, 0 updated' export3.log || {
 	cat export3.log >&2
-	fail "the repairing re-export rewrote concepts"
+	fail "the no-op re-export rewrote concepts"
 }
 okfw search --node-id "$node_id" --json >bridge2.json 2>&1 ||
-	fail "okfw search --node-id failed after the index was rebuilt"
+	fail "okfw search --node-id failed after a no-op re-export"
 grep -q "Greet" bridge2.json || {
 	cat bridge2.json >&2
-	fail "a no-op re-export did not rebuild the lost search index"
+	fail "the node-id bridge did not survive a no-op re-export"
 }
-pass "a no-op re-export repairs a deleted search index"
+pass "the node-id bridge survives a no-op re-export"
 
 # okfw move cannot update graphy'"'"'s exports bucket, so the next export used to
 # create a duplicate: two concepts carrying the same node id.

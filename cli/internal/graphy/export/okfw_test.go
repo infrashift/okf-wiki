@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,11 +12,11 @@ import (
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/graphdb"
+	"okfw/cli/internal/graph"
+	"okfw/cli/internal/search"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/query"
 	"okfw/cli/internal/graphy/store"
-	"okfw/cli/internal/index"
 )
 
 // fixture builds a store with one community and three nodes (two significant,
@@ -66,22 +67,30 @@ func ids(nodes []model.Node) []string {
 	return out
 }
 
+// conceptFiles collects every concept under dir, at any depth: the export
+// mirrors the source tree, so a document's concept lives beside where its
+// source file does rather than flat under the export root.
 func conceptFiles(t *testing.T, cfg *config.Config, dir string) map[string][]byte {
 	t.Helper()
 	out := map[string][]byte{}
 	root := filepath.Join(cfg.RootPath, filepath.FromSlash(dir))
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		t.Fatalf("reading %s: %v", root, err)
-	}
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".md") && e.Name() != "index.md" {
-			content, err := os.ReadFile(filepath.Join(root, e.Name()))
-			if err != nil {
-				t.Fatal(err)
-			}
-			out[e.Name()] = content
+	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+		if err != nil {
+			return err
 		}
+		if fi.IsDir() || !strings.HasSuffix(fi.Name(), ".md") || fi.Name() == "index.md" {
+			return nil
+		}
+		content, rerr := os.ReadFile(p)
+		if rerr != nil {
+			return rerr
+		}
+		rel, _ := filepath.Rel(root, p)
+		out[filepath.ToSlash(rel)] = content
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
 	}
 	return out
 }
@@ -129,7 +138,7 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 			}
 			// Edges are grouped under a per-relation heading carrying the full
 			// count, so a truncated list still says how much it stands for.
-			if !strings.Contains(text, "### calls (1)") || !strings.Contains(text, "- [Beta](./beta--") {
+			if !strings.Contains(text, "### calls (1)") || !strings.Contains(text, "- [Beta](/graphy/myproj/beta--") {
 				t.Errorf("Alpha body lacks the grouped link to Beta:\n%s", text)
 			}
 			if z.Description != "Alpha does things." {
@@ -149,7 +158,7 @@ func TestExportCreatesValidConcepts(t *testing.T) {
 			if z.Graphy.NodeID != "community:core" || z.Graphy.Entity != "community" {
 				t.Errorf("community graphy block = %+v", z.Graphy)
 			}
-			if !strings.Contains(text, "| [Alpha](./alpha--") {
+			if !strings.Contains(text, "| [Alpha](/graphy/myproj/alpha--") {
 				t.Errorf("community table lacks Alpha link:\n%s", text)
 			}
 			// Tiny is unexported → plain text, no link.
@@ -1744,7 +1753,7 @@ func TestExportDropsStructuralDeadEnds(t *testing.T) {
 	if !strings.Contains(alpha, "### references (1)") {
 		t.Errorf("Alpha lost its incoming doc reference:\n%s", alpha)
 	}
-	if !strings.Contains(alpha, "[Usage](./docs-guide-md--") {
+	if !strings.Contains(alpha, "[Usage](/graphy/myproj/docs/docs-guide-md--") {
 		t.Errorf("doc reference should link to the containing document:\n%s", alpha)
 	}
 }
@@ -1762,7 +1771,7 @@ func TestExportRendersDocOutline(t *testing.T) {
 	if !strings.Contains(doc, "## Outline") {
 		t.Errorf("doc concept has no outline:\n%s", doc)
 	}
-	if !strings.Contains(doc, "- Usage — [Alpha](./alpha--") {
+	if !strings.Contains(doc, "- Usage — [Alpha](/graphy/myproj/alpha--") {
 		t.Errorf("outline should say which section describes which entity:\n%s", doc)
 	}
 }
@@ -1784,7 +1793,7 @@ func TestExportOverviewIsTheBundleEntryPoint(t *testing.T) {
 	body := bodyOfTitle(t, cfg, res.Dir, "Code graph: myproj")
 	for _, want := range []string{
 		"## Subsystems (1)",
-		"[core](./community-core--",
+		"[core](/graphy/myproj/community-core--",
 		"## Entry points",
 		"3 nodes, 2 edges",
 		"Clustering: leiden",
@@ -1903,10 +1912,10 @@ func TestExportSegregatesAmbiguousEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := bodyOfTitle(t, cfg, res.Dir, "Caller")
-	if !strings.Contains(body, "- [Sure](./sure--") {
+	if !strings.Contains(body, "- [Sure](/graphy/myproj/sure--") {
 		t.Errorf("resolved edge should be an ordinary bullet:\n%s", body)
 	}
-	if !strings.Contains(body, "- Ambiguous (unresolved between several targets): [Maybe](./maybe--") {
+	if !strings.Contains(body, "- Ambiguous (unresolved between several targets): [Maybe](/graphy/myproj/maybe--") {
 		t.Errorf("ambiguous edge should be segregated:\n%s", body)
 	}
 }
@@ -2102,148 +2111,17 @@ func hubFixture(t *testing.T) (*store.Store, *config.Config) {
 	return s, config.ConfigFor(bundleRoot)
 }
 
-// TestExportRebuildsALostSearchIndex is the defect in its purest form: a no-op
-// export used to write nothing, and syncBundle keyed only off what it wrote,
-// so a bundle whose .index was deleted stayed unindexed and
-// `okfw search --node-id` — the wiki→graph half of the bridge — returned zero
-// hits forever.
-func TestExportRebuildsALostSearchIndex(t *testing.T) {
-	s, cfg := fixture(t)
-	opts := OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1}
 
-	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.RemoveAll(cfg.IndexPath); err != nil {
-		t.Fatal(err)
-	}
 
-	res, err := ToOkfw("/repo/demo", s, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The point is that it repaired the index *without* rewriting a concept.
-	if res.Created != 0 || res.Updated != 0 {
-		t.Errorf("re-export wrote concepts: %d created, %d updated", res.Created, res.Updated)
-	}
-	assertNodeIDResolves(t, cfg, "go:function:a.go#Alpha")
-}
-
-// TestExportIndexesConceptsMissingFromAPartialIndex: the same reconciliation,
-// for one dropped document rather than a whole lost index.
-func TestExportIndexesConceptsMissingFromAPartialIndex(t *testing.T) {
-	s, cfg := fixture(t)
-	opts := OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1}
-	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
-		t.Fatal(err)
-	}
-
-	ids, err := bundle.IndexedIDs(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ids) == 0 {
-		t.Fatal("first export indexed nothing")
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var dropped string
-	for id := range ids {
-		dropped = id
-		break
-	}
-	if err := index.DeleteDocument(idx, dropped); err != nil {
-		t.Fatal(err)
-	}
-	idx.Close()
-
-	if _, err := ToOkfw("/repo/demo", s, opts); err != nil {
-		t.Fatal(err)
-	}
-	after, err := bundle.IndexedIDs(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !after[dropped] {
-		t.Errorf("concept %s was not re-indexed by the no-op export", dropped)
-	}
-}
-
-// TestExportCreatesAndPopulatesTheGraphDatabase: the export used to stat the
-// graph db and skip when absent, so the whole exported tree — one `parent:`
-// edge per concept — was invisible to okfw graph/backlinks/graph-query until
-// the reader ran a graph-sync nothing had told them about.
-func TestExportCreatesAndPopulatesTheGraphDatabase(t *testing.T) {
-	s, cfg := fixture(t)
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err == nil {
-		t.Fatal("fixture already has a graph database")
-	}
-
-	res, err := ToOkfw("/repo/demo", s, OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !res.GraphCreated {
-		t.Error("creating the graph database was not reported")
-	}
-	if _, err := os.Stat(dbPath); err != nil {
-		t.Fatalf("graph database was not created: %v", err)
-	}
-
-	// Scoped, so the handle is released before the second export below: bolt
-	// takes an exclusive file lock.
-	func() {
-		gdb, err := graphdb.Open(dbPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer gdb.Close()
-		n, err := gdb.NodeCount()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 0 {
-			t.Error("graph database is empty after the export that created it")
-		}
-
-		// The overview concept parents every community, which is the edge that
-		// makes the export a tree rather than a thousand siblings.
-		overviewID := conceptIDWithNodeID(t, cfg, res.Dir, "graph:demo")
-		back, err := gdb.GetBacklinks(overviewID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(back) == 0 {
-			t.Error("no concept links to the overview: the parent spine never reached the graph")
-		}
-	}()
-
-	// A second export must not report creating it again.
-	res2, err := ToOkfw("/repo/demo", s, OkfwOptions{Bundle: cfg, Project: "demo", MinDegree: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res2.GraphCreated {
-		t.Error("second export reported creating an existing graph database")
-	}
-}
 
 func assertNodeIDResolves(t *testing.T, cfg *config.Config, nodeID string) {
 	t.Helper()
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	hits, _, err := search.Search(cfg.RootPath, search.Options{GraphyNodeID: nodeID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer idx.Close()
-	hits, _, err := index.Search(idx, index.SearchOptions{GraphyNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hits) == 0 {
-		t.Errorf("okfw search --node-id %s found nothing: the bridge is dead", nodeID)
+	if len(hits) != 1 {
+		t.Fatalf("search --node-id %q returned %d hits, want 1", nodeID, len(hits))
 	}
 }
 
@@ -2346,4 +2224,149 @@ func nodeIDOccurrences(t *testing.T, cfg *config.Config, nodeID string) []string
 	}
 	sort.Strings(found)
 	return found
+}
+
+// TestExportMirrorsTheSourceTree: a concept's OKF id is its path minus ".md"
+// (section 4), so a flat export gave every entity an opaque id that said
+// nothing about the code it documents. Mirroring the source directory makes the
+// id self-describing and matches `resource:`, so a search hit locates the code
+// before the concept is opened.
+func TestExportMirrorsTheSourceTree(t *testing.T) {
+	s, cfg := docFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := conceptFiles(t, cfg, res.Dir)
+
+	// docs/guide.md's concept lives under docs/, beside where its source does.
+	var docRel string
+	for rel, content := range files {
+		z, perr := config.ParseAndValidate(content)
+		if perr != nil {
+			t.Fatalf("%s fails validation: %v", rel, perr)
+		}
+		if z.Title == "docs/guide.md" {
+			docRel = rel
+		}
+	}
+	if docRel == "" {
+		t.Fatal("no concept for docs/guide.md")
+	}
+	if !strings.HasPrefix(docRel, "docs/") {
+		t.Errorf("doc concept at %q; want it under docs/ mirroring its source", docRel)
+	}
+
+	// Communities and the overview have no source file and stay at the root,
+	// which is where the tree's parents belong.
+	for rel, content := range files {
+		z, _ := config.ParseAndValidate(content)
+		if z != nil && (z.Type == "code-community" || z.Type == "code-graph") {
+			if strings.Contains(rel, "/") {
+				t.Errorf("%s (%s) should sit at the export root, found at %q", z.Title, z.Type, rel)
+			}
+		}
+	}
+}
+
+// TestExportLinksAreBundleRelative: with concepts at varying depths a bare
+// "./<file>.md" href resolves against the *linking* concept's directory and
+// silently hits nothing. Every generated link must be wiki-root-relative.
+func TestExportLinksAreBundleRelative(t *testing.T) {
+	s, cfg := docFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rel, content := range conceptFiles(t, cfg, res.Dir) {
+		body := string(content)
+		if strings.Contains(body, "](./") {
+			t.Errorf("%s emits a same-directory link, which cannot survive nesting:\n%s", rel, body)
+		}
+	}
+	// And the links must actually resolve to files that exist.
+	for rel, content := range conceptFiles(t, cfg, res.Dir) {
+		for _, target := range graph.ExtractLinkTargets(config.ExtractBody(content)) {
+			if strings.Contains(target, "://") {
+				continue
+			}
+			p := filepath.Join(cfg.RootPath, filepath.FromSlash(strings.TrimPrefix(target, "/")))
+			if _, err := os.Stat(p); err != nil {
+				t.Errorf("%s links to %q which does not exist", rel, target)
+			}
+		}
+	}
+}
+
+// TestExportMigratesAFlatLayoutInPlace: bundles exported before the layout
+// change hold every concept flat under the export root. The next export must
+// move them rather than duplicating them, keeping each concept's id.
+func TestExportMigratesAFlatLayoutInPlace(t *testing.T) {
+	s, cfg := docFixture(t)
+	res, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := conceptFiles(t, cfg, res.Dir)
+	ids := map[string]string{} // title -> concept id
+	for _, content := range before {
+		z, _ := config.ParseAndValidate(content)
+		if z != nil {
+			ids[z.Title] = z.ID
+		}
+	}
+
+	// Flatten the bundle back, as an older export would have left it, and point
+	// the records at the flat paths.
+	for rel := range before {
+		if !strings.Contains(rel, "/") {
+			continue
+		}
+		from := filepath.Join(cfg.RootPath, filepath.FromSlash(res.Dir), filepath.FromSlash(rel))
+		to := filepath.Join(cfg.RootPath, filepath.FromSlash(res.Dir), filepath.Base(rel))
+		if _, err := bundle.MoveConcept(cfg, from, to); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Collect first, write after: EachExport runs inside a bbolt read
+	// transaction, so calling PutExport from the callback deadlocks.
+	flat := map[string]store.ExportRecord{}
+	if err := s.EachExport(func(key string, rec store.ExportRecord) error {
+		if bundle.RelDir(rec.RelPath) != res.Dir {
+			rec.RelPath = res.Dir + "/" + path.Base(rec.RelPath)
+			flat[key] = rec
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for key, rec := range flat {
+		if err := s.PutExport(key, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	res2, err := ToOkfw("/repo/myproj", s, OkfwOptions{Bundle: cfg, MinDegree: 3})
+	if err != nil {
+		t.Fatalf("re-export over a flat bundle: %v", err)
+	}
+	if res2.Migrated == 0 {
+		t.Error("nothing was migrated into the source-mirroring layout")
+	}
+	if res2.Created != 0 {
+		t.Errorf("migration created %d duplicate concepts; it must move, not duplicate", res2.Created)
+	}
+	after := conceptFiles(t, cfg, res.Dir)
+	if len(after) != len(before) {
+		t.Errorf("concept count changed across migration: %d -> %d", len(before), len(after))
+	}
+	for _, content := range after {
+		z, _ := config.ParseAndValidate(content)
+		if z == nil {
+			continue
+		}
+		if want, ok := ids[z.Title]; ok && want != z.ID {
+			t.Errorf("%s changed id across the migration: %s -> %s", z.Title, want, z.ID)
+		}
+	}
 }

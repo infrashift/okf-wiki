@@ -201,9 +201,13 @@ func TestRunInit(t *testing.T) {
 	}
 
 	gi := readFile(t, filepath.Join(wikiDir, ".gitignore"))
-	for _, want := range []string{config.IndexDirName + "/", config.GraphDBName, "ephemeral/"} {
-		if !strings.Contains(gi, want) {
-			t.Errorf(".gitignore missing %q:\n%s", want, gi)
+	if !strings.Contains(gi, "ephemeral/") {
+		t.Errorf(".gitignore missing %q:\n%s", "ephemeral/", gi)
+	}
+	// The derived stores are gone; init must not resurrect them by habit.
+	for _, gone := range []string{".index", ".graph.db"} {
+		if strings.Contains(gi, gone) {
+			t.Errorf(".gitignore still names the removed %q:\n%s", gone, gi)
 		}
 	}
 

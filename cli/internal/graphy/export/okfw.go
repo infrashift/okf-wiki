@@ -26,7 +26,6 @@ import (
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/graphdb"
 	"okfw/cli/internal/graphy/model"
 	"okfw/cli/internal/graphy/store"
 )
@@ -80,12 +79,14 @@ type OkfwResult struct {
 	// under the export directory — `okfw move` cannot update the exports
 	// bucket, so without this the next export would create a duplicate.
 	Relocated int
-	Rekeyed   int // community concept adopted under a new exports key or label
+	// Migrated counts concepts moved because the layout changed underneath
+	// them — a flat export converging on the source-mirroring tree. Kept apart
+	// from Relocated so a one-time layout migration does not read as the wiki
+	// having moved hundreds of concepts by hand.
+	Migrated int
+	Rekeyed  int // community concept adopted under a new exports key or label
 	Deleted   int
 	Dir       string // bundle-relative concept directory
-	// GraphCreated reports that this export built the bundle's graph database,
-	// which changes how every later okfw graph command answers.
-	GraphCreated bool
 	// Skipped counts eligible graph nodes the filters excluded, so a thin
 	// export is legible as a filter setting rather than as a broken build.
 	Skipped SkipCounts
@@ -187,6 +188,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	upToDate := map[string]bool{} // community records already holding the current digest
 	live := map[string]bool{}     // exports keys resolved from a live record
 	liveRel := map[string]bool{}  // and the files they resolved to
+	// The records themselves, so the layout migration below can move a concept
+	// without rebuilding a record and dropping a community's membership digest.
+	liveRec := map[string]*store.ExportRecord{}
 	for _, it := range items {
 		rec, err := s.GetExport(it.key)
 		if err != nil {
@@ -218,6 +222,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 				return nil, err
 			}
 		}
+		liveRec[it.key] = rec
 		placed[it.key] = placement{rec.ConceptID, rec.RelPath}
 		live[it.key] = true
 		liveRel[rec.RelPath] = true
@@ -228,6 +233,39 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 
 	if err := checkProjectDir(placed, dir); err != nil {
 		return nil, err
+	}
+
+	// Converge on the current layout. Concepts written by an export that put
+	// everything flat sit directly under the export root; move them the first
+	// time they are seen, so upgrading needs no re-export from scratch.
+	// MoveConcept repairs inbound links at both ends and the concept keeps its
+	// id, created stamp and history.
+	//
+	// Strictly after checkProjectDir: this loop moves concepts between
+	// directories, which is exactly what that check refuses to do silently when
+	// --project changes. Running it first would have carried out the split it
+	// exists to prevent.
+	for _, it := range items {
+		rec := liveRec[it.key]
+		if rec == nil {
+			continue
+		}
+		want := itemDir(dir, it)
+		if bundle.RelDir(rec.RelPath) == want {
+			continue
+		}
+		moved, err := relocateInto(cfg, placement{rec.ConceptID, rec.RelPath}, want, it.title)
+		if err != nil {
+			return nil, err
+		}
+		delete(liveRel, rec.RelPath)
+		rec.RelPath = moved.relPath
+		if err := s.PutExport(it.key, *rec); err != nil {
+			return nil, err
+		}
+		placed[it.key] = moved
+		liveRel[moved.relPath] = true
+		res.Migrated++
 	}
 
 	// Pass 1b: place the rest. Resolution order for an item with no live export
@@ -281,9 +319,10 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 			// A concept found outside the export directory was moved by the
 			// wiki side, which cannot update the exports bucket. Bring it back
 			// before recording it, or its links to its siblings dangle.
-			relocated := bundle.RelDir(p.relPath) != dir
+			want := itemDir(dir, it)
+			relocated := bundle.RelDir(p.relPath) != want
 			if relocated {
-				if p, err = relocateInto(cfg, p, dir, it.title); err != nil {
+				if p, err = relocateInto(cfg, p, want, it.title); err != nil {
 					return nil, err
 				}
 			}
@@ -322,7 +361,7 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 		absPath, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 			Title:       it.title,
 			Project:     opts.Project,
-			Dir:         dir,
+			Dir:         itemDir(dir, it),
 			Tags:        it.tags,
 			Description: it.description,
 		})
@@ -370,9 +409,14 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	// changed, so the write and index/graph syncs are skipped entirely and
 	// `timestamp` keeps its OKF meaning of "last meaningful change" (with
 	// graphy.commit pinning the repo state that change was derived from).
+	// Wiki-root-relative, not "./<file>.md". Concepts are placed in
+	// subdirectories mirroring the source tree, so a sibling reference is no
+	// longer a same-directory reference; a bare "./" href would resolve against
+	// the linking concept's own directory and silently hit nothing.
+	// config.NormalizeTarget treats a leading "/" as the bundle root.
 	linkTo := func(key string) string {
 		if p, ok := placed[key]; ok {
-			return "./" + p.relPath[strings.LastIndex(p.relPath, "/")+1:]
+			return "/" + p.relPath
 		}
 		return ""
 	}
@@ -506,11 +550,9 @@ func ToOkfw(root string, s *store.Store, opts OkfwOptions) (*OkfwResult, error) 
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].rel < all[j].rel })
 
-	graphCreated, err := syncBundle(cfg, touched, all)
-	if err != nil {
+	if err := syncBundle(cfg); err != nil {
 		return nil, err
 	}
-	res.GraphCreated = graphCreated
 	return res, nil
 }
 
@@ -1216,6 +1258,38 @@ func filenameEncodes(name, title, conceptID string) bool {
 	return strings.HasPrefix(strings.ReplaceAll(conceptID, "-", ""), short)
 }
 
+// itemDir is the directory a concept belongs in: the export root followed by
+// the source directory of the entity it documents.
+//
+// A concept's OKF id is its path minus ".md" (section 4), so a flat export gave
+// every entity an id like "graphy/<project>/engine-evaluate--019fa597" — an
+// opaque handle carrying nothing a reader could use. Mirroring the source tree
+// makes the id self-describing and matches `resource:`, so a search hit says
+// where the code lives before the concept is opened.
+//
+// Communities, the graph overview and entities with no source file (externals)
+// have no source directory and stay at the export root, which is also where
+// the tree's parents belong.
+func itemDir(root string, it item) string {
+	if it.node == nil || it.node.File == "" {
+		return root
+	}
+	d := path.Dir(filepath.ToSlash(it.node.File))
+	if d == "." || d == "/" || d == "" {
+		return root
+	}
+	return root + "/" + d
+}
+
+// exportRootOf recovers the export root ("graphy/<project>") from a concept's
+// path, now that concepts sit at varying depths beneath it.
+func exportRootOf(rel string) string {
+	if parts := strings.SplitN(rel, "/", 3); len(parts) >= 2 && parts[0] == "graphy" {
+		return parts[0] + "/" + parts[1]
+	}
+	return bundle.RelDir(rel)
+}
+
 // checkProjectDir refuses an export whose live concepts live somewhere other
 // than the directory this run would write to.
 //
@@ -1227,7 +1301,7 @@ func filenameEncodes(name, title, conceptID string) bool {
 // export.
 func checkProjectDir(placed map[string]placement, dir string) error {
 	for _, p := range placed {
-		if old := bundle.RelDir(p.relPath); old != dir {
+		if old := exportRootOf(p.relPath); old != dir {
 			return fmt.Errorf("this bundle's graphy concepts are in %s but this export targets %s: "+
 				"re-run with --project matching %s, or delete %s to re-export from scratch",
 				old, dir, path.Base(old), old)
@@ -1872,92 +1946,22 @@ type conceptRef struct {
 	id  string
 }
 
-// syncBundle reconciles the bundle's derived state — the Bleve index, the
-// index.md listings, and the graph database — with the concepts this export
-// owns. It reports whether it had to create the graph database.
+// syncBundle refreshes the bundle's OKF index.md listings after an export.
 //
-// `touched` is what this run wrote; `all` is every concept it placed, changed
-// or not. Both matter, because the derived state can be missing for reasons the
-// export cannot see. Replaying only `touched` meant that after `.okfw/.index`
-// was lost, a re-export found every concept byte-identical, wrote nothing,
-// indexed nothing, and left `okfw search --node-id` — the wiki→graph half of
-// the bridge — returning zero hits for good.
-func syncBundle(cfg *config.Config, touched []string, all []conceptRef) (bool, error) {
-	need := map[string]bool{}
-	for _, rel := range touched {
-		need[rel] = true
-	}
-
-	indexed, err := bundle.IndexedIDs(cfg)
-	if err != nil {
-		return false, err
-	}
-	for _, c := range all {
-		if c.id != "" && !indexed[c.id] {
-			need[c.rel] = true
-		}
-	}
-
-	// The bundle's graph database, created if this export is the first thing to
-	// want one. `parent:` is the spine of the exported tree — one edge per
-	// concept — and with no database none of it reached okfw's link graph, so
-	// `okfw graph`, `okfw backlinks` and `okfw graph-query` answered nothing
-	// about the export and nothing told the reader to run `okfw graph-sync`.
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	_, statErr := os.Stat(dbPath)
-	freshDB := os.IsNotExist(statErr)
-	gdb, err := graphdb.Open(dbPath)
-	if err != nil {
-		return false, err
-	}
-	defer gdb.Close()
-	if !freshDB {
-		for _, c := range all {
-			if need[c.rel] || c.id == "" {
-				continue
-			}
-			n, err := gdb.GetNode(c.id)
-			if err != nil {
-				return false, err
-			}
-			if n == nil {
-				need[c.rel] = true
-			}
-		}
-	}
-
-	rels := make([]string, 0, len(need))
-	for rel := range need {
-		rels = append(rels, rel)
-	}
-	sort.Strings(rels)
-	abs := make([]string, len(rels))
-	for i, rel := range rels {
-		abs[i] = filepath.Join(cfg.RootPath, filepath.FromSlash(rel))
-	}
-
-	if err := bundle.IndexFiles(cfg, abs); err != nil {
-		return false, err
-	}
-	if _, err := bundle.WriteIndexFiles(cfg, cfg.RootPath); err != nil {
-		return false, err
-	}
-
-	if freshDB {
-		// One walk rather than N SyncFile calls, and it takes in the
-		// hand-written concepts already in the bundle too, so the graph is
-		// never a partial view of it from the moment it starts existing.
-		if _, err := gdb.Sync(cfg.RootPath); err != nil {
-			return false, err
-		}
-		return true, nil
-	}
-	for i, rel := range rels {
-		if err := gdb.SyncFile(abs[i], cfg.RootPath); err != nil {
-			return false, fmt.Errorf("graph-syncing %s: %w", rel, err)
-		}
-	}
-	return false, nil
+// It used to reconcile two caches — the Bleve search index and the bbolt graph
+// database — against every concept this export placed, changed or not. That
+// reconciliation existed because the caches could be missing for reasons the
+// export could not see: after `.okfw/.index` was lost, a re-export found every
+// concept byte-identical, wrote nothing, indexed nothing, and left
+// `okfw search --node-id` returning zero hits for good.
+//
+// Both caches are gone. Search and the link graph are computed from the files,
+// so an export that writes correct files has nothing left to keep in step, and
+// that entire failure mode cannot recur. What remains is the one derived
+// artifact OKF specifies (section 8) and that lives in the bundle as content.
+func syncBundle(cfg *config.Config) error {
+	_, err := bundle.WriteIndexFiles(cfg, cfg.RootPath)
+	return err
 }
 
 // qualOfNodeID returns just the qualified-name half of a node id.

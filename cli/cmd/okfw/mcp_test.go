@@ -256,7 +256,7 @@ graphy:
 
 # Alpha
 `)
-	if err := bundle.AutoIndex(cfg, p); err != nil {
+	if err := bundle.AutoSync(cfg, p); err != nil {
 		t.Fatal(err)
 	}
 

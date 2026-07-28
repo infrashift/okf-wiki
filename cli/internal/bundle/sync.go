@@ -8,143 +8,21 @@ import (
 	"strings"
 
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
 )
 
-// Indexer is the minimal indexing surface IndexFile needs (satisfied by
-// bleve.Index).
-type Indexer interface {
-	Index(string, interface{}) error
-}
-
-// IndexFile parses a concept file and indexes it as a ConceptDoc.
-func IndexFile(idx Indexer, filePath string) error {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return err
-	}
-
-	z, err := config.ParseFrontmatter(content)
-	if err != nil {
-		return err
-	}
-
-	body := config.ExtractBody(content)
-
-	docKind := z.GetKind()
-	docType := z.Type
-	if docType == "" {
-		docType = docKind // legacy notes: fall back to the structured kind
-	}
-
-	doc := &index.ConceptDoc{
-		ID:          z.ID,
-		Title:       z.Title,
-		Type:        docType,
-		Kind:        docKind,
-		Description: z.Description,
-		Project:     z.Project,
-		Tags:        z.Tags,
-		Body:        body,
-		FilePath:    filePath,
-		Created:     z.Created.Format("2006-01-02T15:04:05Z07:00"),
-		Timestamp:   z.Timestamp.Format("2006-01-02T15:04:05Z07:00"),
-		Status:      z.LifecycleStatus(),
-		StaleAfter:  z.StaleAfter,
-	}
-	if z.Graphy != nil {
-		doc.GraphyNodeID = z.Graphy.NodeID
-	}
-
-	return idx.Index(z.ID, doc)
-}
-
-// AutoIndex opens the bundle's search index and indexes a single file.
-func AutoIndex(cfg *config.Config, filePath string) error {
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
-
-	return IndexFile(idx, filePath)
-}
-
-// IndexFiles indexes several concept files in one open/close of the search
-// index.
+// AutoSync refreshes the OKF index.md listings after a concept is created or
+// updated — including an index.md for any directory the concept just created.
 //
-// AutoIndex reopens Bleve per file, which a bulk writer pays once per concept —
-// `graphy export okfw` places thousands in a single run.
-func IndexFiles(cfg *config.Config, absPaths []string) error {
-	if len(absPaths) == 0 {
-		return nil
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return err
-	}
-	defer idx.Close()
-
-	for _, p := range absPaths {
-		if err := IndexFile(idx, p); err != nil {
-			return fmt.Errorf("indexing %s: %w", p, err)
-		}
-	}
-	return nil
-}
-
-// IndexedIDs returns the concept ids currently present in the bundle's search
-// index.
-//
-// A bundle with no index yields an empty set rather than an error, so a caller
-// reconciling against it treats every concept as unindexed — which is exactly
-// what a deleted .index means. It must not create the index on the way past:
-// that is the same mistake as opening a graph database to read it.
-func IndexedIDs(cfg *config.Config) (map[string]bool, error) {
-	if _, err := os.Stat(cfg.IndexPath); err != nil {
-		return map[string]bool{}, nil
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return nil, err
-	}
-	defer idx.Close()
-
-	ids, err := index.AllDocIDs(idx)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		out[id] = true
-	}
-	return out, nil
-}
-
-// AutoSync updates the search index and, when a graph database exists, the
-// persistent graph for a single created or updated file (best-effort).
+// It used to also write a Bleve document and a bbolt graph node. Both are gone:
+// search and the link graph are now computed from the files on demand, so there
+// is nothing to keep in step and nothing that can fall out of step. What
+// remains is the one artifact OKF actually specifies (section 8) and that a
+// consumer expects to find on disk.
 func AutoSync(cfg *config.Config, filePath string) error {
-	if err := AutoIndex(cfg, filePath); err != nil {
-		return err
-	}
-
-	// Keep OKF index.md listings fresh — including an index.md for any
-	// directory the note just created.
 	if _, err := WriteIndexFiles(cfg, cfg.RootPath); err != nil {
 		return fmt.Errorf("failed to refresh index.md files: %w", err)
 	}
-
-	dbPath := filepath.Join(cfg.RootPath, cfg.GraphPath)
-	if _, err := os.Stat(dbPath); err != nil {
-		return nil // no graph database — nothing to keep in sync
-	}
-	store, err := graphdb.Open(dbPath)
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	return store.SyncFile(filePath, cfg.RootPath)
+	return nil
 }
 
 // LiveConceptIDs returns the frontmatter ids of every concept currently on disk
@@ -172,50 +50,10 @@ func LiveConceptIDs(root string) (map[string]bool, error) {
 	return live, err
 }
 
-// PruneIndex drops search-index entries whose concept file no longer exists and
-// returns how many were removed.
-//
-// Nothing used to do this: index.DeleteDocument had no callers, so a deleted
-// concept stayed in `okfw search` results indefinitely — search reports index
-// hits without stat-ing the file, and the only remedy was deleting .index by
-// hand.
-func PruneIndex(cfg *config.Config) (int, error) {
-	if _, err := os.Stat(cfg.IndexPath); err != nil {
-		return 0, nil // no search index yet — nothing to prune
-	}
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		return 0, err
-	}
-	defer idx.Close()
-
-	indexed, err := index.AllDocIDs(idx)
-	if err != nil {
-		return 0, err
-	}
-	live, err := LiveConceptIDs(cfg.RootPath)
-	if err != nil {
-		return 0, err
-	}
-
-	removed := 0
-	for _, id := range indexed {
-		if live[id] {
-			continue
-		}
-		if err := index.DeleteDocument(idx, id); err != nil {
-			return removed, err
-		}
-		removed++
-	}
-	return removed, nil
-}
-
 // WriteIndexFiles regenerates the auto-maintained index.md listing in every
 // bundle directory. Returns the number of index files written.
 func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
-	type entry struct{ title, desc, href string }
-	concepts := map[string][]entry{}
+	concepts := map[string][]indexEntry{}
 	dirs := map[string]bool{"": true}
 
 	addDirChain := func(d string) {
@@ -256,7 +94,7 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 		if title == "" {
 			title = fi.Name()
 		}
-		concepts[d] = append(concepts[d], entry{title, z.Description, fi.Name()})
+		concepts[d] = append(concepts[d], indexEntry{title, z.Description, fi.Name(), z.Type})
 		addDirChain(d)
 		return nil
 	})
@@ -300,12 +138,12 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 		if cs := concepts[d]; len(cs) > 0 {
 			sort.Slice(cs, func(i, j int) bool { return cs[i].title < cs[j].title })
 			b.WriteString("## Concepts\n\n")
-			for _, c := range cs {
-				line := "* [" + c.title + "](" + c.href + ")"
-				if c.desc != "" {
-					line += " - " + c.desc
+			if len(cs) <= indexEnumerateLimit {
+				for _, c := range cs {
+					b.WriteString(indexLine(c.title, c.desc, c.href))
 				}
-				b.WriteString(line + "\n")
+			} else {
+				writeGroupedIndex(&b, cs)
 			}
 			b.WriteString("\n")
 		}
@@ -320,6 +158,80 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 		return count, err
 	}
 	return count, nil
+}
+
+// indexEnumerateLimit is the largest number of concepts a directory listing
+// will name one by one. Past it the listing groups by type and shows a sample.
+//
+// OKF section 8 gives index.md one job — "letting a human or agent see what is
+// available before opening individual documents" — and a listing that names
+// every concept stops doing that job precisely when a directory gets big
+// enough for the question to matter. Measured on a graphy export of a 24k-LOC
+// repo: 901 concepts in one directory produced a 112KB index.md, about 28,000
+// tokens, against a median concept of roughly 1,200. Reading the preview cost
+// 23x reading the thing it previewed, and 5x the entire MCP tool-definition
+// prefix. That is not disclosure, it is a trap laid by the spec's own
+// affordance.
+//
+// 50 keeps a full listing under roughly 6KB, comfortably cheaper than the
+// concepts it stands in for, which is the property that makes it a preview.
+const indexEnumerateLimit = 50
+
+// indexEntry is one concept as a directory listing sees it.
+type indexEntry struct{ title, desc, href, typ string }
+
+// indexPerTypeLimit is how many concepts of each type a grouped listing names.
+// The counts carry the shape of the directory; the sample gives somewhere to
+// start reading.
+const indexPerTypeLimit = 10
+
+func indexLine(title, desc, href string) string {
+	line := "* [" + title + "](" + href + ")"
+	if desc != "" {
+		line += " - " + desc
+	}
+	return line + "\n"
+}
+
+// writeGroupedIndex renders a large directory as counts by type plus a sample
+// of each, naming the query that returns the rest.
+//
+// Withheld entries are always counted and always say how to get them: the same
+// discipline `graphy report` applies to large sections and concept bodies apply
+// to edges past --max-edges. A reader who cannot see that rows were withheld
+// reads a partial listing as the whole directory.
+func writeGroupedIndex(b *strings.Builder, cs []indexEntry) {
+	byType := map[string][]indexEntry{}
+	for _, c := range cs {
+		t := c.typ
+		if t == "" {
+			t = "untyped"
+		}
+		byType[t] = append(byType[t], c)
+	}
+	types := make([]string, 0, len(byType))
+	for t := range byType {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+
+	fmt.Fprintf(b, "%d concepts, grouped by type. Listings are capped; "+
+		"`okfw search --type <type>` returns a full set.\n\n", len(cs))
+	for _, t := range types {
+		group := byType[t]
+		fmt.Fprintf(b, "### %s (%d)\n\n", t, len(group))
+		shown := group
+		if len(shown) > indexPerTypeLimit {
+			shown = shown[:indexPerTypeLimit]
+		}
+		for _, c := range shown {
+			b.WriteString(indexLine(c.title, c.desc, c.href))
+		}
+		if n := len(group) - len(shown); n > 0 {
+			fmt.Fprintf(b, "* … %d more — `okfw search --type %s`\n", n, t)
+		}
+		b.WriteString("\n")
+	}
 }
 
 // pruneOrphanedIndexes removes generated index.md files in directories that no

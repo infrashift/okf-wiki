@@ -38,12 +38,6 @@ func TestDiscover(t *testing.T) {
 	if cfg.RootPath != wikiDir {
 		t.Errorf("RootPath = %q, want %q", cfg.RootPath, wikiDir)
 	}
-	if cfg.IndexPath != filepath.Join(wikiDir, IndexDirName) {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, filepath.Join(wikiDir, IndexDirName))
-	}
-	if cfg.GraphPath != GraphDBName {
-		t.Errorf("GraphPath = %q, want %q", cfg.GraphPath, GraphDBName)
-	}
 
 	// Found from a nested subdirectory (walks upward).
 	cfg, err = Discover(nested)

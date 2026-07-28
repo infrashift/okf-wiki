@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"okfw/cli/internal/config"
-	"okfw/cli/internal/index"
 )
 
 const legacyTodo = `---
@@ -144,72 +143,7 @@ func TestStripLegacyTodoFieldsLeavesRealLifecycleStatusAlone(t *testing.T) {
 
 // --- PruneIndex ---
 
-func TestPruneIndexRemovesDeletedConcepts(t *testing.T) {
-	cfg, root := testCfg(t)
 
-	keepPath, keepID, err := CreateConcept(cfg, Spec{Title: "Keep Me"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	gonePath, goneID, err := CreateConcept(cfg, Spec{Title: "Delete Me"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []string{keepPath, gonePath} {
-		if err := AutoIndex(cfg, p); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	// Nothing is stale yet.
-	if n, err := PruneIndex(cfg); err != nil || n != 0 {
-		t.Fatalf("PruneIndex on a clean bundle = %d, %v; want 0, nil", n, err)
-	}
-
-	// Delete one concept's file, as a user would.
-	if err := os.Remove(gonePath); err != nil {
-		t.Fatal(err)
-	}
-
-	n, err := PruneIndex(cfg)
-	if err != nil {
-		t.Fatalf("PruneIndex: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("pruned %d, want 1", n)
-	}
-
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer idx.Close()
-	ids, err := index.AllDocIDs(idx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, id := range ids {
-		seen[id] = true
-	}
-	if seen[goneID] {
-		t.Error("the deleted concept is still indexed")
-	}
-	if !seen[keepID] {
-		t.Error("PruneIndex removed a concept that still exists")
-	}
-	_ = root
-}
-
-func TestPruneIndexWithoutAnIndexIsANoOp(t *testing.T) {
-	cfg, _ := testCfg(t)
-	if n, err := PruneIndex(cfg); err != nil || n != 0 {
-		t.Errorf("PruneIndex with no index = %d, %v; want 0, nil", n, err)
-	}
-	if _, err := os.Stat(cfg.IndexPath); err == nil {
-		t.Error("PruneIndex must not create an index that did not exist")
-	}
-}
 
 func TestLiveConceptIDs(t *testing.T) {
 	cfg, root := testCfg(t)

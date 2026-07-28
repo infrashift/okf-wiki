@@ -9,8 +9,6 @@ import (
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/graph"
-	"okfw/cli/internal/graphdb"
-	"okfw/cli/internal/index"
 )
 
 // normalize and linksIn keep the tests speaking in terms of resolved targets,
@@ -267,61 +265,30 @@ func TestMoveConceptKeepsIDAndBumpsTimestamp(t *testing.T) {
 	}
 }
 
-func TestMoveConceptUpdatesIndexAndGraph(t *testing.T) {
+// TestMoveConceptKeepsTheGraphPointingAtTheNewLocation: the link graph is read
+// from the files, so a move is reflected the moment the file lands — there is
+// no derived copy that could still name the old path.
+func TestMoveConceptKeepsTheGraphPointingAtTheNewLocation(t *testing.T) {
 	cfg, root := testCfg(t)
 	p, id, err := CreateConcept(cfg, Spec{Title: "Findable Subject", Dir: "notes"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Establish both derived stores before the move.
-	store, err := graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := AutoSync(cfg, p); err != nil {
-		t.Fatal(err)
-	}
-
 	newPath := filepath.Join(root, "archive", filepath.Base(p))
 	if _, err := MoveConcept(cfg, p, newPath); err != nil {
 		t.Fatalf("MoveConcept: %v", err)
 	}
 
-	// The search index must report the new path, not the old one.
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
+	g, err := LoadGraph(cfg.RootPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer idx.Close()
-	results, _, err := index.Search(idx, index.SearchOptions{Query: "Findable"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 1 {
-		t.Fatalf("got %d hits, want 1", len(results))
-	}
-	if results[0].FilePath != newPath {
-		t.Errorf("indexed path = %q, want %q", results[0].FilePath, newPath)
-	}
-
-	// The graph node keeps its id and points at the new location.
-	store, err = graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	node, err := store.GetNode(id)
-	if err != nil {
-		t.Fatalf("GetNode: %v", err)
-	}
+	node := g.GetNode(id)
 	if node == nil {
-		t.Fatal("the moved concept has no graph node")
+		t.Fatalf("concept %s missing from the graph after the move", id)
 	}
-	if !strings.Contains(filepath.ToSlash(node.FilePath), "archive/") {
-		t.Errorf("graph node still at %q", node.FilePath)
+	if node.FilePath != newPath {
+		t.Errorf("graph path = %q, want %q", node.FilePath, newPath)
 	}
 }
 
@@ -385,23 +352,16 @@ func TestMoveConceptRejectsEscapingTheBundle(t *testing.T) {
 
 // --- DeleteConcept ---
 
-func TestDeleteConceptRemovesEverythingDerived(t *testing.T) {
-	cfg, root := testCfg(t)
+// TestDeleteConceptRemovesTheConcept: with search and the link graph computed
+// from the files, deleting the file is the whole operation. This used to have
+// to assert against two caches, and a missing prune step is what once left a
+// deleted concept in `okfw search` results indefinitely.
+func TestDeleteConceptRemovesTheConcept(t *testing.T) {
+	cfg, _ := testCfg(t)
 	p, id, err := CreateConcept(cfg, Spec{Title: "Doomed Subject"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := AutoSync(cfg, p); err != nil {
-		t.Fatal(err)
-	}
-
 	res, err := DeleteConcept(cfg, p)
 	if err != nil {
 		t.Fatalf("DeleteConcept: %v", err)
@@ -409,43 +369,15 @@ func TestDeleteConceptRemovesEverythingDerived(t *testing.T) {
 	if res.ID != id {
 		t.Errorf("reported id %q, want %q", res.ID, id)
 	}
-
 	if _, err := os.Stat(p); err == nil {
 		t.Error("the file still exists")
 	}
-	// Gone from search — the defect that motivated PruneIndex.
-	idx, err := index.OpenOrCreateIndex(cfg.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer idx.Close()
-	results, _, err := index.Search(idx, index.SearchOptions{Query: "Doomed"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(results) != 0 {
-		t.Errorf("deleted concept still in search results: %+v", results)
-	}
-	// Gone from the graph.
-	store, err = graphdb.Open(filepath.Join(root, cfg.GraphPath))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	node, err := store.GetNode(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node != nil {
-		t.Errorf("graph node survived: %+v", node)
-	}
-	// Gone from the listing.
-	rootIdx, err := os.ReadFile(filepath.Join(root, "index.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(rootIdx), "Doomed Subject") {
-		t.Errorf("index.md still lists it:\n%s", rootIdx)
+	// A bundle emptied of concepts has no graph to load; either way the
+	// deleted id must not be in one.
+	if g, err := LoadGraph(cfg.RootPath); err == nil {
+		if g.GetNode(id) != nil {
+			t.Error("deleted concept still in the graph")
+		}
 	}
 }
 
@@ -483,15 +415,19 @@ func TestDeleteConceptRefusesReservedFiles(t *testing.T) {
 	}
 }
 
-func TestDeleteConceptWithoutDerivedStores(t *testing.T) {
-	cfg, _ := testCfg(t)
+// TestDeleteConceptLeavesNoDerivedState: there is no cache for a delete to
+// create or to forget to clean up. This asserts the absence deliberately —
+// the bundle after a delete must contain only concepts and listings.
+func TestDeleteConceptLeavesNoDerivedState(t *testing.T) {
+	cfg, root := testCfg(t)
 	p := concept(t, cfg, "a--0001.md", "a", "# a\n")
-	// No search index and no graph database exist: delete must still work.
 	if _, err := DeleteConcept(cfg, p); err != nil {
-		t.Fatalf("DeleteConcept with no derived stores: %v", err)
+		t.Fatalf("DeleteConcept: %v", err)
 	}
-	if _, err := os.Stat(cfg.IndexPath); err == nil {
-		t.Error("delete must not create a search index")
+	for _, gone := range []string{".index", ".graph.db"} {
+		if _, err := os.Stat(filepath.Join(root, gone)); err == nil {
+			t.Errorf("%s exists; okfw no longer maintains derived stores", gone)
+		}
 	}
 }
 

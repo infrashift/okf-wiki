@@ -7,8 +7,14 @@ description: Search {{ .Repo }}'s OKF wiki (.okfw/) for project knowledge that i
 
 The project keeps a local-first knowledge base in `.okfw/` at the project
 root: markdown **concepts** with YAML frontmatter, woven together by links.
-Search (Bleve), a link graph, and OKF `index.md` listings are maintained
-automatically on every change — no bookkeeping commands needed.
+
+**The files are the whole database.** Search and the link graph are computed
+from them on demand — there is no index to build and nothing to keep in sync,
+so a concept is findable the moment it is written and gone the moment it is
+deleted. This is the discovery model OKF describes: a consumer synthesizes the
+view it wants by scanning frontmatter (section 3.1), and every directory carries
+an auto-maintained `index.md` for progressive disclosure (section 8) — a cheap
+way to see what a directory holds before opening anything in it.
 
 If a command fails with "no OKF wiki found", run `okfw init` at the project
 root first.
@@ -49,7 +55,7 @@ use whichever surface you have.
 | what links here | `okfw backlinks <ref> --json` | `okfw_graph {"action":"backlinks","ref":…}` |
 
 CLI only: `okfw init`, `okfw move`, `okfw delete`, `okfw validate --all`,
-`okfw graph-sync`, `okfw index <file>`, `okfw install`. Every command is
+`okfw graph`, `okfw graph-query`, `okfw install`. Every command is
 self-documenting (`okfw <cmd> --help`) and read commands support `--json`.
 
 Results are capped and say so. A `truncated` field, or a `… N more` line,
@@ -59,7 +65,9 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
 
 ## Conventions that matter
 
-1. **Link actively — links are the product.** Connect related concepts with
+1. **Link actively — links are the product.** OKF section 6.1 treats every link
+   as a directed edge, which is what `backlinks` and `okfw graph` traverse.
+   Connect related concepts with
    plain markdown links using wiki-relative targets:
    `[Display Title](/research/protocols/deep-note--019f23d3.md)` (leading `/`
    = wiki root; `./relative.md` also works). Links power `backlinks` and the
@@ -125,7 +133,7 @@ since a relevant concept usually neighbours others → *then* fall back to sourc
 or fresh analysis for whatever the wiki did not cover.
 
 **Capturing.** Capture quickly → refine → link. Before creating, search to
-avoid duplicates and to find concepts the new note should link to. After
-substantive file edits made outside okfw tools, `okfw index <file>` (or any
-okfw mutation) refreshes the search index; `okfw graph-sync` refreshes the link
-graph and prunes entries whose files are gone.
+avoid duplicates and to find concepts the new note should link to. Edits made
+outside okfw need no follow-up command — search and the graph read the files
+directly. Only the `index.md` listings are generated, and every okfw mutation
+refreshes them.
