@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -176,6 +177,14 @@ func (z *Concept) IsStale(now time.Time) bool { return IsStale(z.StaleAfter, now
 
 // ParseFrontmatter extracts and parses YAML frontmatter from markdown content.
 // Frontmatter must be enclosed between "---" markers at the start of the file.
+//
+// It is lenient by design, because every read path goes through it: a field
+// whose value has the wrong shape (`tags: foo`, an unparseable `created`) is
+// left at its zero value instead of failing the whole concept. Failing used to
+// make the concept vanish from search, the graph, the listings and id lookup,
+// with no warning — so it could not even be found to be fixed. Strictness lives
+// in ParseAndValidate, which `okfw validate` and every writer use. Unparseable
+// YAML, or frontmatter that is not a mapping, is still an error.
 func ParseFrontmatter(content []byte) (*Concept, error) {
 	frontmatter, err := ExtractFrontmatter(content)
 	if err != nil {
@@ -183,11 +192,43 @@ func ParseFrontmatter(content []byte) (*Concept, error) {
 	}
 
 	var z Concept
-	if err := yaml.Unmarshal(frontmatter, &z); err != nil {
-		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+	if err := yaml.Unmarshal(frontmatter, &z); err == nil {
+		return &z, nil
 	}
 
+	var doc yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+	}
+	if doc.Kind == 0 || len(doc.Content) == 0 {
+		return &Concept{}, nil
+	}
+	m := doc.Content[0]
+	if m.Kind != yaml.MappingNode {
+		return nil, fmt.Errorf("failed to parse frontmatter: not a mapping")
+	}
+	// Decode one key at a time, so a bad value costs only its own field.
+	z = Concept{}
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: m.Content[i : i+2]}
+		_ = one.Decode(&z)
+	}
 	return &z, nil
+}
+
+// ConceptKey identifies a concept in a bundle: its frontmatter id, or, for a
+// concept without one, its OKF concept ID (section 2) — the bundle-relative path
+// minus ".md". okfw requires an id of the concepts it writes, but a bundle can
+// hold concepts it did not write, and the spec identifies those by path.
+func ConceptKey(z *Concept, bundleRel string) string {
+	if z.ID != "" {
+		return z.ID
+	}
+	rel := strings.TrimPrefix(filepath.ToSlash(bundleRel), "/")
+	if strings.HasSuffix(strings.ToLower(rel), ".md") {
+		rel = rel[:len(rel)-3]
+	}
+	return rel
 }
 
 // ExtractFrontmatter extracts raw YAML frontmatter bytes from markdown content.

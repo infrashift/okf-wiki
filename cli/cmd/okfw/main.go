@@ -426,23 +426,11 @@ Examples:
 				return err
 			}
 
-			// Determine the target ID
-			targetID := args[0]
-			targetTitle := ""
-
-			// If it's a file path, extract the ID from frontmatter
-			if strings.HasSuffix(targetID, ".md") {
-				content, err := os.ReadFile(targetID)
-				if err != nil {
-					return fmt.Errorf("failed to read file: %w", err)
-				}
-				z, err := config.ParseFrontmatter(content)
-				if err != nil {
-					return fmt.Errorf("failed to parse frontmatter: %w", err)
-				}
-				targetID = z.ID
-				targetTitle = z.Title
+			targetID, err := bundle.ConceptKeyOf(cfg, args[0])
+			if err != nil {
+				return err
 			}
+			targetTitle := ""
 
 			type Backlink struct {
 				ID       string `json:"id"`
@@ -917,11 +905,15 @@ Examples:
 				return err
 			}
 
+			key, err := bundle.ConceptKeyOf(cfg, args[0])
+			if err != nil {
+				return err
+			}
 			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			nodes := g.Backlinks(args[0])
+			nodes := g.Backlinks(key)
 
 			if graphQueryJSONFlag {
 				data, _ := json.Marshal(nodes)
@@ -950,14 +942,18 @@ Examples:
 				return err
 			}
 
+			key, err := bundle.ConceptKeyOf(cfg, args[0])
+			if err != nil {
+				return err
+			}
 			g, err := bundle.LoadGraph(cfg.RootPath)
 			if err != nil {
 				return err
 			}
-			if g.GetNode(args[0]) == nil {
+			if g.GetNode(key) == nil {
 				return fmt.Errorf("node %q not found", args[0])
 			}
-			nodes := g.FindConnected(args[0], graphQueryLimitFlag, graphQueryDepthFlag)
+			nodes := g.FindConnected(key, graphQueryLimitFlag, graphQueryDepthFlag)
 			edges := g.GetEdges(nodes)
 
 			if graphQueryJSONFlag {

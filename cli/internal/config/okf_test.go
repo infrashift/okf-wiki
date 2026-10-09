@@ -348,3 +348,47 @@ func TestGetKindFallsBackToType(t *testing.T) {
 		t.Errorf("GetKind = %q, want the note default", got)
 	}
 }
+
+// --- lenient reads ---
+
+// A field with the wrong shape costs only that field on read. Failing the whole
+// parse made the concept vanish from search, the graph, the listings and id
+// lookup, so it could not be found to be fixed; validation stays strict.
+func TestParseFrontmatterToleratesABadField(t *testing.T) {
+	for name, extra := range map[string]string{
+		"scalar tags":  "tags: foo\n",
+		"bad created":  "created: \"Jan 15 2024\"\n",
+		"list for x":   "x: [1, 2]\n",
+		"map for type": "status: {a: 1}\n",
+	} {
+		content := []byte("---\nid: \"019680f0-7e00-7abc-8def-1234567890ab\"\ntitle: \"Kept\"\ntype: \"note\"\n" + extra + "---\n\nbody\n")
+		z, err := ParseFrontmatter(content)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if z.Title != "Kept" || z.ID == "" || z.Type != "note" {
+			t.Errorf("%s: the good fields were lost: %+v", name, z)
+		}
+		if _, err := ParseAndValidate(content); err == nil {
+			t.Errorf("%s: strict validation accepted it", name)
+		}
+	}
+	for name, content := range map[string]string{
+		"not a mapping": "---\n- a\n- b\n---\n",
+		"bad yaml":      "---\ntitle: [unclosed\n---\n",
+	} {
+		if _, err := ParseFrontmatter([]byte(content)); err == nil {
+			t.Errorf("%s: parsed without error", name)
+		}
+	}
+}
+
+func TestConceptKey(t *testing.T) {
+	if got := ConceptKey(&Concept{ID: "abc"}, "dir/x.md"); got != "abc" {
+		t.Errorf("with an id: %q", got)
+	}
+	if got := ConceptKey(&Concept{}, "dir/x.MD"); got != "dir/x" {
+		t.Errorf("without an id: %q", got)
+	}
+}

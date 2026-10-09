@@ -495,3 +495,31 @@ func TestMoveConceptRepairsEveryLinkFormAndLeavesCodeAlone(t *testing.T) {
 		}
 	}
 }
+
+// A bundle okfw did not write has no ids at all. Its graph used to be empty
+// ("no valid concepts found"); concepts are now keyed by their OKF concept ID.
+func TestLoadGraphKeysConceptsWithoutIDsByPath(t *testing.T) {
+	_, root := testCfg(t)
+	writeConcept(t, root, "metrics/income.md", "---\ntype: Metric\ntitle: Income\n---\n"+
+		"Uses [revenue](../computations/revenue.md) and [profit](/computations/profit.md \"P\").\n")
+	writeConcept(t, root, "computations/revenue.md", "---\ntype: Attested Computation\ntitle: Revenue\n---\n# Revenue\n")
+	writeConcept(t, root, "computations/profit.md", "---\ntype: Attested Computation\ntitle: Profit\n---\n# Profit\n")
+
+	g, err := LoadGraph(root)
+	if err != nil {
+		t.Fatalf("LoadGraph: %v", err)
+	}
+	if g.NodeCount() != 3 {
+		t.Fatalf("nodes = %d, want 3", g.NodeCount())
+	}
+	back := g.Backlinks("computations/revenue")
+	if len(back) != 1 || back[0].ID != "metrics/income" {
+		t.Errorf("backlinks of computations/revenue = %+v, want metrics/income", back)
+	}
+	cfg := config.ConfigFor(root)
+	for _, ref := range []string{"computations/profit", "computations/profit.md", "/computations/profit.md"} {
+		if key, err := ConceptKeyOf(cfg, ref); err != nil || key != "computations/profit" {
+			t.Errorf("ConceptKeyOf(%q) = %q, %v", ref, key, err)
+		}
+	}
+}

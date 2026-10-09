@@ -1,8 +1,6 @@
 package bundle
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -138,38 +136,5 @@ func TestStripLegacyTodoFieldsLeavesRealLifecycleStatusAlone(t *testing.T) {
 		if strings.HasPrefix(d, "status=") {
 			t.Errorf("draft should not be reported as dropped: %v", dropped)
 		}
-	}
-}
-
-// --- PruneIndex ---
-
-func TestLiveConceptIDs(t *testing.T) {
-	cfg, root := testCfg(t)
-	_, id, err := CreateConcept(cfg, Spec{Title: "Real"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A reserved file and a hidden directory must not contribute ids.
-	if err := os.WriteFile(filepath.Join(root, "index.md"),
-		[]byte("---\nid: \"019680f0-7e00-7abc-8def-999999999999\"\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(root, ".index"), 0755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, ".index", "x.md"),
-		[]byte("---\nid: \"019680f0-7e00-7abc-8def-888888888888\"\n---\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	live, err := LiveConceptIDs(root)
-	if err != nil {
-		t.Fatalf("LiveConceptIDs: %v", err)
-	}
-	if !live[id] {
-		t.Errorf("missing the real concept %s", id)
-	}
-	if len(live) != 1 {
-		t.Errorf("got %d live ids, want 1: %v", len(live), live)
 	}
 }

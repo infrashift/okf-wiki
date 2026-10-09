@@ -113,12 +113,15 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 			return nil // unreadable: skip, do not fail the whole search
 		}
 		fm, err := config.ParseFrontmatter(content)
-		if err != nil || fm.ID == "" {
-			return nil // not a concept
+		if err != nil {
+			return nil // no parseable frontmatter: not a concept
 		}
 		abs, _ := filepath.Abs(p)
+		rel, _ := filepath.Rel(bundleRoot, p)
 		r := Result{
-			ID:          fm.ID,
+			// A concept okfw did not write may carry no id; its OKF concept ID
+			// (the path) is what identifies it, and what read and resolve accept.
+			ID:          config.ConceptKey(fm, rel),
 			Title:       fm.Title,
 			Type:        fm.Type,
 			Kind:        fm.GetKind(),

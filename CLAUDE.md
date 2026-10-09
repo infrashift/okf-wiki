@@ -108,6 +108,15 @@ conformant *third-party* bundles, so there are two distinct checks:
 `validate`/`validate --all` apply the strict schema, `validate --okf` implements
 the permissive §11 conformance check and nothing more.
 
+**The divergences bind writes and `validate`, never reads.** `ParseFrontmatter`
+is lenient — a field with the wrong shape is left at its zero value rather than
+failing the concept — and a concept with no `id` is keyed by its OKF concept ID
+(`config.ConceptKey`: the bundle-relative path minus `.md`) in search, the link
+graph and the listings. Strict decoding on reads made such a concept vanish from
+every view, so the one tool that could report it could not find it. Strictness
+lives in `ParseAndValidate`. `index-md`/`migrate` adopt an unmarked `index.md`
+only in a directory holding a concept okfw wrote (one with an `id`).
+
 **okfw has no task tracking.** It once carried `status`/`due`/`completed`/
 `priority` for a `todo` kind, where `status` collided with the field v0.2 spec'd
 for lifecycle. The feature was removed rather than namespaced — okfw is a

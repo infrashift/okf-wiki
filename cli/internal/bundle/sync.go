@@ -26,31 +26,6 @@ func AutoSync(cfg *config.Config, filePath string) error {
 	return nil
 }
 
-// LiveConceptIDs returns the frontmatter ids of every concept currently on disk
-// in the bundle.
-func LiveConceptIDs(root string) (map[string]bool, error) {
-	live := map[string]bool{}
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if fi.IsDir() {
-			if SkipWalkDir(root, p, fi.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(p, ".md") || IsReservedBase(fi.Name()) {
-			return nil
-		}
-		if id := config.ReadConceptID(p); id != "" {
-			live[id] = true
-		}
-		return nil
-	})
-	return live, err
-}
-
 // IndexMarker identifies an index.md that okfw generated and so may overwrite
 // or delete. OKF lets index files exist without any tool (section 8), and a
 // bundle can hold listings someone wrote by hand; okfw used to treat every
@@ -83,6 +58,10 @@ func AdoptIndexFiles(cfg *config.Config, root string) (int, error) {
 func writeIndexFiles(root string, adopt bool) (int, error) {
 	concepts := map[string][]indexEntry{}
 	dirs := map[string]bool{"": true}
+	// ours marks directories holding a concept okfw wrote (one with an id):
+	// the only places an unmarked listing is adopted. A directory of concepts
+	// okfw did not write is where a hand-written listing of them lives.
+	ours := map[string]bool{}
 
 	addDirChain := func(d string) {
 		for {
@@ -112,7 +91,7 @@ func writeIndexFiles(root string, adopt bool) (int, error) {
 			return nil
 		}
 		z, err := config.ParseFrontmatter(content)
-		if err != nil || z.ID == "" {
+		if err != nil {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -123,6 +102,9 @@ func writeIndexFiles(root string, adopt bool) (int, error) {
 			title = fi.Name()
 		}
 		concepts[d] = append(concepts[d], indexEntry{title, z.Description, fi.Name(), z.Type})
+		if z.ID != "" {
+			ours[d] = true
+		}
 		addDirChain(d)
 		return nil
 	})
@@ -182,7 +164,7 @@ func writeIndexFiles(root string, adopt bool) (int, error) {
 			if bytes.Equal(have, want) {
 				continue
 			}
-			if !IsGeneratedIndex(have) && !adopt {
+			if !IsGeneratedIndex(have) && !(adopt && ours[d]) {
 				continue // someone else's listing
 			}
 		}

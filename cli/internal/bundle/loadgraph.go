@@ -60,42 +60,83 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 	// downstream must not vary between runs.
 	sort.Strings(files)
 
-	g := graph.New()
+	type parsed struct {
+		node    *graph.Node
+		body    string
+		fromDir string
+	}
+	var concepts []parsed
+	keyByRel := map[string]string{}
 	for _, filePath := range files {
-		node, err := parseConceptNode(filePath, bundleRoot)
+		content, err := os.ReadFile(filePath)
 		if err != nil {
-			continue // reserved file, malformed frontmatter, or no id
+			continue
 		}
-		g.AddNode(node)
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			continue // no parseable frontmatter: not a concept
+		}
+		absPath, _ := filepath.Abs(filePath)
+		rel, err := relSlash(bundleRoot, absPath)
+		if err != nil {
+			continue
+		}
+		key := config.ConceptKey(z, rel)
+		keyByRel[rel] = key
+		concepts = append(concepts, parsed{
+			node: &graph.Node{
+				ID:       key,
+				Title:    z.Title,
+				FilePath: absPath,
+				Project:  z.Project,
+				Parent:   z.Parent,
+				Tags:     z.Tags,
+			},
+			body:    config.ExtractBody(content),
+			fromDir: RelDir(rel),
+		})
+	}
+
+	// Resolve links from what the walk already read; only a target outside a
+	// subtree walk needs reading.
+	keyOf := func(rel string) string {
+		if k, ok := keyByRel[rel]; ok {
+			return k
+		}
+		k := config.ReadConceptKey(bundleRoot, rel)
+		keyByRel[rel] = k
+		return k
+	}
+	g := graph.New()
+	for _, c := range concepts {
+		c.node.Links = config.ResolveBodyLinks(c.body, c.fromDir, keyOf)
+		g.AddNode(c.node)
 	}
 	if g.NodeCount() == 0 {
-		return nil, fmt.Errorf("no valid concepts found in %s", path)
+		return nil, fmt.Errorf("no concepts found in %s", path)
 	}
 	g.BuildRelationships()
 	return g, nil
 }
 
-func parseConceptNode(filePath, bundleRoot string) (*graph.Node, error) {
-	content, err := os.ReadFile(filePath)
+// ConceptKeyOf resolves any concept reference a command accepts — frontmatter
+// id, OKF concept ID, or file path — to the concept key the link graph uses. A
+// bare id that resolves to no file is returned as given, so a query about a
+// deleted concept still finds the links left pointing at it.
+func ConceptKeyOf(cfg *config.Config, ref string) (string, error) {
+	p, err := ResolveConceptPath(cfg, ref)
 	if err != nil {
-		return nil, err
+		if strings.HasSuffix(ref, ".md") || strings.Contains(ref, "/") {
+			return "", err
+		}
+		return ref, nil
 	}
-	z, err := config.ParseFrontmatter(content)
+	rel, err := relSlash(cfg.RootPath, p)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	if z.ID == "" {
-		return nil, fmt.Errorf("not a valid concept: no id field")
+	if k := config.ReadConceptKey(cfg.RootPath, rel); k != "" {
+		return k, nil
 	}
-	absPath, _ := filepath.Abs(filePath)
-	body := config.ExtractBody(content)
-	return &graph.Node{
-		ID:       z.ID,
-		Title:    z.Title,
-		FilePath: absPath,
-		Project:  z.Project,
-		Parent:   z.Parent,
-		Tags:     z.Tags,
-		Links:    config.ResolveBodyLinkIDs(body, absPath, bundleRoot),
-	}, nil
+	return "", fmt.Errorf("not a concept: %s", ref)
 }

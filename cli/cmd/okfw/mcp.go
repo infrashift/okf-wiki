@@ -695,20 +695,8 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		if id == "" {
 			return errResult(fmt.Errorf("ref is required for %s", a.Action))
 		}
-		if strings.HasSuffix(id, ".md") || strings.Contains(id, "/") {
-			p, err := bundle.ResolveConceptPath(cfg, id)
-			if err != nil {
-				return errResult(err)
-			}
-			content, err := os.ReadFile(p)
-			if err != nil {
-				return errResult(err)
-			}
-			z, err := config.ParseFrontmatter(content)
-			if err != nil || z.ID == "" {
-				return errResult(fmt.Errorf("not a concept: %s", a.Ref))
-			}
-			id = z.ID
+		if id, err = bundle.ConceptKeyOf(cfg, id); err != nil {
+			return errResult(err)
 		}
 	}
 

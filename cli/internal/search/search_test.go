@@ -137,3 +137,27 @@ func TestStaleFilterReadsInstants(t *testing.T) {
 		t.Errorf("stale hits = %v, want [past] (a bare date is not a valid instant)", titles)
 	}
 }
+
+// Concepts okfw did not write, or that carry one malformed field, must still
+// be findable: hiding them from search left no way to find them to fix them.
+// A concept without an id is identified by its OKF concept ID.
+func TestSearchFindsConceptsOkfwWouldReject(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "metrics/revenue.md", "---\ntype: Metric\ntitle: Revenue\n---\nRecognized revenue.\n")
+	write(t, root, "scalar-tags.md", "---\nid: \"019680f0-7e00-7abc-8def-100000000001\"\ntitle: \"Scalar Revenue Tags\"\n"+
+		"type: \"note\"\ntags: revenue\ncreated: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
+	hits, total, err := Search(root, Options{Query: "revenue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, h := range hits {
+		ids[h.ID] = true
+	}
+	if total != 2 || !ids["metrics/revenue"] || !ids["019680f0-7e00-7abc-8def-100000000001"] {
+		t.Errorf("hits = %+v, want the id-less concept (as metrics/revenue) and the scalar-tags one", hits)
+	}
+	if hits, _, _ := Search(root, Options{Type: "Metric"}); len(hits) != 1 {
+		t.Errorf("--type Metric found %d, want 1", len(hits))
+	}
+}
