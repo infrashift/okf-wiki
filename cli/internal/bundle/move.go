@@ -123,8 +123,7 @@ type DeleteResult struct {
 	Inbound []string // concepts left pointing at nothing
 }
 
-// DeleteConcept removes a concept and everything derived from it: its search
-// line in the index.md listings.
+// DeleteConcept removes a concept and its line in the index.md listings.
 //
 // Inbound links are reported, not repaired. OKF section 6.1 requires consumers to
 // tolerate a link whose target does not exist — it "may simply represent
@@ -304,15 +303,12 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		return nil, err
 	}
 
-	// 3. Refresh the listings for everything whose content or location changed.
-	//    Nothing else needs re-syncing: search and the link graph read the files.
-	if err := AutoSync(cfg, newAbs); err != nil {
-		return nil, err
-	}
-	for _, rel := range res.Rewrote {
-		if err := AutoSync(cfg, filepath.Join(cfg.RootPath, filepath.FromSlash(rel))); err != nil {
-			return nil, err
-		}
+	// 3. Refresh the listings once. Nothing else needs re-syncing: search and
+	//    the link graph read the files. The refresh walks the whole bundle, and
+	//    it used to run once per rewritten file — a move with 105 inbound
+	//    links took 11 seconds on a 3,000-concept bundle.
+	if _, err := WriteIndexFiles(cfg, cfg.RootPath); err != nil {
+		return nil, fmt.Errorf("failed to refresh index.md files: %w", err)
 	}
 	return res, nil
 }
