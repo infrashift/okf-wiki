@@ -63,7 +63,7 @@ func (v *VerifiedList) UnmarshalYAML(value *yaml.Node) error {
 	return fmt.Errorf("verified must be a mapping or a list of mappings")
 }
 
-// UsageWindow frames usage_count values with a date range (OKF section 5.1).
+// UsageWindow frames usage_count values with a datetime range (OKF section 5.1).
 type UsageWindow struct {
 	From string `yaml:"from,omitempty"`
 	To   string `yaml:"to,omitempty"`
@@ -171,21 +171,8 @@ func (z *Concept) LastVerifiedAt() time.Time {
 	return latest
 }
 
-// IsStale reports whether the concept is stale as of today: stale_after is an
-// absolute date and the comparison is inclusive of the boundary day
-// (OKF section 5.5). An absent or unparseable stale_after is never stale.
-func (z *Concept) IsStale(today time.Time) bool {
-	raw := z.StaleAfter
-	if len(raw) > 10 {
-		raw = raw[:10] // tolerate a full datetime
-	}
-	cutoff, err := time.Parse("2006-01-02", raw)
-	if err != nil {
-		return false
-	}
-	y, m, d := today.Date()
-	return !time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Before(cutoff)
-}
+// IsStale reports whether the concept is stale at now (OKF section 5.5).
+func (z *Concept) IsStale(now time.Time) bool { return IsStale(z.StaleAfter, now) }
 
 // ParseFrontmatter extracts and parses YAML frontmatter from markdown content.
 // Frontmatter must be enclosed between "---" markers at the start of the file.

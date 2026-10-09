@@ -120,7 +120,7 @@ func TestMCPCreateSearchReadUpdate(t *testing.T) {
 		t.Fatalf("set_stale_after failed: %s", text)
 	}
 	text, _ = callTool(t, s, "read", fmt.Sprintf(`{"ref":%q}`, created.Path))
-	if !strings.Contains(text, `status: "deprecated"`) || !strings.Contains(text, `stale_after: "2026-12-31"`) {
+	if !strings.Contains(text, `status: "deprecated"`) || !strings.Contains(text, `stale_after: "2026-12-31T00:00:00Z"`) {
 		t.Errorf("lifecycle fields not written:\n%s", text)
 	}
 

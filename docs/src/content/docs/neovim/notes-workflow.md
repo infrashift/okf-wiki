@@ -402,7 +402,7 @@ Search as you type:
 :OkfwSearch --status draft
 :OkfwSearch --status deprecated
 
-" Find concepts whose stale_after date has passed
+" Find concepts whose stale_after instant has been reached
 :OkfwSearch --stale
 
 " Combine flags with a text query

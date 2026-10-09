@@ -120,7 +120,7 @@ Search ~
                           --type {val}       free-form OKF type (e.g. note, issue)
                           --kind {val}       note, daily-note, issue
                           --status {val}     draft, stable, deprecated
-                          --stale            stale_after date has passed
+                          --stale            stale_after instant has been reached
                           --tag {val}        filter by tag (repeatable)
 
                         Examples: >vim

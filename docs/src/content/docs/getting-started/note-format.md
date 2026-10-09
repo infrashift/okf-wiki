@@ -60,12 +60,19 @@ OKF spec §5.4–5.5. An absent `status` means `stable`.
 | Field | Format | Description |
 |-------|--------|-------------|
 | `status` | `draft`, `stable`, `deprecated` | `draft`: not yet reviewed, possibly incomplete. `stable`: ready for consumption (the default). `deprecated`: kept for links and history, no longer current. Set with `okfw set-lifecycle`. |
-| `stale_after` | `YYYY-MM-DD` | A concept is **stale** when today is on or after this date. An absolute date rather than a TTL, so staleness is a plain comparison that needs no record of when the concept was read. Set with `okfw set-stale-after`; find them with `okfw search --stale`. |
+| `stale_after` | ISO 8601 datetime with offset | A concept is **stale** once now is on or after this instant. An absolute instant rather than a TTL, so staleness is a plain comparison that needs no record of when the concept was read. Set with `okfw set-stale-after`; find them with `okfw search --stale`. |
 
 ```yaml
 status: "deprecated"
-stale_after: "2026-12-31"
+stale_after: "2026-12-31T00:00:00Z"
 ```
+
+Every timestamp in OKF — `stale_after`, `generated.at`, `verified[].at`,
+`sources[].last_modified` and `usage_window` — is an ISO 8601 datetime with an
+explicit UTC offset. A bare `2026-12-31` names a different instant in every
+timezone, so `okfw validate` rejects it; the writers accept one and store it as
+midnight UTC, and `okfw migrate` upgrades the bare dates older okfw versions
+wrote.
 
 ## Trust fields
 
@@ -113,13 +120,13 @@ OKF spec §5.1. Append entries with `okfw add-source`.
 | `sources[].title` | String | Human-readable label |
 | `sources[].author` | Actor | Who or what produced the source |
 | `sources[].usage_count` | Integer | How often the resource was exercised over `usage_window`. Read it as liveness and trend, not as a score. |
-| `sources[].last_modified` | `YYYY-MM-DD` | When the source itself last changed — distinct from `generated.at`, which is when the concept was written |
+| `sources[].last_modified` | ISO 8601 datetime with offset | When the source itself last changed — distinct from `generated.at`, which is when the concept was written |
 | `usage_window` | `{from, to}` | Written once as a sibling of `sources`, framing every `usage_count`. A single entry may carry its own to override it. |
 
 ```yaml
 usage_window:
-  from: "2026-01-01"
-  to: "2026-06-30"
+  from: "2026-01-01T00:00:00Z"
+  to: "2026-06-30T00:00:00Z"
 sources:
   - resource: "https://example.com/schema"
     id: "ga4-schema"

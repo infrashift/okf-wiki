@@ -68,8 +68,20 @@ field nothing can write is indistinguishable from one that does not exist —
 it, and that is the mistake to avoid repeating:
 
 - **Lifecycle** (§5.4–5.5): `status: draft|stable|deprecated` (absent ⇒ `stable`)
-  and `stale_after`, an absolute date; stale means `today >= stale_after`,
-  inclusive. Writers: `set-lifecycle`, `set-stale-after`. Filter: `search --stale`.
+  and `stale_after`, an absolute instant; stale means `now >= stale_after`
+  (`config.IsStale`, the one implementation). Writers: `set-lifecycle`,
+  `set-stale-after`. Filter: `search --stale`.
+- **Timestamps** (§5): every timestamp-valued key — `stale_after`,
+  `generated.at`, `verified[].at`, `sources[].last_modified`, `usage_window`,
+  and okfw's own `created`/`timestamp` — is an ISO 8601 datetime with an
+  explicit offset (`#DateTime` in the schema, `dateTimeRe` in Go; keep them in
+  step). A bare date is rejected on read and never treated as stale — the spec
+  moved off dates because one names a different instant in every timezone, and a
+  midnight-UTC fallback would bring that back. Writers accept a bare date and
+  store midnight UTC; `okfw migrate` upgrades the ones older okfw wrote.
+  Validation decodes frontmatter through `yaml.Node` and keeps timestamp scalars
+  as written: decoded into `map[string]interface{}`, yaml.v3 turns an unquoted
+  `2026-12-31` into a `time.Time` that reaches CUE as a valid datetime.
 - **Trust** (§5.2–5.3): `generated{by,at}` and `verified[]{by,at}`. A bare
   `verified` mapping MUST normalize to a one-element list — done in
   `VerifiedList.UnmarshalYAML`, pinned by a test. Trust tier keys **strictly** on

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Changed (breaking)
+- **Every OKF timestamp is now an ISO 8601 datetime with an explicit offset**, following the spec's 2026-08-21 revision (§5). `stale_after`, `sources[].last_modified` and `usage_window` were bare `YYYY-MM-DD` dates; a bare date names a different instant in every timezone, so the same bundle could be stale in one office and fresh in another. `okfw validate` now rejects bare dates and offset-less datetimes in every timestamp field (`#ISOTime` used to accept anything after the seconds), whether quoted or not. Staleness is `now >= stale_after` compared as instants, and the one implementation (`config.IsStale`) replaces two that disagreed — `search --stale` never reported a spec-form value, and was a day off east of UTC. The writers (`set-stale-after`, `add-source`, and the MCP actions) accept a bare date and store midnight UTC. **Run `okfw migrate`** to upgrade bare dates already in a bundle; it reports, rather than guesses at, any timestamp it cannot repair.
+
 ### Removed (breaking)
 - **graphy is decommissioned.** The code knowledge-graph binary (`cli/cmd/graphy`, `cli/internal/graphy`), its `build-graphy`/`install-graphy`/`graphy-e2e` make targets, its Containerfile stages and the `graphy-e2e.sh` gate are gone, and the build is pure Go again — tree-sitter, bbolt, gonum and hcl left `go.mod`. The okfw surface that existed only to serve it went with it:
   - the `graphy:` frontmatter extension block and `kind: code` are no longer in the concept schema, so concepts written by `graphy export okfw` now fail `okfw validate`. Delete the exported directory (`.okfw/graphy/` by default) rather than migrating it; it was generated from source and carries nothing hand-written.

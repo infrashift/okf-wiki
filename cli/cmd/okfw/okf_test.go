@@ -407,3 +407,88 @@ func TestRunMigrateLeavesCleanConceptsAlone(t *testing.T) {
 		t.Errorf("a clean concept must not be rewritten:\n%s", after)
 	}
 }
+
+// legacyDatedConcept is what okfw wrote before OKF required datetimes: bare
+// dates in every field that is now an instant, quoted and unquoted.
+const legacyDatedConcept = `---
+id: "019680f0-7e00-7abc-8def-1234567890ab"
+title: "Pricing"
+type: "note"
+tags: []
+stale_after: "2026-12-31"
+usage_window:
+  from: 2026-01-01
+  to: "2026-06-30"
+sources:
+  - resource: "https://example.com/schema"
+    last_modified: "2026-05-01"
+    usage_window: {from: "2026-02-01", to: "2026-03-01"}
+created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
+---
+
+# Pricing
+`
+
+func TestRunMigrateUpgradesDatesToDatetimes(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	p := writeConceptFile(t, root, "pricing--0001.md", legacyDatedConcept)
+
+	if err := runValidateAll(cfg, root); err == nil {
+		t.Fatal("bare dates should fail the current schema")
+	}
+	if err := runMigrate(cfg, root, false); err != nil {
+		t.Fatalf("runMigrate: %v", err)
+	}
+	got := readFile(t, p)
+	z, err := config.ParseAndValidate([]byte(got))
+	if err != nil {
+		t.Fatalf("migrated concept does not validate: %v\n%s", err, got)
+	}
+	if z.StaleAfter != "2026-12-31T00:00:00Z" ||
+		z.UsageWindow.From != "2026-01-01T00:00:00Z" || z.UsageWindow.To != "2026-06-30T00:00:00Z" ||
+		z.Sources[0].LastModified != "2026-05-01T00:00:00Z" ||
+		z.Sources[0].UsageWindow.From != "2026-02-01T00:00:00Z" || z.Sources[0].UsageWindow.To != "2026-03-01T00:00:00Z" {
+		t.Errorf("not every date was upgraded:\n%s", got)
+	}
+	// Reformatting a field is not a change to content.
+	if !z.Timestamp.Equal(time.Date(2026, 2, 13, 10, 45, 0, 0, time.UTC)) {
+		t.Errorf("timestamp moved to %s", z.Timestamp)
+	}
+	if !strings.HasSuffix(got, "\n# Pricing\n") {
+		t.Errorf("body changed:\n%s", got)
+	}
+
+	once := got
+	if err := runMigrate(cfg, root, false); err != nil {
+		t.Fatal(err)
+	}
+	if twice := readFile(t, p); twice != once {
+		t.Errorf("a second migrate changed the file:\n%s\n---\n%s", once, twice)
+	}
+}
+
+// A datetime with no offset names an instant only its author knows; migrate
+// must neither guess nor fail the whole run over it.
+func TestRunMigrateLeavesUnrepairableTimestampsAlone(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	content := strings.Replace(legacyDatedConcept, `stale_after: "2026-12-31"`, `stale_after: "2026-12-31T00:00:00"`, 1)
+	p := writeConceptFile(t, root, "pricing--0001.md", content)
+
+	if err := runMigrate(cfg, root, false); err != nil {
+		t.Fatalf("runMigrate: %v", err)
+	}
+	got := readFile(t, p)
+	if !strings.Contains(got, `stale_after: "2026-12-31T00:00:00"`) {
+		t.Errorf("an offset-less datetime was rewritten:\n%s", got)
+	}
+	if !strings.Contains(got, `last_modified: "2026-05-01T00:00:00Z"`) {
+		t.Errorf("the repairable fields beside it were not upgraded:\n%s", got)
+	}
+	bad, err := bundle.TimestampsNeedingRepair([]byte(got))
+	if err != nil || len(bad) != 1 || bad[0] != "stale_after" {
+		t.Errorf("TimestampsNeedingRepair = %v, %v; want [stale_after]", bad, err)
+	}
+}

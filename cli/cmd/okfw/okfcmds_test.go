@@ -105,8 +105,15 @@ func TestSetStaleAfterCmdAndClear(t *testing.T) {
 		t.Fatalf("set-stale-after: %v", err)
 	}
 	_, z := readConcept(t, cfg)
-	if z.StaleAfter != "2026-12-31" {
+	// A bare date is accepted at the CLI and written in the OKF form.
+	if z.StaleAfter != "2026-12-31T00:00:00Z" {
 		t.Fatalf("stale_after = %q", z.StaleAfter)
+	}
+	if _, err := runCmd(t, newSetStaleAfterCmd(), id, "2027-01-01T09:00:00+05:30"); err != nil {
+		t.Fatalf("set-stale-after with an offset: %v", err)
+	}
+	if _, z = readConcept(t, cfg); z.StaleAfter != "2027-01-01T09:00:00+05:30" {
+		t.Fatalf("a datetime must be kept as written, got %q", z.StaleAfter)
 	}
 
 	if _, err := runCmd(t, newSetStaleAfterCmd(), id, "--clear"); err != nil {
@@ -121,7 +128,7 @@ func TestSetStaleAfterCmdAndClear(t *testing.T) {
 func TestSetStaleAfterCmdRejectsBadDate(t *testing.T) {
 	cfg := bundleAt(t)
 	id := seedConcept(t, cfg)
-	for _, bad := range []string{"31-12-2026", "2026-13-01", "tomorrow"} {
+	for _, bad := range []string{"31-12-2026", "2026-13-01", "tomorrow", "2026-12-31T00:00:00"} {
 		if _, err := runCmd(t, newSetStaleAfterCmd(), id, bad); err == nil {
 			t.Errorf("set-stale-after %q should fail", bad)
 		}
@@ -257,7 +264,10 @@ func TestAddSourceCmd(t *testing.T) {
 	if s.UsageCount == nil || *s.UsageCount != 412 {
 		t.Errorf("usage_count = %v", s.UsageCount)
 	}
-	if s.UsageWindow == nil || s.UsageWindow.From != "2026-01-01" || s.UsageWindow.To != "2026-06-30" {
+	if s.LastModified != "2026-05-01T00:00:00Z" {
+		t.Errorf("last_modified = %q, want the bare date normalized", s.LastModified)
+	}
+	if s.UsageWindow == nil || s.UsageWindow.From != "2026-01-01T00:00:00Z" || s.UsageWindow.To != "2026-06-30T00:00:00Z" {
 		t.Errorf("usage_window = %+v", s.UsageWindow)
 	}
 

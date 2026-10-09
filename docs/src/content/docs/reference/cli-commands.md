@@ -320,8 +320,8 @@ Concepts with no `status` are `stable`, and are returned by `--status stable`.
 okfw search --stale
 ```
 
-Returns concepts whose `stale_after` date has passed, inclusive of the boundary
-day. Set the date with `okfw set-stale-after`.
+Returns concepts whose `stale_after` instant has been reached (now on or after
+it). Set it with `okfw set-stale-after`.
 
 ### Limit results
 ```bash
@@ -547,12 +547,14 @@ writer, so no field is set-able only by hand-editing YAML.
 ### Lifecycle
 ```bash
 okfw set-lifecycle 019f0494 deprecated   # draft | stable | deprecated
-okfw set-stale-after 019f0494 2026-12-31
+okfw set-stale-after 019f0494 2026-12-31T00:00:00Z
+okfw set-stale-after 019f0494 2026-12-31          # stored as 2026-12-31T00:00:00Z
 okfw set-stale-after 019f0494 --clear
 ```
 
-An absent `status` means `stable`. A concept is stale when today is on or after
-`stale_after` — an absolute date, not a TTL.
+An absent `status` means `stable`. A concept is stale once now is on or after
+`stale_after` — an absolute instant, not a TTL. OKF requires an ISO 8601
+datetime with a UTC offset; a bare date is accepted and stored as midnight UTC.
 
 ### Trust
 ```bash
@@ -574,7 +576,7 @@ two equal.
 ```bash
 okfw add-source 019f0494 --resource https://example.com/schema --id ga4-schema
 okfw add-source 019f0494 --resource "all queries in project X" \
-    --usage-count 412 --usage-window 2026-01-01..2026-06-30
+    --usage-count 412 --usage-window 2026-01-01T00:00:00Z..2026-06-30T00:00:00Z
 ```
 
 `--resource` is required, and names either something a consumer can follow or a
@@ -726,7 +728,7 @@ Usage: `okfw root`
 | `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
 | `--type` | `-t` | - | Filter by the free-form OKF `type` field |
 | `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`) |
-| `--stale` | - | `false` | Only concepts whose `stale_after` date has passed |
+| `--stale` | - | `false` | Only concepts whose `stale_after` instant has been reached |
 | `--limit` | `-l` | `20` | Maximum number of results |
 | `--json` | - | `false` | Output as JSON |
 | `--help` | `-h` | - | Show help |
@@ -806,7 +808,7 @@ Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
 
 ### `okfw set-stale-after`
 
-Usage: `okfw set-stale-after <id_or_file> [YYYY-MM-DD]`
+Usage: `okfw set-stale-after <id_or_file> [DATETIME]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -843,8 +845,8 @@ Usage: `okfw add-source <id_or_file> --resource <uri>`
 | `--title` | - | - | Human-readable label |
 | `--author` | - | - | Actor who produced the source |
 | `--usage-count` | - | - | How often the resource was exercised |
-| `--last-modified` | - | - | When the source itself last changed (YYYY-MM-DD) |
-| `--usage-window` | - | - | Date range framing `--usage-count`, as `FROM..TO` |
+| `--last-modified` | - | - | When the source itself last changed (ISO 8601 datetime; a bare date means midnight UTC) |
+| `--usage-window` | - | - | Datetime range framing `--usage-count`, as `FROM..TO` |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw set-resource`

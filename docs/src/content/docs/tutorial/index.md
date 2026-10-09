@@ -524,7 +524,7 @@ Find them later with `okfw search --status draft`.
 ### Give a concept a shelf life
 
 ```bash
-okfw set-stale-after infra/pricing--019f0494 2026-12-31
+okfw set-stale-after infra/pricing--019f0494 2026-12-31T00:00:00Z
 ```
 
 A concept is stale once today is on or after that date. `okfw search --stale`
@@ -694,7 +694,7 @@ okfw index
 | `okfw validate --okf [path]` | Validate whole-wiki OKF conformance (permissive) |
 | `okfw migrate [path]` | Bring a pre-0.2 wiki up to the current schema |
 | `okfw set-lifecycle <ref> <status>` | Set draft/stable/deprecated |
-| `okfw set-stale-after <ref> <date>` | Set the staleness date |
+| `okfw set-stale-after <ref> <datetime>` | Set the staleness instant |
 | `okfw verify <ref>` | Record a verification event |
 | `okfw add-source <ref> --resource <uri>` | Append a provenance source |
 | `okfw set-resource <ref> <uri>` | Set the described asset's URI |

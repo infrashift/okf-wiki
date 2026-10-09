@@ -35,26 +35,27 @@
 
 #Actor: string & !="" // "<producer>/<version>", "human:<id>", or "process:<id>"
 
-#ISODate: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-#ISOTime: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.*"
+// OKF section 5: every timestamp is an ISO 8601 datetime with an explicit UTC
+// offset. Keep in step with dateTimeRe in timestamps.go.
+#DateTime: =~"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})$"
 
 #ConceptID: =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 // Trust (OKF section 5.2)
 #Generated: {
 	by:  #Actor
-	at?: #ISOTime
+	at?: #DateTime
 }
 
 #Verification: {
 	by:  #Actor
-	at?: #ISOTime
+	at?: #DateTime
 }
 
 // Provenance (OKF section 5.1)
 #UsageWindow: {
-	from?: #ISODate
-	to?:   #ISODate
+	from?: #DateTime
+	to?:   #DateTime
 }
 
 #Source: {
@@ -63,7 +64,7 @@
 	title?:        string & !=""
 	author?:       #Actor
 	usage_count?:  int & >=0
-	last_modified?: #ISODate
+	last_modified?: #DateTime
 	usage_window?: #UsageWindow // overrides the concept-level window
 }
 
@@ -78,7 +79,7 @@
 	// --- OKF lifecycle (section 5.4-5.5) ---
 	// Absent means "stable".
 	status?:      "draft" | "stable" | "deprecated"
-	stale_after?: #ISODate
+	stale_after?: #DateTime
 
 	// --- OKF trust (section 5.2) ---
 	generated?: #Generated
@@ -93,8 +94,8 @@
 	kind:      *"note" | "daily-note" | "issue"
 	project?:  string
 	parent?:   #ConceptID
-	created:   #ISOTime
-	timestamp: #ISOTime // mirrors generated.at; see TouchTimestamp
+	created:   #DateTime
+	timestamp: #DateTime // mirrors generated.at; see TouchTimestamp
 	category?: string   // legacy (untethered/tethered), tolerated but ignored
 
 	// The one open struct in an otherwise closed schema: user-defined metadata

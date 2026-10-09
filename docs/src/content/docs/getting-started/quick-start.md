@@ -77,7 +77,7 @@ okfw daily --list                         # List recent daily notes
 
 # OKF metadata (okfw has no task tracking)
 okfw set-lifecycle 019f0494 deprecated    # draft | stable | deprecated
-okfw set-stale-after 019f0494 2026-12-31  # mark a shelf life
+okfw set-stale-after 019f0494 2026-12-31T00:00:00Z  # mark a shelf life
 okfw search --status draft                # find unreviewed concepts
 okfw search --stale                       # find concepts past stale_after
 okfw verify 019f0494                      # record that you reviewed it

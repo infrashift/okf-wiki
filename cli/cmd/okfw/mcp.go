@@ -152,7 +152,7 @@ func mcpTools() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"ref":    str("concept id or path"),
 				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
-				"value":  str("project | draft|stable|deprecated | YYYY-MM-DD | comma-separated tags | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
+				"value":  str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
 			}, "ref", "action", "value"),
 		},
 		{
@@ -566,10 +566,11 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"status": a.Value})
 	case "set_stale_after":
-		if _, perr := time.Parse("2006-01-02", a.Value); perr != nil {
-			return errResult(fmt.Errorf("invalid stale_after %q: want YYYY-MM-DD", a.Value))
+		v, nerr := config.NormalizeDateTime(a.Value)
+		if nerr != nil {
+			return errResult(fmt.Errorf("invalid stale_after: %w", nerr))
 		}
-		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"stale_after": a.Value})
+		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"stale_after": v})
 	case "add_tags":
 		var tags []string
 		for _, t := range strings.Split(a.Value, ",") {
@@ -628,6 +629,9 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 			}
 			from, to, werr := parseUsageWindow(in.UsageWindow)
 			if werr != nil {
+				return errResult(werr)
+			}
+			if in.LastModified, werr = normalizeOptionalDateTime("last_modified", in.LastModified); werr != nil {
 				return errResult(werr)
 			}
 			e = sourceEntry{

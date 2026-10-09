@@ -127,14 +127,18 @@ Examples:
 func newSetStaleAfterCmd() *cobra.Command {
 	var clear bool
 	cmd := &cobra.Command{
-		Use:   "set-stale-after <id_or_file> [YYYY-MM-DD]",
-		Short: "Set the date after which a concept counts as stale",
-		Long: `Set stale_after (OKF spec section 5.5). A concept is stale when today is on
-or after this date — an absolute date rather than a TTL, so staleness is a plain
-comparison that needs no record of when the concept was read.
+		Use:   "set-stale-after <id_or_file> [DATETIME]",
+		Short: "Set the instant after which a concept counts as stale",
+		Long: `Set stale_after (OKF spec section 5.5). A concept is stale once now is on or
+after this instant — an absolute instant rather than a TTL, so staleness is a
+plain comparison that needs no record of when the concept was read.
+
+OKF requires an ISO 8601 datetime with an explicit UTC offset. A bare
+YYYY-MM-DD is accepted here and written as midnight UTC.
 
 Examples:
-  okfw set-stale-after ./notes/pricing.md 2026-12-31
+  okfw set-stale-after ./notes/pricing.md 2026-12-31T00:00:00Z
+  okfw set-stale-after ./notes/pricing.md 2026-12-31          # 2026-12-31T00:00:00Z
   okfw set-stale-after ./notes/pricing.md --clear`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -150,11 +154,11 @@ Examples:
 				return nil
 			}
 			if len(args) < 2 {
-				return fmt.Errorf("a date is required (or use --clear)")
+				return fmt.Errorf("a datetime is required (or use --clear)")
 			}
-			date := args[1]
-			if _, err := time.Parse("2006-01-02", date); err != nil {
-				return fmt.Errorf("invalid date %q: want YYYY-MM-DD", date)
+			date, err := config.NormalizeDateTime(args[1])
+			if err != nil {
+				return fmt.Errorf("invalid stale_after: %w", err)
 			}
 			path, err := editConcept(args[0], func(m *yaml.Node) error {
 				bundle.MapSetString(m, "stale_after", date)
@@ -232,7 +236,10 @@ because reordering the list would silently misattribute every claim.
 Examples:
   okfw add-source ./notes/ga4.md --resource https://example.com/schema --id ga4-schema
   okfw add-source 019680f0 --resource "all queries in project X" --usage-count 412 \
-      --usage-window 2026-01-01..2026-06-30`,
+      --usage-window 2026-01-01T00:00:00Z..2026-06-30T00:00:00Z
+
+Datetimes are ISO 8601 with a UTC offset, as OKF requires; a bare YYYY-MM-DD
+is accepted and written as midnight UTC.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(resource) == "" {
@@ -242,10 +249,8 @@ Examples:
 			if err != nil {
 				return err
 			}
-			if lastModified != "" {
-				if _, err := time.Parse("2006-01-02", lastModified); err != nil {
-					return fmt.Errorf("invalid --last-modified %q: want YYYY-MM-DD", lastModified)
-				}
+			if lastModified, err = normalizeOptionalDateTime("last_modified", lastModified); err != nil {
+				return err
 			}
 
 			path, err := editConcept(args[0], addSourceMutator(sourceEntry{
@@ -266,8 +271,8 @@ Examples:
 	cmd.Flags().StringVar(&title, "title", "", "Human-readable label")
 	cmd.Flags().StringVar(&author, "author", "", "Actor who produced the source")
 	cmd.Flags().IntVar(&usageCount, "usage-count", 0, "How often the resource was exercised")
-	cmd.Flags().StringVar(&lastModified, "last-modified", "", "When the source itself last changed (YYYY-MM-DD)")
-	cmd.Flags().StringVar(&usageWindow, "usage-window", "", "Date range framing usage-count, as FROM..TO")
+	cmd.Flags().StringVar(&lastModified, "last-modified", "", "When the source itself last changed (ISO 8601 datetime)")
+	cmd.Flags().StringVar(&usageWindow, "usage-window", "", "Datetime range framing usage-count, as FROM..TO")
 	return cmd
 }
 
@@ -425,7 +430,8 @@ func setGeneratedMutator(actor string) func(*yaml.Node) error {
 	}
 }
 
-// parseUsageWindow splits a FROM..TO window and validates both dates.
+// parseUsageWindow splits a FROM..TO window and normalizes both ends to OKF
+// datetimes.
 func parseUsageWindow(s string) (from, to string, err error) {
 	if s == "" {
 		return "", "", nil
@@ -434,13 +440,25 @@ func parseUsageWindow(s string) (from, to string, err error) {
 	if len(parts) != 2 {
 		return "", "", fmt.Errorf("invalid usage window %q: want FROM..TO", s)
 	}
-	from, to = parts[0], parts[1]
-	for _, d := range []string{from, to} {
-		if _, err := time.Parse("2006-01-02", d); err != nil {
-			return "", "", fmt.Errorf("invalid usage window date %q: want YYYY-MM-DD", d)
-		}
+	if from, err = config.NormalizeDateTime(parts[0]); err != nil {
+		return "", "", fmt.Errorf("invalid usage window: %w", err)
+	}
+	if to, err = config.NormalizeDateTime(parts[1]); err != nil {
+		return "", "", fmt.Errorf("invalid usage window: %w", err)
 	}
 	return from, to, nil
+}
+
+// normalizeOptionalDateTime normalizes a datetime that may be left empty.
+func normalizeOptionalDateTime(field, s string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	v, err := config.NormalizeDateTime(s)
+	if err != nil {
+		return "", fmt.Errorf("invalid %s: %w", field, err)
+	}
+	return v, nil
 }
 
 // newInstallCmd registers okfw with an agent platform.

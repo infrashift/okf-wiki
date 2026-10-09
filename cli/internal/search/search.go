@@ -67,19 +67,6 @@ type Result struct {
 	StaleAfter string `json:"stale_after,omitempty"`
 }
 
-// IsStale reports whether the concept's stale_after date has arrived.
-// Inclusive: stale means today >= stale_after.
-func (r Result) IsStale(today time.Time) bool {
-	if r.StaleAfter == "" {
-		return false
-	}
-	d, err := time.Parse("2006-01-02", r.StaleAfter)
-	if err != nil {
-		return false
-	}
-	return !today.Before(d)
-}
-
 // Field weights. Title outranks description outranks body because a concept
 // whose *title* is the query is almost always the one meant, and okfw's own
 // convention is one idea per concept with a one-sentence description.
@@ -105,7 +92,7 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 		limit = DefaultLimit
 	}
 	terms := tokenize(opts.Query)
-	today := time.Now()
+	now := time.Now()
 
 	var all []Result
 	err := filepath.Walk(bundleRoot, func(p string, fi os.FileInfo, err error) error {
@@ -142,7 +129,7 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 			Status:      fm.Status,
 			StaleAfter:  fm.StaleAfter,
 		}
-		if !matches(r, opts, today) {
+		if !matches(r, opts, now) {
 			return nil
 		}
 		body := config.ExtractBody(content)
@@ -195,7 +182,7 @@ func lifecycleOf(s string) string {
 	return "stable"
 }
 
-func matches(r Result, opts Options, today time.Time) bool {
+func matches(r Result, opts Options, now time.Time) bool {
 	if opts.Project != "" && r.Project != opts.Project {
 		return false
 	}
@@ -208,7 +195,7 @@ func matches(r Result, opts Options, today time.Time) bool {
 	if opts.Status != "" && lifecycleOf(r.Status) != opts.Status {
 		return false
 	}
-	if opts.Stale && !r.IsStale(today) {
+	if opts.Stale && !config.IsStale(r.StaleAfter, now) {
 		return false
 	}
 	for _, want := range opts.Tags {

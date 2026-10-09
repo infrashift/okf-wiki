@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -49,35 +50,96 @@ func TestLegacyTodoStatusIsRejected(t *testing.T) {
 	}
 }
 
-func TestStaleAfter(t *testing.T) {
-	today := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+// stale_after is an instant (OKF section 5.5): stale means now >= stale_after,
+// compared across offsets, not a calendar day in whatever zone the reader is in.
+func TestStaleAfterIsAnInstant(t *testing.T) {
+	sydney := time.FixedZone("AEST", 10*3600)
+	// 2026-07-25T10:00:00+10:00 is 2026-07-25T00:00:00Z.
+	now := time.Date(2026, 7, 25, 10, 0, 0, 0, sydney)
 	for _, tc := range []struct {
 		raw  string
 		want bool
 	}{
 		{"", false},
-		{"stale_after: \"2026-07-24\"\n", true},
-		{"stale_after: \"2026-07-25\"\n", true}, // inclusive on the boundary day
-		{"stale_after: \"2026-07-26\"\n", false},
+		{"stale_after: \"2026-07-24T23:59:59Z\"\n", true},
+		{"stale_after: \"2026-07-25T00:00:00Z\"\n", true}, // inclusive at the instant
+		{"stale_after: \"2026-07-25T00:00:01Z\"\n", false},
+		{"stale_after: \"2026-07-25T09:59:59+10:00\"\n", true},
+		{"stale_after: \"2026-07-24T20:00:01-04:00\"\n", false}, // 00:00:01Z
+		{"stale_after: 2026-07-25T00:00:00Z\n", true},           // unquoted
+		{"stale_after: \"2026-07-24T00:00:00.5Z\"\n", true},     // fractional seconds
 	} {
 		z, err := ParseAndValidate(concept(tc.raw))
 		if err != nil {
 			t.Fatalf("%q: %v", tc.raw, err)
 		}
-		if got := z.IsStale(today); got != tc.want {
+		if got := z.IsStale(now); got != tc.want {
 			t.Errorf("%q: IsStale = %v, want %v", tc.raw, got, tc.want)
 		}
 	}
 }
 
-func TestStaleAfterRejectsNonDates(t *testing.T) {
-	if _, err := ParseAndValidate(concept("stale_after: \"not-a-date\"\n")); err == nil {
-		t.Error("stale_after must be YYYY-MM-DD")
+// OKF section 5 requires every timestamp to carry an explicit offset. A bare
+// date names a different instant in every timezone, and it must be rejected
+// whether or not it is quoted — unquoted, yaml.v3 resolves it to a time.Time
+// that used to reach the schema re-rendered as a valid datetime.
+func TestTimestampFieldsRequireAnOffset(t *testing.T) {
+	fields := map[string]string{
+		"stale_after":             "stale_after: %s\n",
+		"generated.at":            "generated:\n  by: \"human:me\"\n  at: %s\n",
+		"verified.at":             "verified:\n  by: \"human:me\"\n  at: %s\n",
+		"usage_window.from":       "usage_window:\n  from: %s\n",
+		"sources.last_modified":   "sources:\n  - resource: \"x\"\n    last_modified: %s\n",
+		"sources.usage_window.to": "sources:\n  - resource: \"x\"\n    usage_window:\n      to: %s\n",
 	}
-	// A datetime in the field still resolves rather than erroring at read time.
-	z := &Concept{StaleAfter: "2026-07-24T12:00:00Z"}
-	if !z.IsStale(time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)) {
-		t.Error("a full datetime in stale_after should still compare")
+	for name, tmpl := range fields {
+		for _, bad := range []string{
+			`"2026-12-31"`, `2026-12-31`, // bare date, quoted and not
+			`"2026-12-31T00:00:00"`,      // no offset
+			`"2026-12-31T00:00:00Zjunk"`, // trailing garbage
+			`"2026-12-31 00:00:00Z"`,     // space separator
+			`"not-a-date"`,
+		} {
+			if _, err := ParseAndValidate(concept(fmt.Sprintf(tmpl, bad))); err == nil {
+				t.Errorf("%s = %s was accepted", name, bad)
+			}
+		}
+		for _, good := range []string{`"2026-12-31T00:00:00Z"`, `"2026-12-31T08:30:00+05:30"`, `2026-12-31T00:00:00.123Z`} {
+			if name == "generated.at" {
+				continue // must also equal timestamp; covered by TestGeneratedAtMirrorsTimestamp
+			}
+			if _, err := ParseAndValidate(concept(fmt.Sprintf(tmpl, good))); err != nil {
+				t.Errorf("%s = %s was rejected: %v", name, good, err)
+			}
+		}
+	}
+}
+
+func TestNormalizeDateTime(t *testing.T) {
+	for in, want := range map[string]string{
+		"2026-12-31":                "2026-12-31T00:00:00Z",
+		"2026-12-31T00:00:00Z":      "2026-12-31T00:00:00Z",
+		"2026-12-31T08:30:00+05:30": "2026-12-31T08:30:00+05:30", // kept as written
+	} {
+		if got, err := NormalizeDateTime(in); err != nil || got != want {
+			t.Errorf("NormalizeDateTime(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"2026-13-01", "2026-12-31T00:00:00", "tomorrow", ""} {
+		if got, err := NormalizeDateTime(bad); err == nil {
+			t.Errorf("NormalizeDateTime(%q) = %q, want an error", bad, got)
+		}
+	}
+}
+
+// A value okfw cannot read as an instant is never stale — the consumer rule —
+// and `okfw validate` is what reports it.
+func TestIsStaleIgnoresMalformedValues(t *testing.T) {
+	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, v := range []string{"2026-01-01", "2026-01-01T00:00:00", "garbage"} {
+		if IsStale(v, now) {
+			t.Errorf("IsStale(%q) = true; a malformed value must not mark a concept stale", v)
+		}
 	}
 }
 
@@ -186,15 +248,15 @@ func TestGeneratedRequiresBy(t *testing.T) {
 
 func TestSources(t *testing.T) {
 	z, err := ParseAndValidate(concept(`usage_window:
-  from: "2026-01-01"
-  to: "2026-06-30"
+  from: "2026-01-01T00:00:00Z"
+  to: "2026-06-30T00:00:00Z"
 sources:
   - resource: "https://example.com/schema"
     id: "ga4-schema"
     title: "GA4 export schema"
     author: "team:ga4-docs"
     usage_count: 412
-    last_modified: "2026-05-01"
+    last_modified: "2026-05-01T00:00:00Z"
   - resource: "all queries in project X"
 `))
 	if err != nil {
@@ -210,7 +272,7 @@ sources:
 	if z.Sources[1].Resource != "all queries in project X" {
 		t.Errorf("second source = %+v", z.Sources[1])
 	}
-	if z.UsageWindow == nil || z.UsageWindow.From != "2026-01-01" {
+	if z.UsageWindow == nil || z.UsageWindow.From != "2026-01-01T00:00:00Z" {
 		t.Errorf("usage_window = %+v", z.UsageWindow)
 	}
 }

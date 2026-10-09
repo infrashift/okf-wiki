@@ -38,7 +38,7 @@ tags:
 created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
 status: "deprecated"   # OKF lifecycle: draft | stable (default) | deprecated
-stale_after: "2026-12-31"
+stale_after: "2026-12-31T00:00:00Z"
 parent: "019f0312-..." # optional, links to parent concept id
 x:                     # your own metadata; the only place custom keys are legal
   jira_epic: "PLAT-1421"
@@ -140,7 +140,7 @@ progress. Run `okfw migrate` on a wiki written by an older okfw.
 ```bash
 # Lifecycle
 okfw set-lifecycle ./note.md deprecated     # draft | stable | deprecated
-okfw set-stale-after ./note.md 2026-12-31
+okfw set-stale-after ./note.md 2026-12-31T00:00:00Z
 okfw set-stale-after ./note.md --clear
 
 # Trust: who reviewed this, and when

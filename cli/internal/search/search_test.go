@@ -113,13 +113,27 @@ func TestFiltersAndPaging(t *testing.T) {
 	}
 }
 
-func TestIsStaleIsInclusive(t *testing.T) {
-	r := Result{StaleAfter: "2026-01-02"}
-	day := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
-	if !r.IsStale(day) {
-		t.Error("stale_after should be inclusive: today == stale_after is stale")
+// TestStaleFilterReadsInstants: the filter used to parse only bare dates, so a
+// spec-form stale_after was never reported stale, and it compared local time
+// against UTC midnight, which was off by a day east of UTC.
+func TestStaleFilterReadsInstants(t *testing.T) {
+	root := t.TempDir()
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
+	for name, stale := range map[string]string{"past": past, "future": future, "dateonly": "2000-01-01"} {
+		write(t, root, name+".md", "---\nid: \"019680f0-7e00-7abc-8def-10000000000"+name[:1]+"\"\n"+
+			"title: \""+name+"\"\ntype: \"note\"\ntags: []\nstale_after: \""+stale+"\"\n"+
+			"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
 	}
-	if r.IsStale(day.AddDate(0, 0, -1)) {
-		t.Error("not stale the day before")
+	hits, _, err := Search(root, Options{Stale: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].Title != "past" {
+		var titles []string
+		for _, h := range hits {
+			titles = append(titles, h.Title)
+		}
+		t.Errorf("stale hits = %v, want [past] (a bare date is not a valid instant)", titles)
 	}
 }

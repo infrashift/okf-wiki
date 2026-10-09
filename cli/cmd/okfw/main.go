@@ -780,6 +780,15 @@ rewrites a legacy 'status':
 The free-form OKF 'type' is left alone: the spec does not register type values,
 so an existing type: "todo" stays until you change it.
 
+OKF also moved stale_after, sources[].last_modified and usage_window from bare
+dates to ISO 8601 datetimes with a UTC offset. A bare date is rewritten as
+midnight UTC — the reading okfw already gave it, so staleness does not shift:
+
+  stale_after: 2026-12-31     ->  stale_after: 2026-12-31T00:00:00Z
+
+A timestamp that is neither (say, a datetime with no offset) is reported for
+you to fix by hand, since only its author knows which instant it meant.
+
 Examples:
   okfw migrate --dry-run     # report what would change
   okfw migrate               # apply`,
@@ -1208,7 +1217,7 @@ func ensureGitignore(basePath string, graphPath string) error {
 // runMigrate strips the removed todo feature's frontmatter from every concept in
 // the bundle. Idempotent: a second run reports nothing to do.
 func runMigrate(cfg *config.Config, root string, dryRun bool) error {
-	var scanned, changed int
+	var scanned, changed, repair int
 
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -1230,26 +1239,49 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 		}
 		scanned++
 
-		out, dropped, err := bundle.StripLegacyTodoFields(content)
-		if err != nil {
+		var notes []string
+		out := content
+		if stripped, dropped, err := bundle.StripLegacyTodoFields(out); err != nil {
 			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
 			return nil
+		} else if stripped != nil {
+			out = stripped
+			notes = append(notes, "dropped "+strings.Join(dropped, ", "))
 		}
-		if out == nil {
+		if upgraded, keys, err := bundle.UpgradeDateOnlyTimestamps(out); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
+			return nil
+		} else if upgraded != nil {
+			out = upgraded
+			notes = append(notes, "dates to datetimes: "+strings.Join(keys, ", "))
+		}
+		if bad, err := bundle.TimestampsNeedingRepair(out); err == nil && len(bad) > 0 {
+			repair++
+			fmt.Fprintf(os.Stderr, "  ! %s: fix by hand, not an ISO 8601 datetime with an offset: %s\n",
+				rel, strings.Join(bad, ", "))
+		}
+		if len(notes) == 0 {
 			return nil
 		}
 		changed++
-		fmt.Printf("  %s: dropped %s\n", rel, strings.Join(dropped, ", "))
+		fmt.Printf("  %s: %s\n", rel, strings.Join(notes, "; "))
 		if dryRun {
 			return nil
 		}
-		if err := os.WriteFile(p, out, 0644); err != nil {
-			return err
-		}
-		return bundle.AutoSync(cfg, p)
+		return os.WriteFile(p, out, 0644)
 	})
 	if err != nil {
 		return err
+	}
+	if repair > 0 {
+		fmt.Fprintf(os.Stderr, "%d concept(s) carry a timestamp migrate cannot repair.\n", repair)
+	}
+	if changed > 0 && !dryRun {
+		// One refresh for the whole run: WriteIndexFiles walks the bundle, so
+		// refreshing per file made migrating 300 concepts take 28 seconds.
+		if err := bundle.AutoSync(cfg, cfg.RootPath); err != nil {
+			return err
+		}
 	}
 
 	if changed == 0 {

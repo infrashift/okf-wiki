@@ -105,9 +105,12 @@ func ValidateConceptYAML(frontmatter []byte) error {
 		return err
 	}
 
-	// Parse YAML to map
-	var data map[string]interface{}
-	if err := yaml.Unmarshal(frontmatter, &data); err != nil {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
+		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
+	}
+	data, err := frontmatterValue(&doc)
+	if err != nil {
 		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
 	}
 
