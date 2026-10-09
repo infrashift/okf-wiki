@@ -1602,8 +1602,6 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 		return "", false, fmt.Errorf("failed to create directory: %w", err)
 	}
 
-	filePath := filepath.Join(dailyDir, bundle.NoteFilename(dailyDir, title, id))
-
 	tmpl, err := templates.Get("daily")
 	if err != nil {
 		return "", false, fmt.Errorf("failed to get daily template: %w", err)
@@ -1612,8 +1610,9 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 	if err != nil {
 		return "", false, fmt.Errorf("failed to generate daily note: %w", err)
 	}
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return "", false, fmt.Errorf("failed to write file: %w", err)
+	filePath, err := bundle.WriteNewConcept(dailyDir, title, id, []byte(content))
+	if err != nil {
+		return "", false, err
 	}
 
 	if err := bundle.AutoSync(cfg, filePath); err != nil {

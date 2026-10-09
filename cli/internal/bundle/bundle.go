@@ -68,9 +68,9 @@ func CreateConcept(cfg *config.Config, spec Spec) (string, string, error) {
 		return "", "", err
 	}
 
-	filePath := filepath.Join(outputDir, NoteFilename(outputDir, spec.Title, id))
-	if err := os.WriteFile(filePath, []byte(content), 0644); err != nil {
-		return "", "", fmt.Errorf("failed to write file: %w", err)
+	filePath, err := WriteNewConcept(outputDir, spec.Title, id, []byte(content))
+	if err != nil {
+		return "", "", err
 	}
 	return filePath, id, nil
 }

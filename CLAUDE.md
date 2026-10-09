@@ -132,7 +132,8 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   mutators refuse an edit that would make a *valid* concept invalid — while still
   permitting edits to an already-invalid one, or the CLI could never repair a
   broken file. The compiled schema is a process-wide `sync.Once` value; recompiling per call made
-  every concept pay CUE compilation.
+  every concept pay CUE compilation. Its use is serialized by `schemaMu`: CUE
+  v0.7 writes to its runtime during unification, so concurrent validations race.
 - Frontmatter is edited by round-tripping `yaml.Node` (`cli/internal/bundle/yamlfm.go`),
   never by rewriting lines. This preserves key order, comments, unknown keys, and
   each scalar's quoting style, and it is what makes nested writes possible at all.

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"okfw/cli/internal/config"
@@ -334,6 +335,45 @@ func TestResolveConceptPathRefusesFilesOutsideTheBundle(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "outside the wiki") {
 			t.Errorf("%s: err = %v, want an outside-the-wiki refusal", ref, err)
+		}
+	}
+}
+
+// TestConcurrentCreatesOfOneTitleAllSurvive: the short id in a filename is the
+// UUIDv7 millisecond prefix, so creates of one title in the same millisecond
+// pick the same name. A stat-then-write claimed it for all of them; measured,
+// 40 parallel `okfw create "Same"` runs all reported success and left 35 files.
+func TestConcurrentCreatesOfOneTitleAllSurvive(t *testing.T) {
+	cfg, _ := testCfg(t)
+	const n = 40
+	type result struct{ path, id string }
+	results := make([]result, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i].path, results[i].id, errs[i] = CreateConcept(cfg, Spec{Title: "Same"})
+		}()
+	}
+	wg.Wait()
+
+	seen := map[string]bool{}
+	for i, r := range results {
+		if errs[i] != nil {
+			t.Fatalf("create %d: %v", i, errs[i])
+		}
+		if seen[r.path] {
+			t.Errorf("two creates returned %s", r.path)
+		}
+		seen[r.path] = true
+		content, err := os.ReadFile(r.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(content), `id: "`+r.id+`"`) {
+			t.Errorf("%s does not hold the concept created for it (id %s)", r.path, r.id)
 		}
 	}
 }

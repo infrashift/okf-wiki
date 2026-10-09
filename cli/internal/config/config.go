@@ -74,13 +74,19 @@ func Discover(startDir string) (*Config, error) {
 	}
 }
 
-// The compiled schema is process-wide and immutable, so it is built once.
-// Recompiling per call made every concept pay CUE compilation — invisible for a
-// single `okfw validate`, but paid thousands of times over by validate --all.
+// The compiled schema is process-wide, so it is built once. Recompiling per
+// call made every concept pay CUE compilation — invisible for a single `okfw
+// validate`, but paid thousands of times over by validate --all.
+//
+// Sharing it is not free, though: unifying against a cue.Value writes to state
+// inside its runtime (CUE v0.7 caches compiled regexps there), so concurrent
+// validations race. schemaMu serializes every use; validating one concept takes
+// well under a millisecond, so nothing waits long.
 var (
 	schemaOnce sync.Once
 	schemaVal  cue.Value
 	schemaErr  error
+	schemaMu   sync.Mutex
 )
 
 // LoadConceptSchema returns the #Concept CUE definition, compiling it on first
@@ -113,6 +119,9 @@ func ValidateConceptYAML(frontmatter []byte) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
 	}
+
+	schemaMu.Lock()
+	defer schemaMu.Unlock()
 
 	// Convert to CUE and validate
 	ctx := schema.Context()

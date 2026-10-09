@@ -4,7 +4,9 @@
 package bundle
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,16 +56,57 @@ func ShortID(id string, n int) string {
 // UUIDv7 millisecond timestamp — so filenames match the frontmatter id's first two
 // groups and sort chronologically; on collision it is extended into the random bits.
 // Returns the base name only.
+//
+// The answer is only true at the moment of asking; WriteNewConcept is what a
+// writer should use.
 func NoteFilename(dir, title, id string) string {
-	slug := Slugify(title)
-	for n := 12; n <= 32; n += 2 {
-		name := slug + "--" + ShortID(id, n) + ".md"
+	for _, name := range noteFilenames(title, id) {
 		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
 			return name
 		}
 	}
+	return noteFilenames(title, id)[0]
+}
+
+// noteFilenames lists the candidate names for title/id in order of preference.
+func noteFilenames(title, id string) []string {
+	slug := Slugify(title)
+	var names []string
+	for n := 12; n <= 32; n += 2 {
+		names = append(names, slug+"--"+ShortID(id, n)+".md")
+	}
 	// Fallback: full compact id (effectively always unique).
-	return slug + "--" + strings.ReplaceAll(id, "-", "") + ".md"
+	return append(names, slug+"--"+strings.ReplaceAll(id, "-", "")+".md")
+}
+
+// WriteNewConcept writes content to a new "slug--shortid.md" file in dir and
+// returns its path. Each name is claimed with O_EXCL, so two writers racing for
+// one name cannot both win. Checking with NoteFilename and then writing let
+// concurrent creates of the same title in the same millisecond — which share a
+// 12-character short id — pick one name, and all but one were silently
+// overwritten while every caller reported success.
+func WriteNewConcept(dir, title, id string, content []byte) (string, error) {
+	for _, name := range noteFilenames(title, id) {
+		p := filepath.Join(dir, name)
+		f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("failed to write file: %w", err)
+		}
+		if _, err := f.Write(content); err != nil {
+			f.Close()
+			os.Remove(p)
+			return "", fmt.Errorf("failed to write file: %w", err)
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(p)
+			return "", fmt.Errorf("failed to write file: %w", err)
+		}
+		return p, nil
+	}
+	return "", fmt.Errorf("no free filename for %q in %s", title, dir)
 }
 
 // SanitizeSubdir cleans a user/agent-requested bundle subdirectory and rejects
