@@ -108,37 +108,61 @@ func TestRunIndexMd(t *testing.T) {
 
 // --- runLog (requires git) ---
 
+// TestRunLog: log.md covers the bundle's history only, links resolve from the
+// bundle root, and dates run newest first (OKF section 9). It used to log the
+// whole repository under links like /.okfw/x.md, in commit order.
 func TestRunLog(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
-	root := t.TempDir()
+	project := t.TempDir()
+	root := filepath.Join(project, ".okfw")
 	cfg := testCfg(root)
-	writeConceptFile(t, root, "notes/alpha--0001.md", conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha"))
-
-	for _, args := range [][]string{
-		{"init"},
-		{"-c", "user.email=t@t", "-c", "user.name=t", "add", "-A"},
-		{"-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "Add Alpha concept"},
-	} {
-		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	git := func(date string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", project,
+			"-c", "user.email=t@t", "-c", "user.name=t", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date+"T12:00:00Z", "GIT_COMMITTER_DATE="+date+"T12:00:00Z")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+	git("2026-01-01", "init", "-q")
+	writeConceptFile(t, project, "README.md", "# Project\n")
+	writeConceptFile(t, root, "notes/alpha--0001.md", conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha"))
+	writeConceptFile(t, root, "beta--0002.md", conceptContent("01968109-4700-7def-9abc-ffffffffffff", "Beta", "note", "# Beta"))
+	git("2026-02-01", "add", "-A")
+	git("2026-02-01", "commit", "-q", "-m", "Add Alpha and [Beta]")
+	// Committed later but authored earlier: commit order is not date order.
+	writeConceptFile(t, root, "notes/alpha--0001.md", conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha v2"))
+	git("2026-01-15", "commit", "-q", "-am", "Revise Alpha")
+	if err := os.Remove(filepath.Join(root, "beta--0002.md")); err != nil {
+		t.Fatal(err)
+	}
+	git("2026-03-01", "commit", "-q", "-am", "Drop Beta")
 
 	if err := runLog(cfg, root); err != nil {
 		t.Fatalf("runLog: %v", err)
 	}
 	logmd := readFile(t, filepath.Join(root, "log.md"))
-	if !strings.Contains(logmd, "## 2026-") && !strings.Contains(logmd, "## 20") {
-		t.Errorf("log.md should have a date heading:\n%s", logmd)
+	if v := bundle.CheckLogFile([]byte(logmd)); len(v) > 0 {
+		t.Errorf("log.md breaks OKF section 9: %v\n%s", v, logmd)
 	}
-	if !strings.Contains(logmd, "**Creation**") {
-		t.Errorf("log.md should mark the addition as a Creation:\n%s", logmd)
+	march, feb, jan := strings.Index(logmd, "## 2026-03-01"), strings.Index(logmd, "## 2026-02-01"), strings.Index(logmd, "## 2026-01-15")
+	if march < 0 || feb < march || jan < feb {
+		t.Errorf("dates are not newest first:\n%s", logmd)
 	}
-	if !strings.Contains(logmd, "Add Alpha concept") {
-		t.Error("log.md should include the commit subject")
+	for _, want := range []string{
+		"* **Creation**: [notes/alpha--0001.md](/notes/alpha--0001.md) — Add Alpha and \\[Beta\\]",
+		"* **Update**: [notes/alpha--0001.md](/notes/alpha--0001.md) — Revise Alpha",
+		"* **Removal**: `/beta--0002.md` — Drop Beta",
+	} {
+		if !strings.Contains(logmd, want) {
+			t.Errorf("missing %q in:\n%s", want, logmd)
+		}
+	}
+	if strings.Contains(logmd, "README") || strings.Contains(logmd, ".okfw") {
+		t.Errorf("log.md reaches outside the bundle:\n%s", logmd)
 	}
 }
 

@@ -221,10 +221,12 @@ okfw write does. Editors use it after saving a concept by hand.`,
 	var logCmd = &cobra.Command{
 		Use:   "log [path]",
 		Short: "Generate OKF log.md from git history",
-		Long: `Render an OKF log.md at the bundle root from git history, grouped by
-date (newest first). Concept additions/modifications/deletions become
-Creation/Update/Deprecation entries using each commit's message. Requires the
-bundle to be a git repository.`,
+		Long: `Render an OKF log.md from git history, grouped by date (newest first).
+Only history under the directory is logged: the bundle root by default, or a
+directory inside it, which gets its own log.md (OKF allows one at any level).
+Concept additions, modifications, moves and deletions become Creation, Update,
+Move and Removal entries using each commit's subject. Requires the bundle to be
+in a git repository.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, root, err := bundleArg(args)
@@ -1523,17 +1525,25 @@ func runIndexMd(cfg *config.Config, root string, adopt bool) error {
 // newest first). Concept additions/modifications/deletions become
 // Creation/Update/Deprecation entries.
 func runLog(cfg *config.Config, root string) error {
-	cmd := exec.Command("git", "-C", root, "log", "--date=short", "--name-status",
-		"--pretty=format:\x01%ad\x02%s")
+	// Scope to this directory (`-- .`, with paths relative to it) and keep
+	// non-ASCII paths unquoted. Without the pathspec this logged the whole
+	// repository — README.md, docs/ — under bundle-root links like
+	// /.okfw/x.md that resolve to nothing.
+	cmd := exec.Command("git", "-c", "core.quotePath=false", "-C", root, "log",
+		"--date=short", "--name-status", "--relative", "--pretty=format:\x01%ad\x02%s", "--", ".")
 	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("git log failed (is %s a git repository?): %w", root, err)
+		return fmt.Errorf("git log failed (is %s in a git repository?): %w", root, err)
+	}
+
+	// Links are bundle-absolute; root may be a directory inside the bundle.
+	prefix := ""
+	if rel, err := filepath.Rel(cfg.RootPath, root); err == nil && rel != "." {
+		prefix = filepath.ToSlash(rel) + "/"
 	}
 
 	type event struct{ verb, path, subject string }
 	byDate := map[string][]event{}
-	var dateOrder []string
-	seenDate := map[string]bool{}
 	var curDate, curSubject string
 
 	for _, line := range strings.Split(string(out), "\n") {
@@ -1543,10 +1553,6 @@ func runLog(cfg *config.Config, root string) error {
 			curSubject = ""
 			if len(parts) > 1 {
 				curSubject = parts[1]
-			}
-			if !seenDate[curDate] {
-				seenDate[curDate] = true
-				dateOrder = append(dateOrder, curDate)
 			}
 			continue
 		}
@@ -1567,23 +1573,35 @@ func runLog(cfg *config.Config, root string) error {
 		case strings.HasPrefix(status, "A"):
 			verb = "Creation"
 		case strings.HasPrefix(status, "D"):
-			verb = "Deprecation"
+			verb = "Removal"
+		case strings.HasPrefix(status, "R"):
+			verb = "Move"
 		}
-		byDate[curDate] = append(byDate[curDate], event{verb, filepath.ToSlash(p), curSubject})
+		byDate[curDate] = append(byDate[curDate], event{verb, prefix + filepath.ToSlash(p), curSubject})
 	}
 
+	// Newest first, as section 9 requires. Commit order is not date order —
+	// author dates survive rebases and cherry-picks — so sort the dates.
+	dates := make([]string, 0, len(byDate))
+	for d := range byDate {
+		dates = append(dates, d)
+	}
+	sort.Sort(sort.Reverse(sort.StringSlice(dates)))
+
+	esc := strings.NewReplacer("[", "\\[", "]", "\\]", "<", "&lt;")
 	var b strings.Builder
 	b.WriteString("# Update Log\n\n")
-	for _, d := range dateOrder {
-		evs := byDate[d]
-		if len(evs) == 0 {
-			continue
-		}
+	for _, d := range dates {
 		b.WriteString("## " + d + "\n\n")
-		for _, e := range evs {
-			b.WriteString("* **" + e.verb + "**: [" + e.path + "](/" + e.path + ")")
+		for _, e := range byDate[d] {
+			if e.verb == "Removal" {
+				// The file is gone, so a link would point at nothing.
+				b.WriteString("* **" + e.verb + "**: `/" + e.path + "`")
+			} else {
+				b.WriteString("* **" + e.verb + "**: [" + esc.Replace(e.path) + "](/" + e.path + ")")
+			}
 			if e.subject != "" {
-				b.WriteString(" — " + e.subject)
+				b.WriteString(" — " + esc.Replace(e.subject))
 			}
 			b.WriteString("\n")
 		}
