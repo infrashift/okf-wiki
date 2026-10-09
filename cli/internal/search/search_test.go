@@ -113,25 +113,6 @@ func TestFiltersAndPaging(t *testing.T) {
 	}
 }
 
-func TestNodeIDLookupBridgesBackFromTheGraph(t *testing.T) {
-	root := t.TempDir()
-	// A real graphy export carries the finer OKF type and the extension block.
-	write(t, root, "code--0001.md", "---\nid: \"019680f0-7e00-7abc-8def-100000000000\"\n"+
-		"title: \"Engine.Evaluate\"\ntype: \"code-method\"\nkind: \"code\"\ntags: []\n"+
-		"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n"+
-		"graphy:\n  node_id: \"go:method:e.go#Engine.Evaluate\"\n---\nbody\n")
-	hits, _, err := Search(root, Options{GraphyNodeID: "go:method:e.go#Engine.Evaluate"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(hits) != 1 || hits[0].Title != "Engine.Evaluate" {
-		t.Fatalf("node-id lookup returned %v", hits)
-	}
-	if hits[0].Kind != "code" {
-		t.Errorf("kind = %q, want code (a graphy block classifies on read)", hits[0].Kind)
-	}
-}
-
 func TestIsStaleIsInclusive(t *testing.T) {
 	r := Result{StaleAfter: "2026-01-02"}
 	day := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)

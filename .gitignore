@@ -1,6 +1,5 @@
 # Binary
 /okfw
-/graphy
 
 # Go
 *.exe
@@ -23,4 +22,3 @@ Thumbs.db
 
 # Claude Code (user-specific)
 .claude/settings.local.json
-.graphy/

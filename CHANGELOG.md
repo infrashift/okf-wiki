@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Removed (breaking)
+- **graphy is decommissioned.** The code knowledge-graph binary (`cli/cmd/graphy`, `cli/internal/graphy`), its `build-graphy`/`install-graphy`/`graphy-e2e` make targets, its Containerfile stages and the `graphy-e2e.sh` gate are gone, and the build is pure Go again — tree-sitter, bbolt, gonum and hcl left `go.mod`. The okfw surface that existed only to serve it went with it:
+  - the `graphy:` frontmatter extension block and `kind: code` are no longer in the concept schema, so concepts written by `graphy export okfw` now fail `okfw validate`. Delete the exported directory (`.okfw/graphy/` by default) rather than migrating it; it was generated from source and carries nothing hand-written.
+  - `okfw search --node-id`, and the MCP `okfw_search` `node_id` argument, result field and `kind: "code"` filter.
+  - `agentskill`'s after-edit hook support, which only graphy used.
+
 ## 2026-07-25
 
 ### Changed (breaking)

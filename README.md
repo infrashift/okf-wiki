@@ -115,8 +115,8 @@ Two complementary integration points:
 - **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
   skill and a managed CLAUDE.md/GEMINI.md/AGENTS.md block teaching agents the
   wiki's conventions (linking syntax, atomic notes, capture → refine → link).
-  Re-running it is idempotent, and the block is namespaced so graphy can keep
-  one in the same file. The skill covers the *why and when*; the MCP tools and
+  Re-running it is idempotent, and the block is namespaced so it leaves the
+  rest of the file alone. The skill covers the *why and when*; the MCP tools and
   `okfw --help` cover the mechanics.
 
 ---

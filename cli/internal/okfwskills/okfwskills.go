@@ -1,11 +1,10 @@
 // Package okfwskills holds okfw's agent-facing documentation and installs it
 // via the shared agentskill package.
 //
-// okfw shipped no installer at all: the skill was a loose file at the repo
+// okfw once shipped no installer at all: the skill was a loose file at the repo
 // root that README told the reader to copy into .claude/skills/ by hand, with
 // no CLAUDE.md block and nothing checking it against the commands okfw
-// actually registers. graphy had all of that, so an agent given graphy got a
-// procedure and an agent given okfw got five tool schemas and no conventions.
+// actually registers.
 package okfwskills
 
 import (
@@ -29,10 +28,9 @@ type Result = agentskill.Result
 
 // Install writes the platform integration.
 //
-// No hook: okfw's own writers keep the index, the graph and the listings in
-// step on every change, so there is nothing for an after-edit hook to refresh.
-// (graphy needs one because the code graph goes stale when source files change
-// outside its knowledge.)
+// No hook: search and the link graph are computed from the files, and okfw's
+// own writers refresh the index.md listings, so there is nothing for an
+// after-edit hook to refresh.
 func Install(opts Options) (*Result, error) {
 	skill, instructions, err := Docs(filepath.Base(opts.Root))
 	if err != nil {

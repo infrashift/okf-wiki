@@ -227,12 +227,10 @@ func TestMCPBodyWriting(t *testing.T) {
 	}
 }
 
-// TestMCPSearchSeparatesCodeConceptsFromNotes: a bundle holds hand-written
-// notes and graphy's exported code concepts side by side. Every exported
-// concept used to index as kind "note", so the agent's one lever for "my notes,
-// not the code graph" silently returned both — and the payload gave it no way
-// to tell them apart afterwards either.
-func TestMCPSearchSeparatesCodeConceptsFromNotes(t *testing.T) {
+// TestMCPSearchFiltersByKindAndType: kind and type are the agent's levers for
+// narrowing a mixed bundle, and each hit must say what it is so a mixed result
+// set stays legible after the fact.
+func TestMCPSearchFiltersByKindAndType(t *testing.T) {
 	s, project := mcpTestServer(t)
 	cfg, err := config.Discover(project)
 	if err != nil {
@@ -244,17 +242,15 @@ func TestMCPSearchSeparatesCodeConceptsFromNotes(t *testing.T) {
 	}
 	p := writeConceptFile(t, cfg.RootPath, "alpha--0001.md", `---
 id: "019680f0-7e00-7abc-8def-100000000000"
-title: "Alpha"
-type: "code-function"
-kind: "code"
+title: "Alpha Outage"
+type: "Incident"
+kind: "issue"
 tags: []
 created: "2026-02-13T11:00:00Z"
 timestamp: "2026-02-13T11:00:00Z"
-graphy:
-  node_id: "go:function:a.go#Alpha"
 ---
 
-# Alpha
+# Alpha Outage
 `)
 	if err := bundle.AutoSync(cfg, p); err != nil {
 		t.Fatal(err)
@@ -263,9 +259,9 @@ graphy:
 	for _, tc := range []struct {
 		args, want, notWant string
 	}{
-		{`{"kind":"note"}`, "Handwritten Note", "Alpha"},
-		{`{"kind":"code"}`, "Alpha", "Handwritten Note"},
-		{`{"type":"code-function"}`, "Alpha", "Handwritten Note"},
+		{`{"kind":"note"}`, "Handwritten Note", "Alpha Outage"},
+		{`{"kind":"issue"}`, "Alpha Outage", "Handwritten Note"},
+		{`{"type":"Incident"}`, "Alpha Outage", "Handwritten Note"},
 	} {
 		out, isErr := callTool(t, s, "search", tc.args)
 		if isErr {
@@ -279,9 +275,8 @@ graphy:
 		}
 	}
 
-	// And a hit says what it is, so a mixed result set is legible.
-	out, _ := callTool(t, s, "search", `{"kind":"code"}`)
-	if !strings.Contains(out, `"kind":"code"`) || !strings.Contains(out, `"type":"code-function"`) {
+	out, _ := callTool(t, s, "search", `{"kind":"issue"}`)
+	if !strings.Contains(out, `"kind":"issue"`) || !strings.Contains(out, `"type":"Incident"`) {
 		t.Errorf("hits do not carry kind/type: %s", out)
 	}
 }

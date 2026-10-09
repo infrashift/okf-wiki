@@ -108,16 +108,15 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "okfw_search",
-			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,node_id}]}; path is wiki-relative (use with read), node_id crosses back into graphy. Filter kind:\"code\" for graphy's exported entities or kind:\"note\" for hand-written concepts.",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet}]}; path is wiki-relative (use with read).",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
 				"tag":     str("filter by tag"),
-				"kind":    enum("filter by kind; \"code\" is graphy's exported code graph, the rest are hand-written", "note", "daily-note", "issue", "code"),
-				"type":    str("filter by OKF free-form type, e.g. code-function, code-community"),
+				"kind":    enum("filter by kind", "note", "daily-note", "issue"),
+				"type":    str("filter by OKF free-form type, e.g. Playbook, Metric"),
 				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
-				"node_id": str("find the concept documenting this graphy code-graph node id"),
 				"limit":   num("max results (default 10)"),
 				"offset":  num("skip this many results; `truncated` reports next_offset"),
 			}),
@@ -296,17 +295,13 @@ type mcpHit struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	Path  string `json:"path"`
-	// Kind and Type say what a hit *is*. A bundle holds hand-written notes and
-	// graphy's exported code concepts side by side, and without these the two
-	// were indistinguishable in the payload itself.
+	// Kind and Type say what a hit *is*, so a caller can route on it without
+	// reading the concept.
 	Kind    string   `json:"kind,omitempty"`
 	Type    string   `json:"type,omitempty"`
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Snippet string   `json:"snippet,omitempty"`
-	// NodeID is the code-graph identity of a generated concept, so a hit can be
-	// carried straight back to graphy without a second lookup.
-	NodeID string `json:"node_id,omitempty"`
 }
 
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -318,7 +313,6 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Type    string `json:"type"`
 		Status  string `json:"status"`
 		Stale   bool   `json:"stale"`
-		NodeID  string `json:"node_id"`
 		Limit   int    `json:"limit"`
 		Offset  int    `json:"offset"`
 	}
@@ -330,15 +324,14 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 	}
 
 	opts := search.Options{
-		Query:        a.Q,
-		Project:      a.Project,
-		Kind:         a.Kind,
-		Type:         a.Type,
-		Status:       a.Status,
-		Stale:        a.Stale,
-		GraphyNodeID: a.NodeID,
-		Limit:        a.Limit,
-		Offset:       a.Offset,
+		Query:   a.Q,
+		Project: a.Project,
+		Kind:    a.Kind,
+		Type:    a.Type,
+		Status:  a.Status,
+		Stale:   a.Stale,
+		Limit:   a.Limit,
+		Offset:  a.Offset,
 	}
 	if a.Tag != "" {
 		opts.Tags = []string{a.Tag}
@@ -359,7 +352,6 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			Project: r.Project,
 			Tags:    r.Tags,
 			Snippet: r.Snippet,
-			NodeID:  r.GraphyNodeID,
 		})
 	}
 	out := map[string]interface{}{"total": total, "results": hits}

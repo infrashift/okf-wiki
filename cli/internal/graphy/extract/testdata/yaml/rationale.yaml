@@ -1,7 +1,0 @@
-# WHY: the probe needs a long delay because the migration runs at boot.
-readinessProbe:
-  initialDelaySeconds: 120
-  # FIXME: drop this once the migration moves to an init container.
-  periodSeconds: 5
-
-annotation: "# TODO: this one is a quoted scalar, not a comment"

@@ -112,19 +112,6 @@ type Concept struct {
 	// X is the open extension block: user-defined metadata, passed through
 	// untouched. okfw claims no keys inside it.
 	X map[string]interface{} `yaml:"x,omitempty"`
-
-	// Graphy carries the graphy-export extension block; nil on ordinary concepts.
-	Graphy *GraphyMeta `yaml:"graphy,omitempty"`
-}
-
-// GraphyMeta is the graphy extension block: the graph identity and provenance
-// of an exported code concept.
-type GraphyMeta struct {
-	NodeID    string `yaml:"node_id"`
-	Language  string `yaml:"language,omitempty"`
-	Entity    string `yaml:"entity,omitempty"` // function, method, struct, community, ...
-	Commit    string `yaml:"commit,omitempty"`
-	Generator string `yaml:"generator,omitempty"`
 }
 
 // GetKind returns the structured concept kind, defaulting to "note".
@@ -137,12 +124,6 @@ func (z *Concept) GetKind() string {
 	switch z.Type {
 	case "note", "daily-note", "issue":
 		return z.Type
-	}
-	// A concept carrying a graphy block was written by `graphy export okfw`.
-	// Classify it on read so bundles exported before `kind: code` existed are
-	// still separable from hand-written notes, without rewriting a file.
-	if z.Graphy != nil {
-		return "code"
 	}
 	return "note"
 }

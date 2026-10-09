@@ -104,26 +104,11 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
 9. **Reorganize with `okfw move`, not `mv`.** It keeps the concept's `id`,
    retargets every inbound link, and fixes the moved concept's own relative
    links; moving the file yourself silently breaks both. `okfw delete`
-   likewise clears the search index and graph node that a plain `rm` would
-   strand. Deleting leaves inbound links dangling on purpose — OKF tolerates
-   them.
+   reports the inbound links it leaves behind and refreshes the `index.md`
+   listings that a plain `rm` would leave stale. Deleting leaves inbound links
+   dangling on purpose — OKF tolerates them.
 10. **Don't edit `index.md` or `log.md`** — they are reserved, generated files
    owned by okfw.
-
-## The code graph in this wiki
-
-If graphy has exported into this bundle, the wiki holds two kinds of concept
-side by side. Filter, or you will get both:
-
-- `okfw search --kind code` / `{"kind":"code"}` — entities graphy extracted
-  from the source, typed `code-function`, `code-community`, `code-rationale`
-  and so on. Narrow further with `--type` / `"type"`.
-- `okfw search --kind note` / `{"kind":"note"}` — hand-written concepts.
-
-A code concept carries a `node_id`. Hand it to `graphy concept <node id>` to
-cross back into the graph — or, for a `community:<slug>` or `graph:<slug>` id,
-to `graphy community` or `graphy report`, since those are subsystems rather
-than code entities.
 
 ## Workflow
 

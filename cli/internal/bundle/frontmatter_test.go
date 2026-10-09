@@ -7,10 +7,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// graphyConcept mirrors what `graphy export okfw` writes: okfw's quoted house
-// style plus a nested extension block. Editing one of these is the case the old
-// line-oriented editor could not handle.
-const graphyConcept = `---
+// nestedConcept is okfw's quoted house style plus a nested block under the
+// open `x:` extension. Editing one of these is the case the old line-oriented
+// editor could not handle.
+const nestedConcept = `---
 id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "ParseFrontmatter"
 type: "code-function"
@@ -19,8 +19,8 @@ tags:
   - "code"
 created: "2026-07-25T11:30:18-05:00"
 timestamp: "2026-07-25T11:30:18-05:00"
-graphy:
-  node_id: "go:function:concept.go#ParseFrontmatter"
+x:
+  source: "concept.go#ParseFrontmatter"
   language: "go"
   entity: "function"
 ---
@@ -28,8 +28,6 @@ graphy:
 # ParseFrontmatter
 
 Body text.
-
-<!-- graphy:node go:function:concept.go#ParseFrontmatter -->
 `
 
 func TestEditPreservesUnknownKeysAndComments(t *testing.T) {
@@ -64,11 +62,11 @@ nested:
 }
 
 func TestEditPreservesKeyOrder(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"timestamp": "2026-07-25T13:00:00Z"})
+	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"timestamp": "2026-07-25T13:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
-	want := []string{"id:", "title:", "type:", "description:", "tags:", "created:", "timestamp:", "graphy:"}
+	want := []string{"id:", "title:", "type:", "description:", "tags:", "created:", "timestamp:", "x:"}
 	s := string(out)
 	at := 0
 	for _, key := range want {
@@ -81,7 +79,7 @@ func TestEditPreservesKeyOrder(t *testing.T) {
 }
 
 func TestEditKeepsHouseStyleIndent(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(graphyConcept), nil)
+	out, err := UpdateFrontmatter([]byte(nestedConcept), nil)
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -89,13 +87,13 @@ func TestEditKeepsHouseStyleIndent(t *testing.T) {
 	if !strings.Contains(s, "tags:\n  - \"code\"") {
 		t.Errorf("sequence should indent by 2, got:\n%s", s)
 	}
-	if !strings.Contains(s, "graphy:\n  node_id:") {
+	if !strings.Contains(s, "x:\n  source:") {
 		t.Errorf("nested mapping should indent by 2, got:\n%s", s)
 	}
 }
 
 func TestEditOnlyChangesTheTargetedLine(t *testing.T) {
-	before := []byte(graphyConcept)
+	before := []byte(nestedConcept)
 	after, err := UpdateFrontmatter(before, map[string]string{"timestamp": "2026-07-25T14:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
@@ -121,7 +119,7 @@ func TestEditOnlyChangesTheTargetedLine(t *testing.T) {
 // tests the mechanism alone: an arbitrary new block is not in the concept
 // schema, and UpdateFrontmatter's mutation guard would rightly reject it.
 func TestSetPathCreatesNestedBlock(t *testing.T) {
-	out, err := Edit([]byte(graphyConcept), func(m *yaml.Node) error {
+	out, err := Edit([]byte(nestedConcept), func(m *yaml.Node) error {
 		return SetPath(m, "scratch.status", "closed")
 	})
 	if err != nil {
@@ -135,13 +133,13 @@ func TestSetPathCreatesNestedBlock(t *testing.T) {
 // A mutation that would break a valid concept must be refused before anything
 // reaches disk.
 func TestUpdateFrontmatterRefusesToBreakAValidConcept(t *testing.T) {
-	if _, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"id": "not-a-uuid"}); err == nil {
+	if _, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"id": "not-a-uuid"}); err == nil {
 		t.Error("expected an invalid id to be refused")
 	}
-	if _, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"title": ""}); err == nil {
+	if _, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"title": ""}); err == nil {
 		t.Error("expected an empty title to be refused")
 	}
-	if _, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"undeclared_field": "x"}); err == nil {
+	if _, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"undeclared_field": "x"}); err == nil {
 		t.Error("expected an undeclared field to be refused by the closed schema")
 	}
 }
@@ -160,7 +158,7 @@ func TestUpdateFrontmatterStillEditsAnAlreadyInvalidConcept(t *testing.T) {
 }
 
 func TestSetPathUpdatesExistingNestedKey(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"graphy.language": "python"})
+	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"x.language": "python"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -300,7 +298,7 @@ func TestAddFrontmatterTagsHandlesNullTags(t *testing.T) {
 }
 
 func TestAddFrontmatterTagsIsIdempotent(t *testing.T) {
-	once, err := AddFrontmatterTags([]byte(graphyConcept), []string{"api"})
+	once, err := AddFrontmatterTags([]byte(nestedConcept), []string{"api"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
 	}
@@ -317,8 +315,8 @@ func TestAddFrontmatterTagsIsIdempotent(t *testing.T) {
 }
 
 func TestAddFrontmatterTagsKeepsBodyByteIdentical(t *testing.T) {
-	const body = "\n# ParseFrontmatter\n\nBody text.\n\n<!-- graphy:node go:function:concept.go#ParseFrontmatter -->\n"
-	out, err := AddFrontmatterTags([]byte(graphyConcept), []string{"new"})
+	const body = "\n# ParseFrontmatter\n\nBody text.\n"
+	out, err := AddFrontmatterTags([]byte(nestedConcept), []string{"new"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
 	}
@@ -468,7 +466,7 @@ generated:
 // Without an actor there is nothing truthful to put in generated.by, so no
 // generated block is invented.
 func TestUpdateFrontmatterDoesNotInventGeneratedBlock(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(graphyConcept), map[string]string{"timestamp": "2026-07-25T12:00:00Z"})
+	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"timestamp": "2026-07-25T12:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}

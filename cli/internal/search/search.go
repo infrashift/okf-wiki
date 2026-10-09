@@ -3,8 +3,8 @@
 //
 // The Bleve index this replaces cost 13MB for 1.4MB of markdown and, more to
 // the point, was a second source of truth: a deleted concept stayed in results
-// until something pruned it, and a lost index left `search --node-id` dead
-// until a re-export happened to rebuild it. Scanning cannot desynchronize.
+// until something pruned it, and a lost index stayed lost until something
+// happened to rebuild it. Scanning cannot desynchronize.
 // Measured on a 918-concept bundle, a full-text pass takes about 17ms and a
 // frontmatter filter about 10ms — far below the point where a human or an
 // agent notices, and OKF section 3.1 anticipates exactly this ("a consumer
@@ -38,17 +38,13 @@ type Options struct {
 	Query   string   // free-text query; empty means "filters only"
 	Project string   // exact project match
 	Type    string   // OKF free-form type
-	Kind    string   // structured kind: note/daily-note/issue/code
+	Kind    string   // structured kind: note/daily-note/issue
 	Tags    []string // all must be present
 	Limit   int      // max results (0 → DefaultLimit)
 	Offset  int      // pagination offset
 
 	Status string // OKF lifecycle: draft/stable/deprecated
 	Stale  bool   // only concepts whose stale_after has passed
-
-	// GraphyNodeID looks a concept up by its code-graph identity — the reverse
-	// of graphy's exports mapping, for an agent holding a node id.
-	GraphyNodeID string
 }
 
 // DefaultLimit caps a result set that did not ask for a size.
@@ -69,8 +65,6 @@ type Result struct {
 
 	Status     string `json:"status,omitempty"`
 	StaleAfter string `json:"stale_after,omitempty"`
-
-	GraphyNodeID string `json:"graphy_node_id,omitempty"`
 }
 
 // IsStale reports whether the concept's stale_after date has arrived.
@@ -137,17 +131,16 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 		}
 		abs, _ := filepath.Abs(p)
 		r := Result{
-			ID:           fm.ID,
-			Title:        fm.Title,
-			Type:         fm.Type,
-			Kind:         fm.GetKind(),
-			Description:  fm.Description,
-			Project:      fm.Project,
-			Tags:         fm.Tags,
-			FilePath:     abs,
-			Status:       fm.Status,
-			StaleAfter:   fm.StaleAfter,
-			GraphyNodeID: graphyNodeID(fm),
+			ID:          fm.ID,
+			Title:       fm.Title,
+			Type:        fm.Type,
+			Kind:        fm.GetKind(),
+			Description: fm.Description,
+			Project:     fm.Project,
+			Tags:        fm.Tags,
+			FilePath:    abs,
+			Status:      fm.Status,
+			StaleAfter:  fm.StaleAfter,
 		}
 		if !matches(r, opts, today) {
 			return nil
@@ -212,9 +205,6 @@ func matches(r Result, opts Options, today time.Time) bool {
 	if opts.Status != "" && lifecycleOf(r.Status) != opts.Status {
 		return false
 	}
-	if opts.GraphyNodeID != "" && r.GraphyNodeID != opts.GraphyNodeID {
-		return false
-	}
 	if opts.Stale && !r.IsStale(today) {
 		return false
 	}
@@ -231,16 +221,6 @@ func matches(r Result, opts Options, today time.Time) bool {
 		}
 	}
 	return true
-}
-
-// graphyNodeID reads the graphy extension block's node id, empty on an
-// ordinary concept. It is the wiki→graph half of the bridge: an agent holding
-// a node id from graphy uses it to find the concept documenting that entity.
-func graphyNodeID(fm *config.Concept) string {
-	if fm.Graphy == nil {
-		return ""
-	}
-	return fm.Graphy.NodeID
 }
 
 // scoreConcept ranks a concept against the query terms and returns a snippet

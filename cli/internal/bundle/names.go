@@ -1,6 +1,6 @@
 // Package bundle provides the shared write-path for OKF bundles: concept
-// creation, filename conventions, frontmatter editing, and index/graph
-// synchronization. It is used by both the okfw and graphy binaries.
+// creation, filename conventions, frontmatter editing, moves and deletes, and
+// index.md maintenance.
 package bundle
 
 import (

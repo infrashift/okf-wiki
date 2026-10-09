@@ -22,7 +22,6 @@ func writeConcept(t *testing.T, root, rel, content string) string {
 	return p
 }
 
-
 // --- WriteIndexFiles ---
 
 func TestWriteIndexFilesStampsOkfVersionAtRootOnly(t *testing.T) {
@@ -171,8 +170,6 @@ func TestAutoSyncRefreshesListingsOnly(t *testing.T) {
 	}
 }
 
-
-
 // Emptying a directory used to leave its generated listing behind, still naming
 // the concepts that had been there.
 func TestWriteIndexFilesPrunesOrphanedListings(t *testing.T) {
@@ -257,17 +254,11 @@ func TestWriteIndexFilesKeepsTheRootListing(t *testing.T) {
 	}
 }
 
-
-
-
-
-
 // TestWriteIndexFilesSummarizesLargeDirectories: OKF section 8 gives index.md
 // one job — showing what is available *before* opening documents — and a
 // listing that names every concept stops doing it exactly when the directory
-// is big enough for the question to matter. A graphy export put 901 concepts
-// in one directory and produced a 28,000-token "preview" of concepts averaging
-// 1,200 tokens each.
+// is big enough for the question to matter. A 901-concept directory once
+// produced a 28,000-token "preview" of concepts averaging 1,200 tokens each.
 func TestWriteIndexFilesSummarizesLargeDirectories(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.ConfigFor(root)

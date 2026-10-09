@@ -1,11 +1,7 @@
-.PHONY: build build-graphy build-all test test-race graphy-e2e lint fmt clean install install-graphy tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
+.PHONY: build test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
-
-# graphy — code knowledge-graph sibling binary (tree-sitter requires CGo)
-GRAPHY_BINARY=graphy
-GRAPHY_CMD_PATH=./cli/cmd/graphy
 
 # Container settings
 CONTAINER_ENGINE=podman
@@ -20,11 +16,6 @@ USER_UID=$(shell id -u)
 
 build:
 	CGO_ENABLED=0 go build -o $(BINARY_NAME) $(CMD_PATH)
-
-build-graphy:
-	CGO_ENABLED=1 go build -o $(GRAPHY_BINARY) $(GRAPHY_CMD_PATH)
-
-build-all: build build-graphy
 
 # -count=1 disables the test cache: a cached pass can otherwise hide a
 # regression in code the cache key did not notice.
@@ -57,9 +48,6 @@ fmt:
 install: build
 	mv $(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
 
-install-graphy: build-graphy
-	mv $(GRAPHY_BINARY) $(GOPATH)/bin/$(GRAPHY_BINARY)
-
 ui-check:
 	@echo "Checking Lua syntax..."
 	luacheck lua/ plugin/
@@ -70,21 +58,15 @@ integration-test: build
 	nvim --headless -u NONE -c "luafile test/integration_test.lua"
 
 # The e2e image runs its tests as build steps, so a failed assertion fails the
-# build. It covers what `go test` cannot: graphy is a CGo binary built in one
-# distro and run in another, and `graphy export okfw` has to produce concepts the
-# okfw binary accepts at runtime.
+# build. It runs the NeoVim plugin suite against the okfw binary in a clean
+# container.
 e2e:
 	@echo "Building containerized e2e image (runs the tests inside the container)..."
 	$(CONTAINER_ENGINE) build -f Containerfiles/Containerfile.e2e -t okfw-e2e:latest .
-	@echo "e2e build succeeded — okfw CLI, graphy, and the NeoVim plugin all pass in-container."
-
-# Run the graphy end-to-end script against locally built binaries, without
-# waiting on a container build.
-graphy-e2e: build-all
-	PATH="$(CURDIR):$$PATH" bash Containerfiles/config/graphy-e2e.sh
+	@echo "e2e build succeeded — okfw CLI and the NeoVim plugin pass in-container."
 
 clean:
-	rm -f $(BINARY_NAME) $(GRAPHY_BINARY)
+	rm -f $(BINARY_NAME)
 	
 tidy:
 	go mod tidy

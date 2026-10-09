@@ -1,26 +1,18 @@
 # --------------------------------------------------------------------------
-# End-to-end test image: exercises both binaries and the NeoVim plugin
+# End-to-end test image: exercises the okfw binary and the NeoVim plugin
 # together, headlessly, inside a container. The tests run as build steps, so a
 # failed assertion fails the image build — `make e2e` is the gate.
-#
-# Two things are covered here that `go test` cannot:
-#   - graphy is a CGo binary. Building it in one distro and running it in
-#     another is exactly the mismatch unit tests never see.
-#   - `graphy export okfw` writes into a real bundle that okfw then validates,
-#     so the two binaries have to agree on the concept schema at runtime.
 # --------------------------------------------------------------------------
 
-# Stage 1: build both binaries
+# Stage 1: build okfw (pure Go)
 FROM docker.io/library/golang:1.24 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-# okfw is pure Go; graphy needs CGo for its tree-sitter grammars.
 RUN CGO_ENABLED=0 go build -o /out/okfw ./cli/cmd/okfw
-RUN CGO_ENABLED=1 go build -o /out/graphy ./cli/cmd/graphy
 
-# Stage 2: NeoVim + plenary + the plugin + both CLIs, then run the tests
+# Stage 2: NeoVim + plenary + the plugin + the CLI, then run the tests
 FROM registry.fedoraproject.org/fedora-minimal:43
 
 RUN dnf install -y --setopt=tsflags=nodocs git curl tar gzip ncurses findutils && \
@@ -38,22 +30,12 @@ RUN git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
 WORKDIR /src
 COPY . .
 COPY --from=builder /out/okfw /src/okfw
-COPY --from=builder /out/graphy /src/graphy
 ENV PATH="/src:${PATH}"
-
-# graphy is dynamically linked against the builder's libc. Prove it starts here,
-# where the failure is one line, rather than midway through the graph build.
-RUN graphy version && okfw --help >/dev/null
+RUN okfw --help >/dev/null
 
 # The integration test sources plugin/okfw.lua, drives the okfw CLI via
 # plenary.job, and exercises link insertion/follow plus delete and move. It calls
 # cq 1 on any failed assertion, which fails this RUN (and therefore the build).
 RUN nvim --headless -u NONE -c "luafile test/integration_test.lua"
 
-# graphy end to end on a small fixture: extract (tree-sitter, CGo), cluster,
-# then export into an okfw bundle that okfw itself must accept. A deliberately
-# tiny repo keeps this a correctness gate rather than a benchmark.
-COPY Containerfiles/config/graphy-e2e.sh /usr/local/bin/graphy-e2e.sh
-RUN chmod +x /usr/local/bin/graphy-e2e.sh && graphy-e2e.sh
-
-CMD ["bash", "-lc", "nvim --headless -u NONE -c 'luafile test/integration_test.lua' && graphy-e2e.sh"]
+CMD ["bash", "-lc", "nvim --headless -u NONE -c 'luafile test/integration_test.lua'"]

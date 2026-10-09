@@ -57,13 +57,13 @@ func TestRelHrefRoundTrips(t *testing.T) {
 // --- ReplaceBody ---
 
 func TestReplaceBodyPreservesFrontmatterBytes(t *testing.T) {
-	content := []byte(graphyConcept)
+	content := []byte(nestedConcept)
 	out, err := ReplaceBody(content, "new body\n")
 	if err != nil {
 		t.Fatalf("ReplaceBody: %v", err)
 	}
-	fmEnd := strings.Index(graphyConcept, "---\n\n") + len("---\n")
-	if !strings.HasPrefix(string(out), graphyConcept[:fmEnd]) {
+	fmEnd := strings.Index(nestedConcept, "---\n\n") + len("---\n")
+	if !strings.HasPrefix(string(out), nestedConcept[:fmEnd]) {
 		t.Errorf("frontmatter changed:\n%s", out)
 	}
 	if !strings.HasSuffix(string(out), "new body\n") {

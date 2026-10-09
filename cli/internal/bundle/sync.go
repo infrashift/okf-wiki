@@ -166,9 +166,8 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 // OKF section 8 gives index.md one job — "letting a human or agent see what is
 // available before opening individual documents" — and a listing that names
 // every concept stops doing that job precisely when a directory gets big
-// enough for the question to matter. Measured on a graphy export of a 24k-LOC
-// repo: 901 concepts in one directory produced a 112KB index.md, about 28,000
-// tokens, against a median concept of roughly 1,200. Reading the preview cost
+// enough for the question to matter. Measured on a generated bundle: 901
+// concepts in one directory produced a 112KB index.md, about 28,000 tokens, against a median concept of roughly 1,200. Reading the preview cost
 // 23x reading the thing it previewed, and 5x the entire MCP tool-definition
 // prefix. That is not disclosure, it is a trap laid by the spec's own
 // affordance.
@@ -196,10 +195,9 @@ func indexLine(title, desc, href string) string {
 // writeGroupedIndex renders a large directory as counts by type plus a sample
 // of each, naming the query that returns the rest.
 //
-// Withheld entries are always counted and always say how to get them: the same
-// discipline `graphy report` applies to large sections and concept bodies apply
-// to edges past --max-edges. A reader who cannot see that rows were withheld
-// reads a partial listing as the whole directory.
+// Withheld entries are always counted and always say how to get them, the same
+// discipline the MCP tools apply to capped results. A reader who cannot see
+// that rows were withheld reads a partial listing as the whole directory.
 func writeGroupedIndex(b *strings.Builder, cs []indexEntry) {
 	byType := map[string][]indexEntry{}
 	for _, c := range cs {

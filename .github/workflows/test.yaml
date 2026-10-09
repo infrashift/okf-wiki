@@ -24,12 +24,10 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      # CGO stays on: graphy's extractors bind tree-sitter grammars, and the
-      # extract package does not build without a C toolchain. okfw itself is
-      # pure Go and is built separately below to keep that guarantee honest.
-      #
-      # -race matters here because the compiled concept schema is now a
-      # process-wide sync.Once value shared across every validation.
+      # -race needs CGo; okfw itself is pure Go and is built without it below
+      # to keep that guarantee honest. -race matters here because the compiled
+      # concept schema is a process-wide sync.Once value shared across every
+      # validation.
       - name: Test
         env:
           CGO_ENABLED: 1
@@ -39,8 +37,6 @@ jobs:
         run: go tool cover -func=coverage.out | tail -1
 
       - name: Vet
-        env:
-          CGO_ENABLED: 1
         run: go vet ./cli/...
 
       # gofmt and tidy drift are cheap to catch and annoying to discover later.
@@ -66,11 +62,6 @@ jobs:
         env:
           CGO_ENABLED: 0
         run: go build -o /dev/null ./cli/cmd/okfw
-
-      - name: Build graphy
-        env:
-          CGO_ENABLED: 1
-        run: go build -o /dev/null ./cli/cmd/graphy
 
       # `cue vet` on the schema alone type-checks it against no data instance, so
       # it cannot catch a concept that violates #Concept. It is kept only as a

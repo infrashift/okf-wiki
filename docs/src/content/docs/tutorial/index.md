@@ -97,17 +97,14 @@ If you disconnect and reconnect, SSH reattaches to the same tmux session
 automatically. Your editor state, shell history, and Claude conversation are
 preserved.
 
-Both CLIs are on `PATH` in the container:
+The CLI is on `PATH` in the container:
 
 ```bash
-okfw --help      # the OKF wiki CLI
-graphy version   # the code knowledge-graph CLI
+okfw --help
 ```
 
-`graphy` builds a graph of a repository and can export it into an okfw bundle
-(`graphy build`, then `graphy export okfw`). Run `graphy install` inside a
-project to register its skill with Claude Code — that is per-project, so it is
-deliberately not done when the image is built.
+Run `okfw install` inside a project to register its skill with Claude Code —
+that is per-project, so it is deliberately not done when the image is built.
 
 ## 4. Where Are Notes Stored?
 

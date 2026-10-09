@@ -27,9 +27,8 @@ func main() {
 
 // rootCmd builds the whole command tree.
 //
-// Extracted from main so tests can enumerate the registered commands. graphy
-// has had this shape from the start, which is why its skill could be checked
-// against the binary and okfw's could not.
+// Extracted from main so tests can enumerate the registered commands, which is
+// what lets the agent skill be checked against the binary.
 func rootCmd() *cobra.Command {
 	var projectFlag string
 	var tagsFlag []string
@@ -257,7 +256,6 @@ Use with: okfw create "title" --template <name>`,
 	var typeFlag string
 	var kindFlag string
 	var staleFlag bool
-	var nodeIDFlag string
 
 	var searchCmd = &cobra.Command{
 		Use:   "search [query]",
@@ -268,13 +266,11 @@ Examples:
   okfw search "authentication"              # Full-text search
   okfw search --project myproject           # Filter by project
   okfw search --tag golang --tag api        # Filter by tags (AND)
-  okfw search --kind note                   # Hand-written concepts only
-  okfw search --kind code                   # graphy's exported code graph only
-  okfw search --type code-rationale         # Filter by OKF free-form type
+  okfw search --kind note                   # Notes only (no daily notes or issues)
+  okfw search --type Playbook               # Filter by OKF free-form type
   okfw search --status draft                # Filter by lifecycle status
   okfw search --stale                       # Concepts past their stale_after
-  okfw search "auth" --project myproject    # Combined search
-  okfw search --node-id go:function:a.go#F  # The concept documenting a graphy node`,
+  okfw search "auth" --project myproject    # Combined search`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
 			if err != nil {
@@ -282,15 +278,14 @@ Examples:
 			}
 
 			opts := search.Options{
-				Project:      projectFlag,
-				Type:         typeFlag,
-				Kind:         kindFlag,
-				Tags:         tagsFlag,
-				Limit:        limitFlag,
-				Offset:       offsetFlag,
-				Status:       statusFlag,
-				Stale:        staleFlag,
-				GraphyNodeID: nodeIDFlag,
+				Project: projectFlag,
+				Type:    typeFlag,
+				Kind:    kindFlag,
+				Tags:    tagsFlag,
+				Limit:   limitFlag,
+				Offset:  offsetFlag,
+				Status:  statusFlag,
+				Stale:   staleFlag,
 			}
 
 			if len(args) > 0 {
@@ -603,7 +598,7 @@ Examples:
 
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
 	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
-	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/daily-note/issue/code)")
+	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/daily-note/issue)")
 	// Offset has been honoured by index.Search since it was written; nothing
 	// ever set it, so pagination was unreachable and the only way past the
 	// limit was to raise it.
@@ -611,9 +606,6 @@ Examples:
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
-	// The reverse of `graphy concept`: cross from a code-graph node id to the
-	// concept documenting it. The two tools otherwise share no identifier.
-	searchCmd.Flags().StringVar(&nodeIDFlag, "node-id", "", "Find the concept documenting this graphy code-graph node id")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
 

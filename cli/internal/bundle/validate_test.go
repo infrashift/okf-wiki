@@ -143,8 +143,6 @@ func TestStripLegacyTodoFieldsLeavesRealLifecycleStatusAlone(t *testing.T) {
 
 // --- PruneIndex ---
 
-
-
 func TestLiveConceptIDs(t *testing.T) {
 	cfg, root := testCfg(t)
 	_, id, err := CreateConcept(cfg, Spec{Title: "Real"})

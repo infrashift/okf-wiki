@@ -21,12 +21,11 @@ const WikiDirName = ".okfw"
 
 // Fixed locations inside the wiki directory. Storage is standardized — there
 // is no user configuration.
-const (
-)
+const ()
 
 // Config carries the resolved paths of a discovered wiki.
 type Config struct {
-	RootPath  string // absolute path of the .okfw directory (the OKF bundle root)
+	RootPath string // absolute path of the .okfw directory (the OKF bundle root)
 }
 
 // ErrNoWiki is returned by Discover when no .okfw directory is found.
@@ -41,7 +40,7 @@ func (e *ErrNoWiki) Error() string {
 // ConfigFor returns the Config for a wiki rooted at the given .okfw directory.
 func ConfigFor(wikiDir string) *Config {
 	return &Config{
-		RootPath:  wikiDir,
+		RootPath: wikiDir,
 	}
 }
 
@@ -77,8 +76,7 @@ func Discover(startDir string) (*Config, error) {
 
 // The compiled schema is process-wide and immutable, so it is built once.
 // Recompiling per call made every concept pay CUE compilation — invisible for a
-// single `okfw validate`, but paid thousands of times over by validate --all and
-// by `graphy export okfw`.
+// single `okfw validate`, but paid thousands of times over by validate --all.
 var (
 	schemaOnce sync.Once
 	schemaVal  cue.Value

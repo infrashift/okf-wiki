@@ -11,10 +11,10 @@ import (
 // TestSkillDocumentsEveryCommand keeps the agent-facing documentation honest
 // against the binary.
 //
-// The skill is the only description of okfw most agents ever read. graphy has
-// had this check for months; okfw's skill was a loose file nothing verified,
-// so nothing would have caught it advertising a command that does not exist —
-// or failing to mention one that does.
+// The skill is the only description of okfw most agents ever read. It used to
+// be a loose file nothing verified, so nothing would have caught it
+// advertising a command that does not exist — or failing to mention one that
+// does.
 func TestSkillDocumentsEveryCommand(t *testing.T) {
 	skill, instructions, err := okfwskills.Docs("testrepo")
 	if err != nil {

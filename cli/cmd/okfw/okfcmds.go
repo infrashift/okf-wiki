@@ -252,7 +252,7 @@ Examples:
 				resource: resource, id: id, title: title, author: author,
 				lastModified: lastModified,
 				usageCount:   usageCount, hasUsage: cmd.Flags().Changed("usage-count"),
-				from:         from, to: to,
+				from: from, to: to,
 			}))
 			if err != nil {
 				return err
@@ -459,7 +459,7 @@ func newInstallCmd() *cobra.Command {
 knowledge in the wiki instead of scattering notes. Supported platforms: claude
 (Claude Code: skill + CLAUDE.md block), gemini (GEMINI.md block), codex
 (AGENTS.md block). Managed marker blocks keep re-installs idempotent, and the
-block is namespaced, so okfw and graphy can both maintain one in the same file.
+block is namespaced, so it coexists with blocks other tools maintain in the same file.
 
 Run from anywhere inside the project; the wiki's parent directory is the root.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
