@@ -173,32 +173,38 @@ log("")
 log("Test 8: CLI set-project command")
 if plenary_ok then
     local Job = require("plenary.job")
-
-    -- First copy the test file
-    os.execute("cp " .. repo_root .. "/cli/testdata/valid_concept_no_project.md /tmp/test_setproject_integration.md")
-
-    local setproj_output = {}
-    local setproj_code = nil
-
-    local setproj_job = Job:new({
-        command = okfw_bin,
-        args = { "set-project", "/tmp/test_setproject_integration.md", "new-project" },
-        cwd = test_project,
-        on_stdout = function(_, data)
-            table.insert(setproj_output, data)
-        end,
-        on_exit = function(_, return_val)
-            setproj_code = return_val
-        end,
-    })
-
-    setproj_job:sync(5000)
-
-    assert_eq(setproj_code, 0, "okfw set-project exits with code 0")
-
-    if #setproj_output > 0 then
-        log("  CLI output: " .. setproj_output[1])
+    local function set_project(path)
+        local out, code = {}, nil
+        Job:new({
+            command = okfw_bin,
+            args = { "set-project", path, "new-project" },
+            cwd = test_project,
+            on_stdout = function(_, data) table.insert(out, data) end,
+            on_exit = function(_, rv) code = rv end,
+        }):sync(5000)
+        return code, out
     end
+
+    -- A concept inside the bundle.
+    local inside = test_project .. "/.okfw/setproject-integration.md"
+    vim.fn.writefile(vim.fn.readfile(repo_root .. "/cli/testdata/valid_concept_no_project.md"), inside)
+    local code, out = set_project(inside)
+    assert_eq(code, 0, "okfw set-project exits with code 0")
+    assert_true(table.concat(vim.fn.readfile(inside), "\n"):find('project: "new-project"', 1, true) ~= nil,
+        "set-project wrote the project")
+    if #out > 0 then
+        log("  CLI output: " .. out[1])
+    end
+    vim.fn.delete(inside)
+
+    -- A file outside the bundle is refused rather than rewritten.
+    local outside = vim.fn.tempname() .. ".md"
+    vim.fn.writefile(vim.fn.readfile(repo_root .. "/cli/testdata/valid_concept_no_project.md"), outside)
+    local before = table.concat(vim.fn.readfile(outside), "\n")
+    code = set_project(outside)
+    assert_true(code ~= 0, "set-project refuses a file outside the bundle")
+    assert_eq(table.concat(vim.fn.readfile(outside), "\n"), before, "the outside file is untouched")
+    vim.fn.delete(outside)
 end
 
 -- Test 9: Test search command via CLI
@@ -643,13 +649,106 @@ if plenary_ok then
 
         vim.fn.confirm = real_confirm
 
-        -- And it is gone from the search index, not merely from disk.
+        -- And search no longer finds it.
         local scode, sout = run_okfw({ "search", "Deletable", "--json" })
         assert_eq(scode, 0, "search runs after the delete")
         local ok2, hits = pcall(vim.json.decode, sout)
+        assert_true(ok2 and type(hits) == "table", "search --json decodes")
         if ok2 and type(hits) == "table" then
-            assert_eq(#hits, 0, "deleted concept is gone from the search index")
+            assert_eq(#hits, 0, "deleted concept is no longer found by search")
         end
+    end
+end
+
+-- Test 34: saving a concept by hand refreshes the index.md listings. The save
+-- hook used to run the removed `okfw index`, which failed on every :w.
+log("")
+log("Test 34: index_file refreshes listings after a hand edit")
+if plenary_ok then
+    local code = run_okfw({ "create", "Hand Edited" })
+    assert_eq(code, 0, "created a concept to edit")
+    local matches = vim.fn.glob(test_project .. "/.okfw/hand-edited--*.md", false, true)
+    assert_eq(#matches, 1, "found the created concept")
+    if #matches == 1 then
+        local lines = vim.fn.readfile(matches[1])
+        for i, l in ipairs(lines) do
+            if l:match("^title:") then lines[i] = 'title: "Retitled By Hand"' end
+        end
+        vim.fn.writefile(lines, matches[1])
+        local warned = false
+        local real_notify = vim.notify
+        vim.notify = function(msg, level)
+            if level == vim.log.levels.WARN then warned = true end
+            return real_notify(msg, level)
+        end
+        okfw.index_file(matches[1])
+        local root_index = test_project .. "/.okfw/index.md"
+        vim.wait(8000, function()
+            return table.concat(vim.fn.readfile(root_index), "\n"):find("Retitled By Hand", 1, true) ~= nil
+        end)
+        vim.notify = real_notify
+        assert_true(table.concat(vim.fn.readfile(root_index), "\n"):find("Retitled By Hand", 1, true) ~= nil,
+            "root index.md lists the new title")
+        assert_true(not warned, "the save hook reported no failure")
+    end
+end
+
+-- Test 35: add_tags and validate drive the CLI. Both were bound to keymaps
+-- after their functions had been deleted, so the keys threw.
+log("")
+log("Test 35: add_tags and validate")
+if plenary_ok then
+    local code = run_okfw({ "create", "Taggable" })
+    assert_eq(code, 0, "created a concept to tag")
+    local matches = vim.fn.glob(test_project .. "/.okfw/taggable--*.md", false, true)
+    assert_eq(#matches, 1, "found the created concept")
+    if #matches == 1 then
+        okfw.add_tags("alpha, beta", matches[1])
+        vim.wait(8000, function()
+            return table.concat(vim.fn.readfile(matches[1]), "\n"):find('"beta"', 1, true) ~= nil
+        end)
+        local body = table.concat(vim.fn.readfile(matches[1]), "\n")
+        assert_true(body:find('"alpha"', 1, true) ~= nil and body:find('"beta"', 1, true) ~= nil,
+            "add_tags wrote both tags")
+
+        local levels = {}
+        local real_notify = vim.notify
+        vim.notify = function(msg, level) table.insert(levels, level) end
+        okfw.validate(matches[1])
+        vim.wait(8000, function() return #levels > 0 end)
+        assert_eq(levels[1], vim.log.levels.INFO, "validate reports a valid concept as valid")
+
+        local broken = test_project .. "/.okfw/broken--0001.md"
+        vim.fn.writefile({ "---", 'title: "Broken"', "---", "" }, broken)
+        levels = {}
+        okfw.validate(broken)
+        vim.wait(8000, function() return #levels > 0 end)
+        vim.notify = real_notify
+        assert_eq(levels[1], vim.log.levels.ERROR, "validate reports an invalid concept as an error")
+        vim.fn.delete(broken)
+    end
+end
+
+-- Test 36: preview_by_id resolves a concept wherever it ranks. It used to run a
+-- one-result search and look for the id inside it.
+log("")
+log("Test 36: resolve_concept")
+if plenary_ok then
+    local matches = vim.fn.glob(test_project .. "/.okfw/taggable--*.md", false, true)
+    if #matches == 1 then
+        local id
+        for _, l in ipairs(vim.fn.readfile(matches[1], "", 20)) do
+            id = id or l:match('^id:%s*"([^"]+)"')
+        end
+        okfw._bundle_roots = {}
+        local real_cwd = vim.fn.getcwd()
+        vim.cmd("cd " .. vim.fn.fnameescape(test_project))
+        local want = vim.fn.resolve(matches[1])
+        assert_eq(vim.fn.resolve(okfw.resolve_concept(id) or ""), want, "resolves by frontmatter id")
+        local concept_id = vim.fn.fnamemodify(matches[1], ":t:r")
+        assert_eq(vim.fn.resolve(okfw.resolve_concept(concept_id) or ""), want, "resolves by OKF concept ID")
+        assert_eq(okfw.resolve_concept("019680f0-0000-7000-8000-000000000000"), nil, "unknown id resolves to nil")
+        vim.cmd("cd " .. vim.fn.fnameescape(real_cwd))
     end
 end
 

@@ -454,8 +454,8 @@ M.set_project = function(file_path, project)
     job:start()
 end
 
--- Delete a concept: the file plus its search-index entry, graph node, and
--- index.md line.
+-- Delete a concept: the file and its index.md line. Inbound links are reported,
+-- not rewritten (OKF tolerates a link to a concept that does not exist).
 --
 -- The confirmation happens here rather than in the CLI. plenary.job hands the
 -- child a pipe, and `okfw delete` refuses to prompt on anything that is not a
@@ -616,20 +616,24 @@ M.search = function(query, opts)
     job:start()
 end
 
--- Index files
+-- Regenerate the bundle's index.md listings (`okfw index-md`). Search and the
+-- link graph are computed from the files, so the listings are the only thing
+-- there is to refresh. `path` selects which bundle; it defaults to the cwd's.
 M.index = function(path)
-    path = path or vim.fn.getcwd()
+    local args = { "index-md" }
+    if path and path ~= "" then table.insert(args, path) end
 
     local job = require('plenary.job'):new({
         command = M.config.bin,
-        args = { "index", path },
+        args = args,
+        cwd = vim.fn.getcwd(),
         on_exit = function(j, return_val)
             vim.schedule(function()
                 if return_val == 0 then
-                    local result = table.concat(j:result(), "\n")
-                    print(result)
+                    print(table.concat(j:result(), "\n"))
                 else
-                    print("Failed to index")
+                    local err = table.concat(j:stderr_result(), "\n")
+                    print("Failed to refresh index.md listings: " .. err)
                 end
             end)
         end,
@@ -637,7 +641,10 @@ M.index = function(path)
     job:start()
 end
 
--- Index a single file silently (for auto-indexing on save)
+-- Refresh the listings after a concept was saved by hand, silently. A title or
+-- description edited in the buffer otherwise stays stale in index.md until the
+-- next okfw write. --no-adopt keeps this to the listings okfw already
+-- maintains, as its own writers do; it never takes over a hand-written one.
 M.index_file = function(path)
     if not path or path == "" then
         return
@@ -645,14 +652,81 @@ M.index_file = function(path)
 
     local job = require('plenary.job'):new({
         command = M.config.bin,
-        args = { "index", path },
-        -- Silent - no output on success
+        args = { "index-md", "--no-adopt" },
+        -- Run from the file's directory so the bundle it belongs to is found.
+        cwd = vim.fn.fnamemodify(path, ":h"),
         on_exit = function(_, return_val)
             if return_val ~= 0 then
                 vim.schedule(function()
-                    vim.notify("okfw: failed to index " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.WARN)
+                    vim.notify("okfw: failed to refresh index.md listings after saving "
+                        .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.WARN)
                 end)
             end
+        end,
+    })
+    job:start()
+end
+
+-- Add tags to a concept (`okfw add-tags`). `tags` is a space- or
+-- comma-separated string or a list; `file_path` defaults to the current buffer.
+M.add_tags = function(tags, file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+    if type(tags) == "string" then
+        tags = vim.split(tags, "[%s,]+", { trimempty = true })
+    end
+    if not tags or #tags == 0 then
+        return
+    end
+
+    local args = { "add-tags", file_path }
+    vim.list_extend(args, tags)
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        cwd = vim.fn.fnamemodify(file_path, ":h"),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    print("Added tags: " .. table.concat(tags, ", "))
+                    M._tag_cache = nil
+                    if vim.fn.expand("%:p") == file_path then
+                        vim.cmd("edit!")
+                    end
+                else
+                    print("Failed to add tags: " .. table.concat(j:stderr_result(), "\n"))
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Validate a concept's frontmatter against the schema (`okfw validate`).
+-- `file_path` defaults to the current buffer.
+M.validate = function(file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = { "validate", file_path },
+        cwd = vim.fn.fnamemodify(file_path, ":h"),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                local out = vim.trim(table.concat(j:result(), "\n") .. "\n" .. table.concat(j:stderr_result(), "\n"))
+                if return_val == 0 then
+                    vim.notify(out ~= "" and out or "Valid", vim.log.levels.INFO)
+                else
+                    vim.notify(out, vim.log.levels.ERROR)
+                end
+            end)
         end,
     })
     job:start()
@@ -685,7 +759,7 @@ M.graph = function(opts)
     local limit = opts.limit or 10
     local depth = opts.depth or 0
 
-    -- Build args: path is optional (CLI defaults to conceptkasten root)
+    -- Build args: path is optional (the CLI defaults to the discovered bundle)
     local args = { "graph" }
 
     if opts.path and opts.path ~= "" then
@@ -887,31 +961,67 @@ M.preview_note = function(file_path)
     return { buf = buf, win = win }
 end
 
--- Preview note by ID (searches for matching file)
+-- Preview a concept by its frontmatter id or its OKF concept ID (the
+-- bundle-relative path, with or without ".md").
+--
+-- This used to run a search capped at one result and then look for the id in
+-- it, so it found the concept only when it happened to rank first.
 M.preview_by_id = function(id)
     if not id or id == "" then
-        id = vim.fn.input("Note ID: ")
+        id = vim.fn.input("Concept ID: ")
         if id == "" then return end
     end
-
-    -- Search for the note
-    M.search("", {
-        limit = 1,
-        on_results = function(results)
-            -- Filter by ID
-            for _, r in ipairs(results) do
-                if r.id == id then
-                    M.preview_note(r.file_path)
-                    return
-                end
-            end
-            print("Note not found: " .. id)
-        end,
-    })
+    local path = M.resolve_concept(id)
+    if path then
+        M.preview_note(path)
+    else
+        print("Concept not found: " .. id)
+    end
 end
 
--- Insert a concept link at cursor position
--- Format: [[id]] or [[id|title]]
+-- Resolve a frontmatter id or OKF concept ID to an absolute path, or nil.
+M.resolve_concept = function(ref)
+    local root = M.bundle_root()
+    if not root or not ref or ref == "" then return nil end
+    root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+
+    -- OKF concept ID: the bundle-relative path.
+    if ref:find("/") or ref:match("%.md$") then
+        local rel = ref:gsub("^/", "")
+        for _, cand in ipairs({ rel, rel .. ".md" }) do
+            local p = root .. "/" .. cand
+            if vim.fn.filereadable(p) == 1 then return p end
+        end
+        return nil
+    end
+
+    local function has_id(p)
+        local ok, lines = pcall(vim.fn.readfile, p, "", 20)
+        if not ok or lines[1] ~= "---" then return false end
+        for i = 2, #lines do
+            if lines[i] == "---" then return false end
+            local v = lines[i]:match('^id:%s*["\']?([^"\']+)["\']?%s*$')
+            if v then return v == ref end
+        end
+        return false
+    end
+
+    -- Filenames embed the id's first 12 hex characters, so try those first.
+    local short = ref:gsub("-", ""):sub(1, 12)
+    for _, p in ipairs(vim.fn.globpath(root, "**/*--" .. short .. "*.md", false, true)) do
+        if has_id(p) then return p end
+    end
+    for _, p in ipairs(vim.fn.globpath(root, "**/*.md", false, true)) do
+        -- ephemeral/ holds `okfw export` copies, which carry the same id.
+        if not vim.startswith(p, root .. "/ephemeral/") and has_id(p) then return p end
+    end
+    -- A bare concept ID at the bundle root.
+    if vim.fn.filereadable(root .. "/" .. ref .. ".md") == 1 then
+        return root .. "/" .. ref .. ".md"
+    end
+    return nil
+end
+
 -- Cached wiki roots (path of the project's .okfw directory), queried from the
 -- CLI. Keyed by cwd: the wiki is per-project and discovered by walking upward,
 -- so switching projects within one session must not reuse a stale root.
@@ -1290,7 +1400,7 @@ end
 M.complete_tags = function()
     local tags = M.get_tags_sync()
     if #tags == 0 then
-        print("No tags found. Run :lua require('okfw').index() first.")
+        print("No tags found.")
         return
     end
 

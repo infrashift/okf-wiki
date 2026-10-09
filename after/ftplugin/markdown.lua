@@ -23,7 +23,7 @@ local function is_concept()
     return false
 end
 
--- Get the structured kind from frontmatter (e.g. "todo", "note", "daily-note").
+-- Get the structured kind from frontmatter (e.g. "note", "daily-note", "issue").
 -- The `kind` field is omitted for plain notes, so an absent kind means "note".
 local function get_kind()
     local lines = vim.api.nvim_buf_get_lines(0, 0, 15, false)
@@ -50,14 +50,15 @@ if is_concept() then
     -- Set omnifunc for tag completion
     vim.bo.omnifunc = "v:lua.require'okfw'.omnifunc"
 
-    -- Auto-index on save
+    -- Refresh the index.md listings on save, so a title or description edited
+    -- here shows up in them as it would after any okfw write.
     vim.api.nvim_create_autocmd("BufWritePost", {
         buffer = 0,
         callback = function()
             local file_path = vim.fn.expand("%:p")
             require("okfw").index_file(file_path)
         end,
-        desc = "Auto-index concept on save",
+        desc = "Refresh okfw index.md listings on save",
     })
 
     -- Buffer-local keymaps for concept files
@@ -103,27 +104,10 @@ if is_concept() then
     -- Let native gf also resolve bare relative .md paths
     vim.opt_local.suffixesadd:prepend(".md")
 
-    local zkind = get_kind()
-
-    -- Set project (note and todo kinds)
-    if zkind == "note" or zkind == "todo" then
+    -- Set project (plain notes only)
+    if get_kind() == "note" then
         vim.keymap.set("n", "<localleader>p", function()
             require("okfw").set_project()
         end, vim.tbl_extend("force", opts, { desc = "Set project" }))
-    end
-
-    -- Status picker for todo-kind concepts
-    if zkind == "todo" then
-        vim.keymap.set("n", "<localleader>s", function()
-            vim.ui.select(
-                { "open", "in_progress", "closed" },
-                { prompt = "Set todo status:" },
-                function(choice)
-                    if choice then
-                        require("okfw").set_status(choice)
-                    end
-                end
-            )
-        end, vim.tbl_extend("force", opts, { desc = "Set todo status" }))
     end
 end

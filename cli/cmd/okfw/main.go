@@ -189,6 +189,7 @@ wiki exists.`,
 		},
 	}
 
+	var indexNoAdoptFlag bool
 	var indexMdCmd = &cobra.Command{
 		Use:   "index-md [path]",
 		Short: "Generate OKF index.md directory listings",
@@ -200,7 +201,10 @@ okfw marks the listings it generates and maintains only those on every change.
 This command also takes over an unmarked index.md in a directory holding okfw
 concepts — which is how listings from before the marker come back under
 maintenance — but never deletes one: an index.md okfw did not write is pruned
-by nobody but you.`,
+by nobody but you.
+
+--no-adopt refreshes only the listings okfw already maintains, exactly as every
+okfw write does. Editors use it after saving a concept by hand.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Listings are bundle-wide and the root one carries okf_version, so
@@ -209,9 +213,10 @@ by nobody but you.`,
 			if err != nil {
 				return err
 			}
-			return runIndexMd(cfg, cfg.RootPath)
+			return runIndexMd(cfg, cfg.RootPath, !indexNoAdoptFlag)
 		},
 	}
+	indexMdCmd.Flags().BoolVar(&indexNoAdoptFlag, "no-adopt", false, "Refresh only listings okfw already maintains; never take over an unmarked index.md")
 
 	var logCmd = &cobra.Command{
 		Use:   "log [path]",
@@ -1475,8 +1480,12 @@ func bundleArg(args []string) (*config.Config, string, error) {
 // runIndexMd generates an OKF index.md in each bundle directory (progressive
 // disclosure). The root index.md carries the okf_version declaration; all other
 // index files have no frontmatter.
-func runIndexMd(cfg *config.Config, root string) error {
-	count, err := bundle.AdoptIndexFiles(cfg, root)
+func runIndexMd(cfg *config.Config, root string, adopt bool) error {
+	write := bundle.WriteIndexFiles
+	if adopt {
+		write = bundle.AdoptIndexFiles
+	}
+	count, err := write(cfg, root)
 	if err != nil {
 		return err
 	}

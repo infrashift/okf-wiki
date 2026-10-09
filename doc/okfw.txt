@@ -130,11 +130,10 @@ Search ~
                           :OkfwSearch! --kind issue
 <
 
-Indexing ~
+Delete and move ~
                                                                   *:OkfwDelete*
-:OkfwDelete [{path}]      Delete a concept and everything derived from it: the
-                          file, its search-index entry, its graph node, and its
-                          index.md line. With no argument, acts on the current
+:OkfwDelete [{path}]      Delete a concept: the file and its index.md line.
+                          Inbound links are reported, not rewritten. With no argument, acts on the current
                           buffer. Asks for confirmation (defaulting to No) and
                           then wipes the orphaned buffer.
 
@@ -155,8 +154,10 @@ Indexing ~
                           relative links.
 
                                                                   *:OkfwIndex*
-:OkfwIndex [path]       Index concepts for searching.
-                        Default: current directory
+:OkfwIndex [path]       Regenerate the bundle's index.md listings
+                        (`okfw index-md`). Search needs no index. Saving a
+                        concept refreshes the listings automatically.
+                        Default: the bundle of the current directory
 
 Graph ~
                                                                   *:OkfwGraph*
@@ -243,7 +244,21 @@ search({query}, {opts}) Search concepts.
                         opts.on_results: callback function
 
                                                                 *okfw.index()*
-index({path})           Index concepts.
+index({path})           Regenerate the index.md listings (`okfw index-md`).
+
+                                                           *okfw.index_file()*
+index_file({path})      Refresh the listings okfw maintains after {path} was
+                        saved by hand (`okfw index-md --no-adopt`). Runs on
+                        BufWritePost for concept buffers.
+
+                                                      *okfw.resolve_concept()*
+resolve_concept({ref})  Return the absolute path of the concept with
+                        frontmatter id {ref}, or OKF concept ID {ref} (its
+                        bundle-relative path, with or without .md); nil if
+                        none.
+
+                                                        *okfw.preview_by_id()*
+preview_by_id({ref})    Preview the concept resolve_concept() finds.
 
 Graph ~
                                                                 *okfw.graph()*
@@ -291,7 +306,7 @@ Tags ~
                                                             *okfw.add_tags()*
 add_tags({tags}, {path})
                         Add tags to a concept's frontmatter.
-                        {tags}: string (space-separated) or table
+                        {tags}: string (space- or comma-separated) or table
                         {path}: optional file path (default: current buffer)
 
 Validation ~

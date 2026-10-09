@@ -372,7 +372,7 @@ local function create_commands()
     end, {
         nargs = "?",
         complete = "dir",
-        desc = "Index concepts",
+        desc = "Regenerate the bundle's index.md listings",
     })
 
     -- Delete / move
@@ -383,7 +383,7 @@ local function create_commands()
     end, {
         nargs = "?",
         complete = "file",
-        desc = "Delete the current concept (asks first) and its index/graph entries",
+        desc = "Delete the current concept (asks first) and its index.md entry",
     })
 
     vim.api.nvim_create_user_command("OkfwMove", function(opts)

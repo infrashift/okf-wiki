@@ -89,7 +89,7 @@ func TestRunIndexMd(t *testing.T) {
 	writeConceptFile(t, root, "notes/alpha--0001.md", conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha"))
 	writeConceptFile(t, root, "projects/okf/beta--0002.md", conceptContent("01968109-4700-7def-9abc-ffffffffffff", "Beta", "note", "# Beta"))
 
-	if err := runIndexMd(cfg, root); err != nil {
+	if err := runIndexMd(cfg, root, true); err != nil {
 		t.Fatalf("runIndexMd: %v", err)
 	}
 
