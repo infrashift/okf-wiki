@@ -262,7 +262,8 @@ func writeGroupedIndex(b *strings.Builder, cs []indexEntry) {
 			b.WriteString(indexLine(c.title, c.desc, c.href))
 		}
 		if n := len(group) - len(shown); n > 0 {
-			fmt.Fprintf(b, "* … %d more — `okfw search --type %s`\n", n, t)
+			// Plain text, not a bullet: OKF section 8 listing entries are links.
+			fmt.Fprintf(b, "\n… %d more — `okfw search --type %s`\n", n, t)
 		}
 		b.WriteString("\n")
 	}

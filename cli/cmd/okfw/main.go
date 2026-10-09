@@ -1359,7 +1359,7 @@ func runValidateAll(cfg *config.Config, root string) error {
 // warnings (OKF tolerates broken links). Returns an error if any hard violation
 // is found.
 func runValidateOKF(cfg *config.Config, root string) error {
-	var concepts, violations, brokenLinks int
+	var concepts, violations, brokenLinks, warnings int
 	var problems []string
 
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
@@ -1372,7 +1372,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -1380,6 +1380,28 @@ func runValidateOKF(cfg *config.Config, root string) error {
 		if err != nil {
 			return nil
 		}
+		// Section 11.3: reserved files must follow sections 8 and 9.
+		switch fi.Name() {
+		case "index.md":
+			v, w := bundle.CheckIndexFile(content, filepath.Dir(p) == root)
+			for _, m := range v {
+				violations++
+				problems = append(problems, fmt.Sprintf("  ✗ %s: %s", rel, m))
+			}
+			for _, m := range w {
+				warnings++
+				problems = append(problems, fmt.Sprintf("  ⚠ %s: %s", rel, m))
+			}
+			return nil
+		case "log.md":
+			for _, m := range bundle.CheckLogFile(content) {
+				violations++
+				problems = append(problems, fmt.Sprintf("  ✗ %s: %s", rel, m))
+			}
+			return nil
+		}
+		// Section 11.1 asks only for parseable YAML frontmatter, so a field of
+		// the wrong shape is not a violation here; `okfw validate` is strict.
 		z, err := config.ParseFrontmatter(content)
 		if err != nil {
 			violations++
@@ -1417,17 +1439,21 @@ func runValidateOKF(cfg *config.Config, root string) error {
 		return err
 	}
 
-	// Root index.md should declare okf_version.
+	// Section 12: a version okfw does not implement is checked best-effort,
+	// not refused.
 	if data, err := os.ReadFile(filepath.Join(root, "index.md")); err == nil {
-		if !strings.Contains(string(data), "okf_version") {
-			problems = append(problems, "  ⚠ index.md: root index is missing an okf_version declaration")
+		if v := bundle.DeclaredOKFVersion(data); v != "" && v != config.OKFVersion {
+			warnings++
+			problems = append(problems, fmt.Sprintf(
+				"  ⚠ index.md: the bundle declares OKF %s; checked against OKF %s on a best-effort basis", v, config.OKFVersion))
 		}
 	}
 
 	for _, pmsg := range problems {
 		fmt.Println(pmsg)
 	}
-	fmt.Printf("\nOKF conformance: %d concept(s), %d violation(s), %d broken link(s).\n", concepts, violations, brokenLinks)
+	fmt.Printf("\nOKF conformance: %d concept(s), %d violation(s), %d broken link(s), %d warning(s).\n",
+		concepts, violations, brokenLinks, warnings)
 	if violations > 0 {
 		return fmt.Errorf("%d conformance violation(s)", violations)
 	}

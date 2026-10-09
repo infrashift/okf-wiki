@@ -546,3 +546,57 @@ func TestRunMigrateLeavesUnrepairableTimestampsAlone(t *testing.T) {
 		t.Errorf("TimestampsNeedingRepair = %v, %v; want [stale_after]", bad, err)
 	}
 }
+
+func captureStdout(t *testing.T, fn func() error) (string, error) {
+	t.Helper()
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := fn()
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	return string(out), err
+}
+
+// TestValidateOKFOnABundleOkfwDidNotWrite: §11 asks for parseable frontmatter
+// with a non-empty type, plus reserved files shaped per §8 and §9 — nothing
+// about okfw's own fields. A nested directory named ephemeral is part of the
+// bundle; only the root's is okfw's scratch area.
+func TestValidateOKFOnABundleOkfwDidNotWrite(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.2\"\n---\n\n# Finance\n\n* [Revenue](computations/revenue.md) - Revenue.\n")
+	writeConceptFile(t, root, "computations/revenue.md", "---\ntype: Attested Computation\ntags: finance\n---\n# Revenue\n\nSee [profit](/computations/profit.md \"P\").\n")
+	writeConceptFile(t, root, "computations/profit.md", "---\ntype: Attested Computation\n---\n# Profit\n")
+	writeConceptFile(t, root, "notes/ephemeral/scratch.md", "---\ntype: Note\n---\n# Scratch\n")
+	writeConceptFile(t, root, "log.md", "# Log\n\n## 2026-05-22\n* **Update**: revenue\n\n## 2026-05-15\n* **Creation**: profit\n")
+
+	out, err := captureStdout(t, func() error { return runValidateOKF(cfg, root) })
+	if err != nil {
+		t.Fatalf("conformant bundle rejected: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "3 concept(s), 0 violation(s), 0 broken link(s), 0 warning(s)") {
+		t.Errorf("summary:\n%s", out)
+	}
+
+	// Reserved files that break their structure are violations.
+	writeConceptFile(t, root, "computations/index.md", "---\nokf_version: \"0.2\"\n---\n# Computations\n")
+	writeConceptFile(t, root, "log.md", "## 2026-02-01\n* a\n\n## 2026-03-01\n* b\n")
+	out, err = captureStdout(t, func() error { return runValidateOKF(cfg, root) })
+	if err == nil || !strings.Contains(out, "computations/index.md: frontmatter is only permitted") ||
+		!strings.Contains(out, "log.md: line 4: 2026-03-01 follows 2026-02-01") {
+		t.Errorf("err = %v, output:\n%s", err, out)
+	}
+}
+
+func TestValidateOKFReportsAnotherVersionWithoutFailing(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"1.0\"\n---\n\n# /\n")
+	writeConceptFile(t, root, "a.md", "---\ntype: Note\n---\n")
+	out, err := captureStdout(t, func() error { return runValidateOKF(cfg, root) })
+	if err != nil || !strings.Contains(out, "declares OKF 1.0") {
+		t.Errorf("err = %v, output:\n%s", err, out)
+	}
+}

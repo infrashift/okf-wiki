@@ -188,4 +188,7 @@ func TestSkipWalkDir(t *testing.T) {
 	if SkipWalkDir(root, filepath.Join(root, "notes"), "notes") {
 		t.Error("SkipWalkDir should not skip a normal directory")
 	}
+	if SkipWalkDir(root, filepath.Join(root, "foo", "ephemeral"), "ephemeral") {
+		t.Error("only the root's ephemeral/ is okfw's; a nested one is part of the bundle")
+	}
 }

@@ -168,9 +168,12 @@ func RelDir(rel string) string {
 
 // SkipWalkDir reports whether a bundle walk should skip the directory: hidden
 // directories and the ephemeral export scratch area, but never the root itself.
+// ephemeral/ is okfw's own directory at the walk root only; a "ephemeral"
+// directory deeper down is an ordinary part of the bundle, and skipping it at
+// any depth hid its concepts from every command, validate --okf included.
 func SkipWalkDir(root, p, name string) bool {
 	if p == root {
 		return false
 	}
-	return strings.HasPrefix(name, ".") || name == "ephemeral"
+	return strings.HasPrefix(name, ".") || (name == "ephemeral" && filepath.Dir(p) == root)
 }

@@ -678,7 +678,7 @@ Usage: `okfw validate <file>` or `okfw validate --okf [path]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--okf` | - | `false` | Validate the whole wiki for OKF conformance (every concept has non-empty `type`; broken links reported as warnings) |
+| `--okf` | - | `false` | Validate the whole wiki for OKF §11 conformance: every concept has parseable frontmatter with a non-empty `type`, every `index.md` follows §8 (no frontmatter except `okf_version` at the root) and every `log.md` follows §9 (`## YYYY-MM-DD` headings, newest first). Broken links, listing entries that are not links, and a declared `okf_version` other than okfw's are reported as warnings |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw mcp`
