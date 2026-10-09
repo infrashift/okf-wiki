@@ -1,9 +1,8 @@
 package main
 
 // `okfw delete` and `okfw move`: the two operations that change whether a concept
-// exists and where. Both keep the file, the search index, the graph database, and
-// the index.md listings in step; doing any one of them by hand leaves the other
-// three stale.
+// exists and where. Both keep the links and the index.md listings in step with
+// the file; doing it by hand with rm or mv leaves them stale.
 
 import (
 	"bufio"
@@ -26,9 +25,8 @@ func newDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "delete <id_or_file>",
 		Aliases: []string{"rm"},
-		Short:   "Delete a concept and everything derived from it",
-		Long: `Remove a concept's file, its search-index entry, its graph node, and its
-line in the index.md listings.
+		Short:   "Delete a concept and its index.md entry",
+		Long: `Remove a concept's file and its line in the index.md listings.
 
 Concepts that link to the deleted one are reported but left alone. OKF requires
 consumers to tolerate a link whose target does not exist, so a dangling link is

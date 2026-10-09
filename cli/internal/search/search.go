@@ -326,11 +326,6 @@ func ResultsToJSON(results []Result) (string, error) {
 	return string(b), nil
 }
 
-// FormatResults renders results for a terminal.
-func FormatResults(results []Result, total int) string {
-	return FormatResultsFrom(results, total, 0)
-}
-
 // FormatResultsFrom renders a page, numbering from offset and saying when more
 // remain — a caller that cannot see it withheld rows reads a truncated list as
 // the whole answer.

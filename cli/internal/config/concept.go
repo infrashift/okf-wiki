@@ -132,9 +132,6 @@ func (z *Concept) GetKind() string {
 	return "note"
 }
 
-// IsDailyNote returns true if this concept is a daily note.
-func (z *Concept) IsDailyNote() bool { return z.GetKind() == "daily-note" }
-
 // LifecycleStatus returns the OKF lifecycle status, defaulting to "stable"
 // (OKF section 5.4: absent status means stable).
 func (z *Concept) LifecycleStatus() string {

@@ -50,8 +50,9 @@ wiki of markdown concepts stored in a .okfw/ directory at your project root.
 
 Run 'okfw init' once per project. Every other command then finds the wiki
 automatically by searching upward from the working directory, so okfw works
-from any subdirectory. Zero configuration: the search index, graph database,
-and index.md listings are maintained automatically inside .okfw/.
+from any subdirectory. Zero configuration: there is no index or database to
+maintain — search and the link graph are computed from the files, and the
+index.md listings are kept current on every change.
 
 For scripts and agents: read commands support --json for structured output,
 'okfw create --json' returns the new note's {"id","path"}, and plain create
@@ -134,9 +135,9 @@ is found.`,
 when inside a repo, otherwise the current directory.
 
 All other commands find the wiki automatically by searching upward from the
-working directory. Generated artifacts (search index, graph database, todo
-lists, exports) are gitignored via .okfw/.gitignore; concept markdown is
-meant to be committed with the project.
+working directory. The one generated directory, ephemeral/ (okfw export's
+output), is gitignored via .okfw/.gitignore; concept markdown and the index.md
+listings are meant to be committed with the project.
 
 Running init on an already-initialized project is a no-op.`,
 		Args: cobra.NoArgs,
@@ -498,8 +499,9 @@ Examples:
 		Long: `Export a subset of the bundle as portable markdown files.
 
 Runs the same graph query as 'okfw graph' (BFS, --limit, --depth, --start),
-then copies each note into <root>/ephemeral/ with [[id|title]] links
-converted to [title](id.md) relative links that work in any markdown viewer.
+then copies each concept into <root>/ephemeral/ as <id>.md, rewriting links
+between exported concepts to point at those files, so the set reads in any
+markdown viewer.
 
 The ephemeral/ directory has a .gitignore that ignores all its contents.
 
@@ -688,7 +690,6 @@ Examples:
 	dailyCmd.Flags().BoolVar(&monthFlag, "month", false, "Show this month's notes (with --list)")
 	dailyCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON (with --list)")
 
-	// Todo-specific flags
 	var addTagsCmd = &cobra.Command{
 		Use:   "add-tags [id_or_file] [tags...]",
 		Short: "Add tags to a concept",
@@ -885,8 +886,9 @@ Examples:
 
 	var graphQueryCmd = &cobra.Command{
 		Use:   "graph-query <subcommand> <arg>",
-		Short: "Query the persistent graph database",
-		Long: `Query the graph database for backlinks, clusters, tags, or dangling edges.
+		Short: "Query the link graph",
+		Long: `Query the link graph for backlinks, clusters, tags, or dangling edges. The
+graph is built from the files on each call; there is no database to sync.
 
 All subcommands support --json for machine-readable output (e.g. for Neovim integration).
 
@@ -1100,7 +1102,6 @@ Example client configuration (Claude Code):
 	return rootCmd
 }
 
-// parseConceptForGraph parses a concept file and returns a graph node
 // runInit creates the .okfw wiki directory under target (a project root),
 // with a .gitignore for generated artifacts and an OKF root index.md.
 // A no-op with a message when the wiki already exists.
@@ -1131,9 +1132,6 @@ func runInit(target string) error {
 	return nil
 }
 
-// bundle.SkipWalkDir reports whether a directory met during a bundle walk should be
-// skipped: hidden directories (.index, .git, ...) and the ephemeral/ export
-// dir — but never the walk root itself, which is the hidden .okfw directory.
 // queryGraph runs FindConnected or FindAllConnected based on startID.
 func queryGraph(cfg *config.Config, g *graph.Graph, start string, limit, depth int) ([]*graph.Node, error) {
 	if start != "" {
@@ -1151,10 +1149,6 @@ func queryGraph(cfg *config.Config, g *graph.Graph, start string, limit, depth i
 	return g.FindAllConnected(limit, depth), nil
 }
 
-// queryStore runs the graph query against the persistent store. With a start
-// node it uses the store's indexed cluster BFS (backlinks are O(1) lookups and
-// only the cluster is loaded); without one it must load the full graph to find
-// the most-connected starting node.
 // prepareEphemeralDir wipes and recreates the ephemeral directory with a .gitignore.
 func prepareEphemeralDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
@@ -1170,67 +1164,9 @@ func prepareEphemeralDir(dir string) error {
 	return nil
 }
 
-// ensureGitignore ensures the .gitignore file includes the graph path
-func ensureGitignore(basePath string, graphPath string) error {
-	info, err := os.Stat(basePath)
-	if err != nil {
-		return err
-	}
-
-	var gitignorePath string
-	if info.IsDir() {
-		gitignorePath = filepath.Join(basePath, ".gitignore")
-	} else {
-		gitignorePath = filepath.Join(filepath.Dir(basePath), ".gitignore")
-	}
-
-	// Read existing .gitignore or create new
-	var lines []string
-	content, err := os.ReadFile(gitignorePath)
-	if err == nil {
-		lines = strings.Split(string(content), "\n")
-	}
-
-	// Check if graph path is already ignored
-	graphPattern := graphPath
-	if !strings.HasPrefix(graphPattern, "/") {
-		graphPattern = "/" + graphPattern
-	}
-	graphPatternAlt := graphPath + "/"
-
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == graphPath || trimmed == graphPattern || trimmed == graphPatternAlt {
-			return nil // Already ignored
-		}
-	}
-
-	// Add graph path to .gitignore
-	f, err := os.OpenFile(gitignorePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	// Add newline if file doesn't end with one
-	if len(content) > 0 && content[len(content)-1] != '\n' {
-		if _, err := f.WriteString("\n"); err != nil {
-			return err
-		}
-	}
-
-	// Add comment and pattern
-	entry := fmt.Sprintf("\n# Generated graph visualizations\n%s/\n", graphPath)
-	if _, err := f.WriteString(entry); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// bundle.IndexFile indexes a single markdown file
-// runMigrate strips the removed todo feature's frontmatter from every concept in
-// the bundle. Idempotent: a second run reports nothing to do.
+// runMigrate brings older concepts up to the current frontmatter shape: it
+// strips the removed todo feature's fields and upgrades bare dates to OKF
+// datetimes. Idempotent: a second run reports nothing to do.
 func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 	var scanned, changed, repair int
 
@@ -1842,13 +1778,3 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 
 	return nil
 }
-
-// bundle.AutoIndex indexes a single file silently (for auto-indexing on create/update)
-// bundle.AutoSync updates the search index and, when a graph database exists, the
-// persistent graph for a single created or updated file (best-effort).
-// bundle.Spec describes a concept to create.
-
-// bundle.NewV7WithTime constructs a UUIDv7 with a specific timestamp instead of time.Now().
-// bundle.TimeFromID extracts creation time from either ID format:
-//   - Legacy: "YYYYMMDDHHmmss-UUID" → parse 14-char prefix
-//   - UUIDv7: parse first 48 bits as Unix milliseconds

@@ -17,9 +17,10 @@ and gives a cheap overview before you open anything (OKF section 8).
 - **Link actively** — `[Title](/dir/file.md)` from the wiki root, or
   `./file.md`. Links are what makes the wiki more than a folder.
 - **One idea per concept**, with a one-sentence `description`.
-- **Use `okfw move` / `okfw delete`, never `mv` / `rm`.** They keep the file,
-  the search index, the graph node and the listings in step; the shell
-  commands strand three of the four.
+- **Use `okfw move` / `okfw delete`, never `mv` / `rm`.** `move` repairs every
+  link to the concept and its own relative links, and both keep the `index.md`
+  listings current; the shell commands break the links and leave the listings
+  stale.
 - **`status` is the OKF lifecycle field** (`draft`/`stable`/`deprecated`), not
   task state. Mark superseded knowledge rather than deleting it.
 - **Custom metadata goes under `x:`** — the schema is closed and rejects any

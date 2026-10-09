@@ -19,10 +19,6 @@ var conceptSchema string
 // discovered by every command.
 const WikiDirName = ".okfw"
 
-// Fixed locations inside the wiki directory. Storage is standardized — there
-// is no user configuration.
-const ()
-
 // Config carries the resolved paths of a discovered wiki.
 type Config struct {
 	RootPath string // absolute path of the .okfw directory (the OKF bundle root)

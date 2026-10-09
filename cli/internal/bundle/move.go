@@ -10,9 +10,10 @@ import (
 	"okfw/cli/internal/graph"
 )
 
-// Relocating and removing concepts. Both operations have to touch four things
-// that can otherwise drift apart: the file, the search index, the graph
-// and the index.md listings.
+// Relocating and removing concepts. Both operations have to keep three things
+// in step that a plain mv or rm would let drift apart: the file, the links that
+// point at it (and, for a move, its own relative links), and the index.md
+// listings.
 
 // RelHref returns the relative slash path that reaches target from fromDir, both
 // bundle-relative. Used to keep a relative markdown link pointing at the same

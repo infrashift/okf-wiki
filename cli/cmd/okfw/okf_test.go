@@ -51,18 +51,6 @@ func readFile(t *testing.T, p string) string {
 	return string(b)
 }
 
-func glob1(t *testing.T, pattern string) string {
-	t.Helper()
-	m, err := filepath.Glob(pattern)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m) != 1 {
-		t.Fatalf("expected exactly 1 match for %q, got %d: %v", pattern, len(m), m)
-	}
-	return m[0]
-}
-
 // --- runValidateOKF ---
 
 func TestRunValidateOKF(t *testing.T) {

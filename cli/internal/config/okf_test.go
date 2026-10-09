@@ -340,9 +340,6 @@ func TestGetKindFallsBackToType(t *testing.T) {
 	if got := z.GetKind(); got != "daily-note" {
 		t.Errorf("GetKind = %q", got)
 	}
-	if !z.IsDailyNote() {
-		t.Error("IsDailyNote should be true")
-	}
 	// A free-form type is not a kind.
 	z = &Concept{Type: "BigQuery Table"}
 	if got := z.GetKind(); got != "note" {

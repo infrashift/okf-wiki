@@ -114,8 +114,7 @@ func WriteNewConcept(dir, title, id string, content []byte) (string, error) {
 // internals. Returns "" if invalid.
 //
 // Dot-directories are rejected because SkipWalkDir skips them: a concept written
-// to .index/ or .todos/ would sit inside the search index or the generated todo
-// output, and would be invisible to search, index.md, and every other walk.
+// to one would be invisible to search, index.md, and every other walk.
 func SanitizeSubdir(p string) string {
 	p = strings.TrimSpace(filepath.ToSlash(p))
 	p = strings.TrimPrefix(p, "/")

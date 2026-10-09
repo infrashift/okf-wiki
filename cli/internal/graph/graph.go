@@ -235,7 +235,7 @@ func (g *Graph) GetEdges(nodes []*Node) []Edge {
 //
 // The root is startNodeID (if provided and present), otherwise the most-connected
 // node. Children are sorted by ID for stable output. Directional markers show
-// where the [[id]] link lives: "←" means the tree-child links back to its
+// where the link lives: "←" means the tree-child links back to its
 // tree-parent; "→" means the tree-parent links forward to the tree-child.
 // Cross-edges (links between nodes already placed in the tree) are shown as
 // inline annotations, e.g. "(also → Node B)". Disconnected nodes appear as
