@@ -850,16 +850,16 @@ Examples:
 			if len(args) == 0 {
 				return fmt.Errorf("a concept id or file is required (or use --all / --okf to check the bundle)")
 			}
+			// A file on disk is validated as given — checking a file outside any
+			// wiki is a legitimate, read-only use. Anything else is a concept
+			// reference: an id, a unique prefix, or an OKF concept ID.
 			filePath := args[0]
-
-			// If it looks like an ID (not a file path), resolve it
-			if !strings.HasSuffix(filePath, ".md") && !strings.Contains(filePath, "/") {
+			if fi, err := os.Stat(filePath); err != nil || fi.IsDir() {
 				cfg, err := config.Discover("")
 				if err != nil {
 					return err
 				}
-				filePath, err = bundle.ResolveConceptPath(cfg, args[0])
-				if err != nil {
+				if filePath, err = bundle.ResolveConceptPath(cfg, args[0]); err != nil {
 					return err
 				}
 			}

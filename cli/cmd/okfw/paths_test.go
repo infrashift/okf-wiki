@@ -83,3 +83,19 @@ func TestExportRefusesIDsThatEscapeTheExportDirectory(t *testing.T) {
 		t.Errorf("safe concept not exported: %v", err)
 	}
 }
+
+// validate took any path-shaped argument as a path from the working
+// directory, so the OKF concept ID forms every other command accepts failed.
+func TestValidateAcceptsEveryConceptReference(t *testing.T) {
+	cfg := bundleAt(t)
+	writeConceptFile(t, cfg.RootPath, "notes/alpha--0001.md",
+		conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha"))
+	for _, ref := range []string{
+		"notes/alpha--0001", "notes/alpha--0001.md", "/notes/alpha--0001.md",
+		"019680f0", ".okfw/notes/alpha--0001.md",
+	} {
+		if out, err := runCmd(t, rootCmd(), "validate", ref); err != nil {
+			t.Errorf("validate %s: %v\n%s", ref, err, out)
+		}
+	}
+}

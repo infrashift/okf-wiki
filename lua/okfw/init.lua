@@ -995,26 +995,39 @@ M.resolve_concept = function(ref)
         return nil
     end
 
-    local function has_id(p)
+    local function id_of(p)
         local ok, lines = pcall(vim.fn.readfile, p, "", 20)
-        if not ok or lines[1] ~= "---" then return false end
+        if not ok or lines[1] ~= "---" then return nil end
         for i = 2, #lines do
-            if lines[i] == "---" then return false end
+            if lines[i] == "---" then return nil end
             local v = lines[i]:match('^id:%s*["\']?([^"\']+)["\']?%s*$')
-            if v then return v == ref end
+            if v then return v end
         end
-        return false
+        return nil
     end
+    local function compact(id) return id:gsub("-", ""):lower() end
 
     -- Filenames embed the id's first 12 hex characters, so try those first.
-    local short = ref:gsub("-", ""):sub(1, 12)
+    local short = compact(ref):sub(1, 12)
     for _, p in ipairs(vim.fn.globpath(root, "**/*--" .. short .. "*.md", false, true)) do
-        if has_id(p) then return p end
+        if id_of(p) == ref then return p end
     end
+    -- Otherwise scan, accepting a unique prefix of 8+ hex digits as the CLI
+    -- does (`okfw set-lifecycle 019f0494 draft`).
+    local want = compact(ref)
+    local prefix_ok = #want >= 8 and want:match("^%x+$") ~= nil
+    local prefixed = {}
     for _, p in ipairs(vim.fn.globpath(root, "**/*.md", false, true)) do
         -- ephemeral/ holds `okfw export` copies, which carry the same id.
-        if not vim.startswith(p, root .. "/ephemeral/") and has_id(p) then return p end
+        if not vim.startswith(p, root .. "/ephemeral/") then
+            local id = id_of(p)
+            if id == ref then return p end
+            if prefix_ok and id and vim.startswith(compact(id), want) then
+                table.insert(prefixed, p)
+            end
+        end
     end
+    if #prefixed == 1 then return prefixed[1] end
     -- A bare concept ID at the bundle root.
     if vim.fn.filereadable(root .. "/" .. ref .. ".md") == 1 then
         return root .. "/" .. ref .. ".md"

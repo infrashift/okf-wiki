@@ -748,6 +748,7 @@ if plenary_ok then
         local concept_id = vim.fn.fnamemodify(matches[1], ":t:r")
         assert_eq(vim.fn.resolve(okfw.resolve_concept(concept_id) or ""), want, "resolves by OKF concept ID")
         assert_eq(okfw.resolve_concept("019680f0-0000-7000-8000-000000000000"), nil, "unknown id resolves to nil")
+        assert_eq(vim.fn.resolve(okfw.resolve_concept(id:sub(1, 13)) or ""), want, "resolves by a unique id prefix")
         vim.cmd("cd " .. vim.fn.fnameescape(real_cwd))
     end
 end
