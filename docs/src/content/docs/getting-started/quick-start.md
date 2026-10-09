@@ -34,13 +34,9 @@ okfw add-tags path/to/note.md golang api      # Add multiple tags
 okfw validate path/to/note.md
 okfw validate --okf                       # Validate whole-wiki OKF conformance
 
-# Index notes for searching
-okfw index path/to/notes/       # Index a directory
-okfw index path/to/note.md      # Index a single file
-
 # OKF wiki maintenance
 okfw root                                 # Print the discovered .okfw path
-okfw index-md                             # Generate OKF index.md directory listings
+okfw index-md                             # Regenerate OKF index.md directory listings
 okfw log                                  # Generate OKF log.md from git history
 
 # Search notes
@@ -52,8 +48,10 @@ okfw search --type note                   # Filter by the free-form OKF type
 okfw search "auth" --project my-project   # Combined search
 okfw search --json                        # JSON output for tooling
 
-# Generate graph visualization
-okfw graph path/to/notes/                 # Show ASCII tree graph
+# Generate graph visualization (search and the graph read the files directly;
+# there is no index to build)
+okfw graph path/to/notes/                 # Mermaid diagram
+okfw graph --ascii                        # Plain-text tree instead
 okfw graph . --limit 20                   # Custom node limit
 okfw graph . --start <note-id>            # Start from a specific note
 
@@ -84,6 +82,4 @@ okfw verify 019f0494                      # record that you reviewed it
 okfw add-source 019f0494 --resource https://example.com/spec
 okfw validate --all                       # strict schema check of the wiki
 okfw migrate                              # clean up a pre-0.2 wiki
-
-# Git workflow (dated branches)
 ```

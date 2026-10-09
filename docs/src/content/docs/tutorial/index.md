@@ -118,26 +118,26 @@ project:
   log.md                       Update history (reserved)
   infra/                       A project folder (concepts grouped by project)
     index.md
-    my-note-title--019f0494.md
+    my-note-title--019f049400a8.md
   daily/                       Daily notes, grouped by year/month
     2026/
       06/
-        2026-06-26--019f04a1.md
+        2026-06-26-friday--019f04a10000.md
   any-other-folder/            Concepts may live in any directory you choose
-    another-concept--019f04b8.md
+    another-concept--019f04b80000.md
   ephemeral/                   Export scratch dir (gitignored)
-  .index/                      Full-text search index (auto-managed)
-  .graph.db                    Persistent graph database (auto-managed)
-  .gitignore                   Ignores .index/, .graph.db, ephemeral/
+  .gitignore                   Ignores ephemeral/
 ```
 
 Every `okfw` command **discovers** the wiki automatically by searching upward
 from the current working directory (the way git finds `.git`), so commands
 work from any subdirectory of the project. Concept markdown is meant to be
-committed with the project; the generated artifacts are gitignored.
+committed with the project; only the `ephemeral/` export directory is
+gitignored. There is no search index or graph database to maintain: search and
+the link graph are computed from the files on every call.
 
-Concept files are named `slug--shortid.md`, where the short id is the leading
-hex of the concept's UUID. `index.md` and `log.md` are **reserved filenames**
+Concept files are named `slug--shortid.md`, where the short id is the first 12
+hex digits of the concept's UUID. `index.md` and `log.md` are **reserved filenames**
 that carry no concept frontmatter: `index.md` is a directory listing (for
 progressive disclosure) and `log.md` is an update history generated from git.
 
@@ -153,8 +153,9 @@ Each note has a UUIDv7 `id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
 embeds a timestamp for natural sorting while remaining collision-free. Legacy
 `YYYYMMDDHHmmss-UUID` IDs are still accepted. A concept's **OKF id is its
 path within the wiki minus `.md`** — for example the file
-`.okfw/infra/my-note-title--019f0494.md` has the id
-`infra/my-note-title--019f0494`.
+`.okfw/infra/my-note-title--019f049400a8.md` has the id
+`infra/my-note-title--019f049400a8`. Commands accept that id, the full UUID, or
+any unique prefix of at least 8 hex digits (`019f0494`).
 
 To **persist notes across container restarts**, mount your project directory:
 
@@ -204,19 +205,19 @@ sections for your morning plan, tasks, notes, and end-of-day reflection:
 ```markdown
 ---
 id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
-title: "Daily Note - 2026-02-19"
+title: "2026-02-19 Thursday"
 type: "daily-note"
 kind: "daily-note"
 tags:
-  - daily
+  - "daily"
 created: "2026-02-19T14:30:00Z"
 timestamp: "2026-02-19T14:30:00Z"
 ---
 
-# Daily Note - 2026-02-19
+# 2026-02-19 Thursday
 
 ## Morning
-- [ ] ...
+- ...
 
 ## Tasks
 - [ ] ...
@@ -230,8 +231,9 @@ timestamp: "2026-02-19T14:30:00Z"
 ## Links Created
 ```
 
-Fill in your morning plan. Add a few tasks. Save the file with `:w`. The note
-is automatically indexed for search.
+Fill in your morning plan. Add a few tasks. Save the file with `:w`. Search
+reads the files directly, so the note is searchable immediately, and saving
+refreshes the `index.md` listings.
 
 You can also view yesterday's daily note:
 
@@ -317,7 +319,7 @@ Method` and press Enter. A markdown link is inserted at your cursor. By default
 it uses a wiki-relative absolute path (a leading `/` means the wiki root):
 
 ```markdown
-[linked-note-taking-method--019f0494](/infra/linked-note-taking-method--019f0494.md)
+[linked-note-taking-method--019f049400a8](/infra/linked-note-taking-method--019f049400a8.md)
 ```
 
 To insert a link that uses the title as link text (more readable):
@@ -329,10 +331,10 @@ To insert a link that uses the title as link text (more readable):
 This inserts:
 
 ```markdown
-[Linked Note-Taking Method](/infra/linked-note-taking-method--019f0494.md)
+[Linked Note-Taking Method](/infra/linked-note-taking-method--019f049400a8.md)
 ```
 
-You can also write relative links by hand, e.g. `[text](./other-note--019f04a1.md)`.
+You can also write relative links by hand, e.g. `[text](./other-note--019f04a10000.md)`.
 Broken links are tolerated. To **follow a link**, place your cursor on it and
 press `gf` (go to file).
 
@@ -417,10 +419,12 @@ terminal. Press `q` to close the Glow preview.
 
 ### Quick preview floating window
 
-To peek at a note's raw content without leaving your current file:
+To peek at a note's raw content without leaving your current file, press
+`Ctrl-p` on a note in any picker (`:OkfwSearch`, `:OkfwDailyList`), or preview
+the current buffer:
 
 ```vim
-\p
+:lua require("okfw").preview_note()
 ```
 
 A floating preview window shows the note content. Inside the preview, press
@@ -499,10 +503,10 @@ From the CLI:
 okfw graph --limit 20
 ```
 
-You can also start the tree from a specific note and control depth:
+You can also start the graph from a specific note and control depth:
 
 ```bash
-okfw graph --start infra/linked-note-taking-method--019f0494 --depth 3
+okfw graph --start infra/linked-note-taking-method--019f049400a8 --depth 3
 ```
 
 ## 16. Record OKF Metadata
@@ -527,7 +531,8 @@ Find them later with `okfw search --status draft`.
 okfw set-stale-after infra/pricing--019f0494 2026-12-31T00:00:00Z
 ```
 
-A concept is stale once today is on or after that date. `okfw search --stale`
+A concept is stale once now is on or after that instant (a bare date such as
+`2026-12-31` is accepted and stored as midnight UTC). `okfw search --stale`
 lists everything that has expired, so review is a query rather than a memory
 exercise.
 
@@ -566,7 +571,7 @@ okfw validate --okf    # permissive OKF conformance check
 ```
 
 If you are opening a wiki created by an older okfw, run `okfw migrate` first: it
-removes the retired task-tracking fields.
+removes the retired task-tracking fields and upgrades bare dates to datetimes.
 
 
 
@@ -620,10 +625,12 @@ Refresh the tag cache if you've added new tags externally:
 :OkfwRefreshTags
 ```
 
-## 19. Index Your Notes
+## 19. Refresh the Directory Listings
 
-Notes are automatically indexed when you save them in NeoVim. To manually
-reindex everything:
+There is no search index to maintain — search and the graph read the files
+directly. What okfw does keep up to date are the OKF `index.md` directory
+listings, and saving a concept in NeoVim refreshes them automatically. To
+regenerate them all by hand:
 
 ```vim
 :OkfwIndex
@@ -632,7 +639,7 @@ reindex everything:
 Or from the CLI:
 
 ```bash
-okfw index
+okfw index-md
 ```
 
 ## Quick Reference
@@ -650,7 +657,7 @@ okfw index
 | `:OkfwSearch!` | Live search (updates as you type) |
 | `:Glow` | Render current note as styled Markdown |
 | `:OkfwGraph [limit]` | Show Mermaid graph |
-| `:OkfwIndex` | Reindex all notes |
+| `:OkfwIndex` | Regenerate `index.md` listings (`okfw index-md`) |
 | `:OkfwRefreshTags` | Refresh tag cache |
 
 ### Keybindings (in concept markdown files)
@@ -685,7 +692,7 @@ okfw index
 | `okfw search [query]` | Search notes |
 | `okfw graph [path]` | Render a Mermaid diagram (`--ascii` for a text tree) |
 | `okfw set-project [file] [project]` | Set project on a note |
-| `okfw delete <ref>` | Delete a concept and everything derived from it |
+| `okfw delete <ref>` | Delete a concept and its `index.md` entry |
 | `okfw move <ref> <dest>` | Move or rename a concept, repairing links |
 | `okfw backlinks [file]` | Show backlinks |
 | `okfw add-tags <file> <tag1> [tag2...]` | Add tags to a concept |
@@ -699,11 +706,12 @@ okfw index
 | `okfw add-source <ref> --resource <uri>` | Append a provenance source |
 | `okfw set-resource <ref> <uri>` | Set the described asset's URI |
 | `okfw export [path]` | Export a portable subset to `ephemeral/` |
-| `okfw index [path]` | Index notes |
 | `okfw index-md [path]` | Generate OKF `index.md` directory listings |
 | `okfw log [path]` | Generate OKF `log.md` from git history |
 | `okfw root` | Print the discovered `.okfw` path |
 | `okfw templates` | List templates |
+| `okfw install` | Install the okfw agent skill (`--platform claude\|gemini\|codex`) |
+| `okfw mcp` | Serve the wiki to AI agents over MCP (stdio) |
 
 ## Container Management
 

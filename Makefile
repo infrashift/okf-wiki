@@ -11,7 +11,6 @@ IMAGE_TAG=latest
 CONTAINER_NAME=okfw-dev
 SSH_PORT=2222
 SSH_PUBKEY=$(HOME)/.ssh/id_ed25519.pub
-OKFW_BUNDLE=$(HOME)/okfw
 USER_UID=$(shell id -u)
 
 build:
@@ -82,7 +81,6 @@ run-container:
 		--userns=keep-id \
 		-p $(SSH_PORT):2222 \
 		-v $(SSH_PUBKEY):/home/user/.ssh/authorized_keys:ro,Z \
-		-v $(OKFW_BUNDLE):/home/user/okfw:Z \
 		$(IMAGE_NAME):$(IMAGE_TAG)
 
 stop-container:

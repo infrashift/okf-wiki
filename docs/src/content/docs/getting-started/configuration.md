@@ -17,8 +17,8 @@ okfw init
 ```
 
 This creates `.okfw/` at the git repository root (or the current directory if
-you're not in a git repo), writes a `.okfw/.gitignore` covering generated
-artifacts, and generates the OKF root `index.md` (with the `okf_version`
+you're not in a git repo), writes a `.okfw/.gitignore` covering the
+`ephemeral/` export directory, and generates the OKF root `index.md` (with the `okf_version`
 declaration). Running `okfw init` again is a no-op that prints
 `OKF wiki already initialized at <path>`.
 
@@ -36,7 +36,7 @@ no OKF wiki found (searched upward from <dir>); run 'okfw init' at your project 
 Two commands help you verify and script against the discovered wiki:
 
 - `okfw connect` — verifies the wiki and prints `Connected: <path>` plus a
-  summary line (`concepts: N | search index: yes/no | graph db: yes/no`).
+  `concepts: N` line.
 - `okfw root` — prints the discovered `.okfw` path (script-friendly; used by
   the Neovim plugin).
 
@@ -49,10 +49,10 @@ The layout inside `.okfw/` is fixed:
 | `*.md` (top level) | Concept markdown files (subdirectories via `--path` or `--project`) |
 | `index.md` (every directory) | OKF directory listing, auto-maintained on every note change |
 | `daily/YYYY/MM/` | Daily notes, grouped by year and month |
-| `.index/` | Bleve full-text search index (generated) |
-| `.graph.db` | Persistent graph database (generated) |
-| `ephemeral/` | Export scratch directory |
-| `.gitignore` | Ignores `.index/`, `.graph.db`, `ephemeral/` |
+| `ephemeral/` | Export scratch directory (the only generated directory) |
+| `.gitignore` | Ignores `ephemeral/` |
 
-Concept markdown is meant to be **committed with your project**; the generated
-artifacts are gitignored.
+Concept markdown is meant to be **committed with your project**; only
+`ephemeral/` is gitignored. There is no search index or graph database to
+build or keep in sync: search and the link graph are computed from the files
+on every call.

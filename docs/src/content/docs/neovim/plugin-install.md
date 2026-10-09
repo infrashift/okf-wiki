@@ -138,6 +138,10 @@ automatically provides buffer-local keymaps:
 | `<localleader>p` | Set project |
 | `<localleader>a` | Add tags (all concept types) |
 | `<localleader>v` | Validate frontmatter (all concept types) |
+| `gf` | Follow the markdown link under the cursor (`/` resolves to the wiki root) |
+
+Saving a concept buffer also refreshes the wiki's `index.md` listings
+(`okfw index-md --no-adopt`), so an edited title or description shows up in them.
 
 ## Help Documentation
 
@@ -170,10 +174,10 @@ vim.keymap.set("n", "<leader>z/", function()
     require("okfw.picker").live_search()
 end, { desc = "Live search concepts" })
 
--- Index current directory
+-- Regenerate index.md listings
 vim.keymap.set("n", "<leader>zi", function()
     require("okfw").index()
-end, { desc = "Index concepts" })
+end, { desc = "Refresh index.md listings" })
 
 -- Generate graph visualization
 vim.keymap.set("n", "<leader>zg", function()
@@ -217,7 +221,7 @@ end, { desc = "Create from template" })
 
 -- Quick meeting notes
 vim.keymap.set("n", "<leader>zm", function()
-    require("okfw").create_from_template("meeting")
+    require("okfw").create_from_template({ template = "meeting" })
 end, { desc = "Create meeting notes" })
 
 -- Today's daily note
@@ -253,7 +257,7 @@ wk.register({
         b = { function() require("okfw").toggle_backlinks() end, "Toggle backlinks" },
         B = { function() require("okfw").backlinks_split() end, "Backlinks split" },
         t = { function() require("okfw").template_picker() end, "Create from template" },
-        m = { function() require("okfw").create_from_template("meeting") end, "Meeting notes" },
+        m = { function() require("okfw").create_from_template({ template = "meeting" }) end, "Meeting notes" },
         d = { function() require("okfw").daily() end, "Today's daily" },
         D = { function() require("okfw").daily({ date = "yesterday" }) end, "Yesterday's daily" },
         w = { function() require("okfw").daily_picker() end, "Browse daily notes" },
@@ -265,7 +269,7 @@ wk.register({
 
 1. When you call `create_note()`, NeoVim prompts for a note title
 2. The plugin invokes `okfw create "title"`
-3. The `okfw` binary detects your current git project automatically
+3. The `okfw` binary discovers the project's `.okfw/` wiki by searching upward from NeoVim's cwd
 4. A confirmation message appears on success
 
 ## Troubleshooting
@@ -320,12 +324,14 @@ require("okfw").setup({
 })
 ```
 
-### `create_note(project)`
+### `create_note(opts)`
 
 Create a new note.
 
 **Parameters:**
-- `project` (string, optional): Project metadata for the note. Omitted when nil.
+- `opts` (table, optional):
+  - `title` (string): Note title. Prompted for when omitted.
+  - `project` (string): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title via `vim.fn.input()`
@@ -334,7 +340,7 @@ Create a new note.
 
 ```lua
 require("okfw").create_note()
-require("okfw").create_note("my-project")
+require("okfw").create_note({ project = "my-project" })
 ```
 
 ### `set_project(file_path, project)`
@@ -375,28 +381,33 @@ require("okfw").search("query", { project = "my-project", on_results = function(
 
 ### `index(path)`
 
-Index concepts for searching.
+Regenerate the wiki's OKF `index.md` listings (runs `okfw index-md`). There is
+no search index: search and the graph read the files directly, so the listings
+are the only derived state to refresh. Saving a concept buffer already refreshes
+them.
 
 **Parameters:**
-- `path` (string, optional): Path to index. Defaults to current directory.
+- `path` (string, optional): Bundle path. Defaults to the wiki discovered from the cwd.
 
 ```lua
-require("okfw").index()  -- Index cwd
+require("okfw").index()  -- Discovered wiki
 require("okfw").index("path/to/.okfw/")
 ```
 
 ### `graph(opts)`
 
-Generate an ASCII tree visualization of note relationships.
+Render note relationships as a Mermaid flowchart.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `path` (string): Path to scan. Defaults to current directory.
+  - `path` (string): Path to scan. Defaults to the discovered wiki.
   - `limit` (number): Maximum nodes to display. Defaults to 10.
+  - `depth` (number): Maximum hops from the start node. Defaults to unlimited.
+  - `start` (string): Start concept. Defaults to the concept in the current buffer.
 
 **Behavior:**
 1. Executes `okfw graph` asynchronously
-2. Opens the ASCII tree output in a vertical split
+2. Opens the Mermaid output in a scratch buffer (filetype `mermaid`; `q` closes it)
 
 ```lua
 require("okfw").graph()  -- Graph cwd with defaults
@@ -424,17 +435,17 @@ require("okfw").preview_note("/path/to/note.md")
 
 ### `preview_by_id(id)`
 
-Preview a note by its ID (searches the index).
+Preview a note by its ID (resolved by scanning the wiki).
 
 **Parameters:**
-- `id` (string, optional): Concept id (UUIDv7, or the concept's wiki-relative path minus `.md`). Prompts for input if nil.
+- `id` (string, optional): The frontmatter id or a unique prefix of it (8+ hex digits, e.g. `019f0494`), or the concept's OKF concept ID (its wiki-relative path minus `.md`). Prompts for input if nil.
 
 **Behavior:**
 1. Searches for note with matching ID
 2. Opens floating preview if found
 
 ```lua
-require("okfw").preview_by_id("202602131045")
+require("okfw").preview_by_id("019f0494-00a8-7206-b788-c5bbfa2430a8")
 require("okfw").preview_by_id()  -- Prompts for ID
 ```
 
@@ -448,7 +459,7 @@ The inserted link points at the target concept's wiki-relative file path (a
 leading `/` means the wiki root), for example:
 
 ```markdown
-[Title](/infra/note--019f0494.md)
+[Title](/infra/note--019f049400a8.md)
 ```
 
 To follow a link, place the cursor on it and press `gf`.
@@ -475,7 +486,7 @@ require("okfw").link_picker({ include_title = true })  -- <CR> inserts [title](/
 
 ### `get_tags(callback)`
 
-Get all unique tags from indexed concepts (async).
+Get all unique tags used across the wiki's concepts (async).
 
 **Parameters:**
 - `callback` (function): Called with sorted list of tags
@@ -615,11 +626,11 @@ require("okfw").toggle_backlinks()
 
 ### `templates`
 
-Table containing template metadata. Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`.
+List of template metadata. Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`.
 
 ```lua
-for name, meta in pairs(require("okfw").templates) do
-    print(name .. ": " .. meta.description)
+for _, meta in ipairs(require("okfw").templates) do
+    print(meta.name .. ": " .. meta.description)
 end
 ```
 
@@ -637,13 +648,14 @@ local tmpl = require("okfw").get_template("meeting")
 print(tmpl.description)  -- "Meeting notes with attendees and action items"
 ```
 
-### `create_from_template(template_name, project)`
+### `create_from_template(opts)`
 
 Create a note from a template.
 
 **Parameters:**
-- `template_name` (string): Template name (e.g., `"meeting"`, `"user-story"`)
-- `project` (string, optional): Project metadata for the note. Omitted when nil.
+- `opts` (table, optional):
+  - `template` (string): Template name (e.g., `"meeting"`, `"user-story"`). Opens the template picker when omitted.
+  - `project` (string): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title
@@ -651,8 +663,8 @@ Create a note from a template.
 3. Prints success/failure message
 
 ```lua
-require("okfw").create_from_template("meeting")
-require("okfw").create_from_template("feature", "my-project")
+require("okfw").create_from_template({ template = "meeting" })
+require("okfw").create_from_template({ template = "feature", project = "my-project" })
 ```
 
 ### `template_picker(opts)`
@@ -750,7 +762,7 @@ Requires snacks.nvim to be installed.
 
 ### `require("okfw.picker").search(opts)`
 
-Open picker with all indexed concepts.
+Open picker with all concepts.
 
 ### `require("okfw.picker").live_search(opts)`
 

@@ -171,13 +171,15 @@ The consequence: `okfw validate` will reject a *conformant third-party* bundle. 
 
 **okfw has no task-tracking fields.** It once carried `status`, `due`, `completed`, and `priority` for a `todo` kind, where `status` collided with the field OKF v0.2 spec'd for lifecycle. The feature was removed rather than namespaced. Run `okfw migrate` on a bundle written by an older okfw: it drops the retired fields and rewrites `status: closed` to `status: deprecated`.
 
-Attested Computation (spec §10) is not implemented; the spec still defers its receipt formats and attester ABI to a future revision.
+Attested Computation (spec §10) is accepted but not executed: the schema declares its keys (`runtime`, `parameters`, `computation`, `executor`, `attester`) so a bundle can hold such a concept, and a concept of that `type` must carry `runtime`. okfw runs and attests nothing — the spec still defers its receipt formats and attester ABI to a future revision.
 
 ## Concept IDs and file paths
 
-OKF derives a concept's identity from the filesystem: its **id is its path within the wiki (relative to `.okfw/`) minus `.md`**. Concept files are named `slug--shortid.md` (for example `my-note-title--019f0494.md`), where the short id is the leading hex of the UUID. So a note stored at `.okfw/infra/my-note-title--019f0494.md` has the OKF concept id `infra/my-note-title--019f0494`.
+OKF derives a concept's identity from the filesystem: its **id is its path within the wiki (relative to `.okfw/`) minus `.md`**. Concept files are named `slug--shortid.md` (for example `my-note-title--019f049400a8.md`), where the short id is the first 12 hex digits of the UUID (extended on a collision). So a note stored at `.okfw/infra/my-note-title--019f049400a8.md` has the OKF concept id `infra/my-note-title--019f049400a8`.
 
-The `id:` field in frontmatter is a separate, okfw-specific identifier: a UUIDv7 that stays stable when a file moves. `parent:` refers to that UUID, not to a path.
+The `id:` field in frontmatter is a separate, okfw-specific identifier: a UUIDv7 that stays stable when a file moves. `parent:` refers to that full UUID, not to a path or a short prefix.
+
+Every command that takes a concept accepts any of: the full frontmatter `id`, a unique id prefix of at least 8 hex digits (`019f0494`), the OKF concept ID (`infra/my-note-title--019f049400a8`, optionally with `.md` or a leading `/`), or a file path.
 
 Links between concepts are vanilla markdown links pointing at file paths. See the [Notes Workflow](/okf-wiki/neovim/notes-workflow/) for how linking works.
 

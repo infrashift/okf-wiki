@@ -1,7 +1,7 @@
 *okfw.txt*  OKF Wiki integration for NeoVim
 
 Author:  infrashift
-License: MIT
+License: Apache-2.0
 
 INTRODUCTION                                                *okfw* *okfw.nvim*
 
@@ -174,7 +174,7 @@ Graph ~
                             A --> B;
 <
                         Nodes are declared with their titles as labels.
-                        A --> B means A has [[B]] in its body.
+                        A --> B means A's body has a markdown link to B.
                         Paste into mermaid.live or any Mermaid renderer.
 
                                                                  *:OkfwExport*
@@ -183,9 +183,9 @@ Graph ~
                         --depth N: max BFS hops
                         --start ID: center on a concept
 
-                        Copies concepts into <root>/ephemeral/ with
-                        [[id|title]] links converted to [title](id.md)
-                        relative links. The ephemeral/ directory has a
+                        Copies concepts into <root>/ephemeral/ as <id>.md,
+                        with in-bundle markdown links rewritten to point at
+                        <id>.md. The ephemeral/ directory has a
                         .gitignore that ignores all exported files.
 
                         Links to concepts NOT in the export set are left
@@ -225,7 +225,7 @@ create_note({opts})     Create a new concept.
                                                    *okfw.create_from_template()*
 create_from_template({opts})
                         Create note from template.
-                        opts.template: template name
+                        opts.template: template name (picker if omitted)
                         opts.project: project name
 
                                                        *okfw.template_picker()*
@@ -253,9 +253,9 @@ index_file({path})      Refresh the listings okfw maintains after {path} was
 
                                                       *okfw.resolve_concept()*
 resolve_concept({ref})  Return the absolute path of the concept with
-                        frontmatter id {ref}, or OKF concept ID {ref} (its
-                        bundle-relative path, with or without .md); nil if
-                        none.
+                        frontmatter id {ref} (or a unique prefix of 8+ hex
+                        digits), or OKF concept ID {ref} (its bundle-relative
+                        path, with or without .md); nil if none.
 
                                                         *okfw.preview_by_id()*
 preview_by_id({ref})    Preview the concept resolve_concept() finds.
@@ -268,24 +268,25 @@ graph({opts})           Show Mermaid graph in scratch buffer.
                                                                *okfw.export()*
 export({opts})          Export graph subset as portable markdown.
                         opts.path, opts.limit, opts.depth, opts.start
-                        Writes to <root>/ephemeral/ with links converted
-                        from [[id|title]] to [title](id.md).
+                        Writes <id>.md files to <root>/ephemeral/ with
+                        in-bundle links rewritten to <id>.md.
 
 Preview ~
                                                          *okfw.preview_note()*
 preview_note({path})    Preview note in floating window.
 
-                                                        *okfw.preview_by_id()*
-preview_by_id({id})     Preview note by ID.
-
 Linking ~
                                                           *okfw.insert_link()*
-insert_link({id}, {title}, {include_title})
-                        Insert link at cursor.
+insert_link({entry}, {use_title})
+                        Insert a markdown link to {entry} (a search result
+                        with file_path and title) at the cursor. The target is
+                        the wiki-relative path, e.g. [text](/dir/note.md);
+                        {use_title} makes the title the link text.
 
                                                           *okfw.link_picker()*
 link_picker({opts})     Open picker for linking.
-                        opts.include_title: use [[id|title]] format
+                        opts.include_title: use the concept title as the
+                        link text
 
 Backlinks ~
                                                         *okfw.get_backlinks()*
@@ -350,8 +351,8 @@ require("okfw.picker").insert_link({opts}) Insert link to concept
 Picker Keymaps ~
     <CR>        Open note
     <C-p>       Preview in floating window
-    <C-l>       Insert link as [[id]]
-    <C-S-l>     Insert link as [[id|title]]
+    <C-l>       Insert a markdown link: [path](/path/to/note.md)
+    <C-S-l>     Insert a markdown link with the title as link text
 
 FILETYPE SETTINGS                                         *okfw-ftplugin*
 
@@ -365,7 +366,9 @@ automatically sets up:
   - <localleader>b for backlinks toggle
   - <localleader>a for adding tags (all concept types)
   - <localleader>v for validating frontmatter (all concept types)
-  - <localleader>p for set project
+  - <localleader>p for set project (plain notes)
+  - gf to follow the markdown link under the cursor
+  - a BufWritePost hook that refreshes the index.md listings
 
 SUGGESTED KEYMAPS                                             *okfw-keymaps*
 
@@ -392,6 +395,6 @@ Add these to your configuration: >lua
 
 LICENSE                                                       *okfw-license*
 
-MIT License
+Apache License 2.0. See the LICENSE file in the repository.
 
  vim:tw=78:ts=8:ft=help:norl:

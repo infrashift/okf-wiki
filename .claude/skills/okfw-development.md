@@ -16,13 +16,19 @@ make test                     # Go tests + CUE schema validation
 go test ./cli/... -count=1    # All Go tests
 go test ./cli/internal/search/... -v  # Single package, verbose
 go build ./cli/cmd/okfw/      # Just compile, no binary output
-make lint                     # go vet + staticcheck
+make test-race                # Go tests under the race detector
+make lint                     # go vet + staticcheck + gofmt check + go mod tidy -diff
 make fmt                      # go fmt + cue fmt
+make integration-test         # NeoVim plugin suite
 ```
 
 ## Architecture
 
-All CLI commands live in a single file: `cli/cmd/okfw/main.go`. Commands are defined as Cobra commands within `main()`.
+CLI commands live in `cli/cmd/okfw/`. The command tree is built by `rootCmd()`
+in `main.go` (extracted from `main()` so tests can walk the registered command
+set); file-moving commands (`delete`, `move`) are in `filecmds.go`
+(`fileCommands()`), the OKF-metadata writers and `install` in `okfcmds.go`
+(`okfFamilyCommands()`, `newInstallCmd()`), and the MCP server in `mcp.go`.
 
 Wikis are per-project `.okfw/` directories, created by `okfw init` and
 discovered by searching upward from the current working directory (like git
@@ -33,26 +39,37 @@ state: search and the link graph are computed from the concepts on demand.
 
 Internal packages:
 - `cli/internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
-- `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, ASCII tree, Mermaid rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
+- `cli/internal/bundle/` — The write path: concept creation, `yaml.Node` frontmatter editing, move/delete, `index.md` listings, migrate, OKF conformance, reference resolution (`ResolveConceptPath`), and `LoadGraph`
+- `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, Mermaid and ASCII rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
 - `cli/internal/search/` — Concept search: scan, filter on frontmatter, rank by weighted field match. No index
+- `cli/internal/agentskill/` + `cli/internal/okfwskills/` — `okfw install`: the tool-neutral installer and okfw's SKILL.md / CLAUDE.md-block templates
 - `cli/internal/templates/` — Embedded markdown templates via `//go:embed`
+- `cli/internal/gitctx/` — Git project-root helper (used by `okfw init` and `okfw log`)
 
 ## Key Types
 
 ```go
 // cli/internal/config/concept.go
 type Concept struct {
-    ID, Title, Type, Kind, Description, Resource, Project string
+    Type, Title, Description, Resource string
     Tags []string
+    Status, StaleAfter string        // OKF lifecycle
+    Generated *Generated              // OKF trust
+    Verified  VerifiedList
+    Runtime   string                  // OKF Attested Computation
+    Sources     []Source              // OKF provenance
+    UsageWindow *UsageWindow
+    ID, Kind, Project, Parent string  // okfw extensions
     Created, Timestamp time.Time
-    Parent, Status, Due, Completed, Priority string
+    X map[string]interface{}          // open x: block
 }
 
 // cli/internal/graph/graph.go
 type Node struct {
     ID, Title, FilePath, Project, Parent string
-    Children, Links []string
+    Children, Links, Tags []string
 }
+```
 
 ## CUE Schemas
 
@@ -62,8 +79,8 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 
 ## Dependencies
 
-- `go.etcd.io/bbolt` — Persistent graph store (BoltDB fork, pure Go, single-file)
-- `github.com/blevesearch/bleve/v2` — Full-text search engine
+okfw carries no database; `make build` uses `CGO_ENABLED=0`, so keep it pure Go.
+
 - `cuelang.org/go` — Schema validation
 - `github.com/spf13/cobra` — CLI framework
 - `github.com/google/uuid` — UUID generation
@@ -71,20 +88,25 @@ Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.N
 
 ## Adding a New Command
 
-1. Define the command as a `cobra.Command` inside `main()` in `cli/cmd/okfw/main.go`
+1. Define the command as a `cobra.Command` — inline in `rootCmd()` in `cli/cmd/okfw/main.go`, or as a `newXxxCmd()` constructor in `filecmds.go`/`okfcmds.go`
 2. Add flags after the command definition
-3. Register with `rootCmd.AddCommand(myCmd)`
+3. Register it in `rootCmd()` with `rootCmd.AddCommand(myCmd)` (or add it to `fileCommands()`/`okfFamilyCommands()`)
 4. Discover the wiki with `config.Discover` inside RunE (searches upward from the cwd for `.okfw/`; error out with `okfw init` advice when none is found)
-5. For graph operations, build the graph with `bundle.LoadGraph(cfg.RootPath)` — it scans the concepts; there is no store to open
+5. Resolve a concept argument with `bundle.ResolveConceptPath(cfg, ref)` — it accepts the full id, a unique ≥8-hex-digit id prefix, an OKF concept ID, or a file path
+6. For graph operations, build the graph with `bundle.LoadGraph(cfg.RootPath)` — it scans the concepts; there is no store to open
+7. If the command belongs in the agent skill or the MCP `update` tool, update those too: `TestSkillDocumentsEveryCommand` / `TestSkillPromisesOnlyRealCommands` and `TestUpdateToolMatchesTheCLIWriters` will fail otherwise
 
 ## Testing Pattern
 
 ```go
-// Use t.TempDir() for test databases and concept files
+// Use t.TempDir() for the bundle and its concept files
 func TestMyFeature(t *testing.T) {
-    dir := t.TempDir()
-    g, _ := bundle.LoadGraph(bundleRoot)
-    defer store.Close()
-    // ... write test concepts, sync, query, assert
+    bundleRoot := t.TempDir()
+    // ... write test concepts into bundleRoot
+    g, err := bundle.LoadGraph(bundleRoot)
+    if err != nil {
+        t.Fatal(err)
+    }
+    // ... query g, assert
 }
 ```

@@ -20,7 +20,7 @@ You're a developer. You read documentation, solve problems, attend meetings, and
 **The solution:**
 - One system for capturing everything
 - Notes that link to each other
-- Searchable, indexed knowledge
+- Searchable knowledge, with no index to maintain
 - Works from your editor - no context switching
 
 `okfw` brings OKF Wiki into NeoVim, so your knowledge base grows while you work.
@@ -94,9 +94,9 @@ You'll be prompted for a title:
 Note Title: Interesting error handling pattern in auth module
 ```
 
-The plugin creates a new note and shows you the path. Files are named `slug--shortid.md`, where the short id is the leading hex of the concept's UUID:
+The plugin creates a new note and shows you the path. Files are named `slug--shortid.md`, where the short id is the first 12 hex digits of the concept's UUID:
 ```
-Created: .okfw/error-handling-pattern--019f0494.md
+Created: .okfw/interesting-error-handling-pattern-in-auth-module--019f049400a8.md
 ```
 
 **What just happened:**
@@ -119,8 +119,7 @@ The file looks like this:
 id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
 type: "note"
-tags:
-  - ""
+tags: []
 created: "2026-02-13T14:23:45-06:00"
 timestamp: "2026-02-13T14:23:45-06:00"
 ---
@@ -162,14 +161,11 @@ Worth adopting in other services.
 
 Save the file (`:w`).
 
-### Step 4: Index Your Notes
+### Step 4: Search Your Notes
 
-Before you can search, index your notes:
-```vim
-:OkfwIndex path/to/.okfw/
-```
-
-Or index just the current directory:
+There is nothing to index: search reads the files directly, so the note is
+searchable as soon as it is saved. Saving also refreshes the wiki's `index.md`
+listings. If you edited concepts outside NeoVim, regenerate the listings with:
 ```vim
 :OkfwIndex
 ```
@@ -199,17 +195,17 @@ Later, you write another note about Go best practices. Link back to your error h
 
 Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. By default it uses a wiki-relative absolute path — a leading `/` means the wiki root:
 ```markdown
-See also [error wrapping](/error-handling-pattern--019f0494.md) for the pattern.
+See also [error wrapping](/interesting-error-handling-pattern-in-auth-module--019f049400a8.md) for the pattern.
 ```
 
 Or press `\L` to use the concept title as the link text:
 ```markdown
-See [Interesting error handling pattern in auth module](/error-handling-pattern--019f0494.md).
+See [Interesting error handling pattern in auth module](/interesting-error-handling-pattern-in-auth-module--019f049400a8.md).
 ```
 
 You can also write relative links by hand:
 ```markdown
-See [the pattern](./error-handling-pattern--019f0494.md).
+See [the pattern](./interesting-error-handling-pattern-in-auth-module--019f049400a8.md).
 ```
 
 Broken links are tolerated — if a target moves or is removed, the link simply doesn't resolve. To **follow a link**, place your cursor on it and press `gf` (go to file).
@@ -336,7 +332,7 @@ timestamp: "2026-02-13T15:30:00-06:00"
 
 ## Related Stories
 
-- [User authentication epic](/auth/user-authentication-epic--019f0312.md)
+- [User authentication epic](/auth/user-authentication-epic--019f03124700.md)
 ```
 
 ### Example: Code Snippet
@@ -385,7 +381,7 @@ Search as you type:
 
 ### Search with Flags
 
-`:OkfwSearch` supports flags for filtering by any indexed field:
+`:OkfwSearch` supports flags for filtering by frontmatter fields:
 
 ```vim
 " Filter by project
@@ -424,7 +420,7 @@ See how your notes connect:
 :OkfwGraph 20
 ```
 
-This generates an ASCII tree showing up to 20 notes and their relationships.
+This generates a Mermaid flowchart of up to 20 notes and their relationships, opened in a scratch buffer.
 
 ---
 
@@ -478,7 +474,7 @@ vim.keymap.set("n", "<leader>z/", "<cmd>OkfwSearch!<cr>", { desc = "Live search"
 vim.keymap.set("n", "<leader>zg", "<cmd>OkfwGraph<cr>", { desc = "Graph" })
 
 -- Management
-vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" })
+vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Refresh index.md listings" })
 ```
 
 ---
@@ -498,7 +494,7 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Index notes" }
 | Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
 | Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 | Generate graph | `:OkfwGraph` | `<leader>zg` |
-| Index notes | `:OkfwIndex` | `<leader>zi` |
+| Refresh `index.md` listings | `:OkfwIndex` | `<leader>zi` |
 
 ---
 

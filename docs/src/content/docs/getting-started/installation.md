@@ -5,7 +5,7 @@ description: How to install OKF Wiki from source.
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - CUE (for schema validation)
 
 ## Build from source

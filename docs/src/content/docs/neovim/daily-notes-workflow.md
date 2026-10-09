@@ -326,18 +326,18 @@ a structured hierarchy:
 └── daily/
     └── 2026/
         ├── 01/
-        │   ├── 2026-01-01--019f0494.md
-        │   ├── 2026-01-02--019f04a1.md
+        │   ├── 2026-01-01-thursday--019f049400a8.md
+        │   ├── 2026-01-02-friday--019f04a10000.md
         │   └── ...
         └── 02/
-            ├── 2026-02-01--019f04b8.md
+            ├── 2026-02-01-sunday--019f04b80000.md
             └── ...
 ```
 
 This structure:
 - Lives at the wiki root, separate from project folders
 - Groups notes by year and month
-- Uses human-readable filenames (YYYY-MM-DD--<shortid>.md)
+- Uses human-readable filenames (`YYYY-MM-DD-<weekday>--<shortid>.md`)
 - Makes manual browsing easy
 - Supports standard file system tools
 

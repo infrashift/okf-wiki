@@ -8,13 +8,13 @@ A fast, opinionated command-line tool for managing a local-first personal knowle
 
 - **CUE-validated schemas** - Frontmatter is validated against strict CUE schemas
 - **Full-text search** - Scans and ranks the concepts; no index to build, so results always match the files
-- **Graph visualization** - ASCII tree showing note relationships
+- **Graph visualization** - Mermaid diagram (or an ASCII tree with `--ascii`) of concept relationships
 - **Backlinks discovery** - Find all concepts that link to any concept
 - **Note templates** - Built-in templates for meetings, user stories, features, and more
 - **Daily notes** - Idempotent daily capture with review workflows
 - **OKF metadata** - Lifecycle status, staleness, verification trail, and provenance sources
 - **NeoVim integration** - Lua plugin for seamless note creation from your editor
-- **AI-agent ready** - `--json` output, self-documenting help, a token-lean MCP server (`okfw mcp`), and a drop-in agent skill ([`skills/okfw.md`](skills/okfw.md))
+- **AI-agent ready** - `--json` output, self-documenting help, a token-lean MCP server (`okfw mcp`), and an agent skill installed with `okfw install`
 - **Hierarchical notes** - Support for parent-child relationships between concepts
 - **Universal linking** - Link any concept to any other concept (notes, daily notes, issues)
 
@@ -69,7 +69,7 @@ tutorial.
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - CUE (for schema validation)
 
 ### Build from source
@@ -109,7 +109,7 @@ Two complementary integration points:
 
 - **MCP server** — `okfw mcp` serves five consolidated tools (`okfw_search`,
   `okfw_create`, `okfw_read`, `okfw_update`, `okfw_graph`) over stdio with
-  compact JSON responses (< 3 KB of tool schemas). Register with
+  compact JSON responses (about 3.9 KB of tool schemas). Register with
   `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
   unprefixed names still dispatch, for configurations that predate the prefix.
 - **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
@@ -147,11 +147,16 @@ make ui-check
 ```
 okf-wiki/
 ├── cli/
-│   ├── cmd/okfw/        # CLI entry point
+│   ├── cmd/okfw/        # CLI entry point (all commands, MCP server)
 │   ├── internal/
 │   │   ├── config/      # .okfw discovery and CUE schema validation
-│   │   ├── search/     # Scan-and-rank concept search
-│   │   ├── graph/       # Concept relationship graph
+│   │   ├── bundle/      # Write path: concept creation, frontmatter, index.md, link graph
+│   │   ├── graph/       # In-memory graph + rendering (Mermaid, ASCII tree)
+│   │   ├── search/      # Scan-and-rank concept search (no index)
+│   │   ├── agentskill/  # Agent-skill installer (okfw install)
+│   │   ├── okfwskills/  # okfw's SKILL.md / CLAUDE.md-block templates
+│   │   ├── templates/   # Embedded note templates
+│   │   └── gitctx/      # Git project-context helper
 │   └── testdata/        # Test fixtures
 ├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload

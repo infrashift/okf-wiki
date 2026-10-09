@@ -15,15 +15,18 @@ A wiki is a per-project `.okfw/` directory at the project root, created once
 with `okfw init` (no-op if it already exists). There is no config file. Every
 command discovers the wiki by searching upward from the current working
 directory (like git finds `.git`) and errors with init advice when none is
-found. `okfw connect` verifies the wiki and prints a summary; `okfw root`
+found. `okfw connect` verifies the wiki and prints its concept count; `okfw root`
 prints the discovered `.okfw` path. Generated artifacts inside `.okfw/`:
 `ephemeral/` (exports) — the only generated directory
 — all gitignored; concept markdown is committed with the project.
 
 ## Concept Format
 
-Every concept is a markdown file with YAML frontmatter. ID format: UUIDv7
-(legacy `YYYYMMDDHHmmss-UUIDv4` still accepted).
+Every concept is a markdown file with YAML frontmatter, named
+`slug--<first 12 hex digits of the id>.md`. ID format: UUIDv7 (legacy
+`YYYYMMDDHHmmss-UUIDv4` still accepted). Commands that take a concept accept
+the full id, a unique id prefix of at least 8 hex digits, the OKF concept ID
+(bundle-relative path minus `.md`), or a file path.
 
 ```yaml
 ---
@@ -39,14 +42,15 @@ created: "2026-02-13T10:45:00Z"
 timestamp: "2026-02-13T10:45:00Z"
 status: "deprecated"   # OKF lifecycle: draft | stable (default) | deprecated
 stale_after: "2026-12-31T00:00:00Z"
-parent: "019f0312-..." # optional, links to parent concept id
+parent: "019f0312-4700-7def-9abc-ffffffffffff"  # optional; the parent's full id
 x:                     # your own metadata; the only place custom keys are legal
   jira_epic: "PLAT-1421"
 ---
 
 # My Concept Title
 
-Body content with [[20260212...-uuid|Display Title]] style links.
+Body content with vanilla markdown links: [Display Title](/dir/other--019f04a10000.md)
+(bundle-relative, recommended) or [Display Title](./other--019f04a10000.md).
 ```
 
 ## Creating Concepts
@@ -124,7 +128,7 @@ Use these rather than `mv`/`rm`: they repair links at both ends and refresh the
 ```bash
 okfw move <ref> archive/              # into a directory (id is preserved)
 okfw move <ref> notes/new-name.md     # new path and name
-okfw delete <ref> --force             # file + index entry + graph node
+okfw delete <ref> --force             # file + its index.md line
 ```
 
 `move` retargets every inbound link and rewrites the moved concept's own relative

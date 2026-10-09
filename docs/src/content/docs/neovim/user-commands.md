@@ -58,7 +58,7 @@ Create a note from a template. Opens a picker if no template name is given.
 :OkfwTemplate feature --project my-project
 ```
 
-**Available templates:** `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`
+**Available templates:** `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`
 
 ---
 
@@ -121,7 +121,10 @@ Use the bang (`!`) variant for live search that updates as you type.
 
 ### `:OkfwGraph`
 
-Generate an ASCII tree visualization of note relationships. Opens in a vertical split.
+Render note relationships as a [Mermaid](https://mermaid.js.org/) flowchart
+(`okfw graph`). Opens in a scratch buffer (filetype `mermaid`); press `q` to
+close it. With no `--start`, the graph is centered on the concept in the current
+buffer.
 
 ```vim
 " Default graph (limit 10 nodes)
@@ -132,13 +135,13 @@ Generate an ASCII tree visualization of note relationships. Opens in a vertical 
 :OkfwGraph 20
 
 " Start from a specific note
-:OkfwGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000
+:OkfwGraph --start 019f0494
 
 " Set traversal depth
 :OkfwGraph --depth 3
 
 " Combine options
-:OkfwGraph --start 20260213143000-550e8400-e29b-41d4-a716-446655440000 --depth 3 --limit 50
+:OkfwGraph --start 019f0494 --depth 3 --limit 50
 ```
 
 **Flags:**
@@ -146,7 +149,7 @@ Generate an ASCII tree visualization of note relationships. Opens in a vertical 
 | Flag | Values | Description |
 |------|--------|-------------|
 | `--limit` | number | Maximum nodes to display (default: 10) |
-| `--start` | concept ID | Start node for the graph |
+| `--start` | concept reference | Start node: full id, unique id prefix (≥ 8 hex digits), or OKF concept ID |
 | `--depth` | number | Traversal depth |
 
 ---
@@ -182,10 +185,30 @@ Browse daily notes in a picker. Use the bang variant to show only this week.
 
 ---
 
+## Maintenance
+
+### `:OkfwIndex`
+
+Regenerate the wiki's OKF `index.md` directory listings by running
+`okfw index-md`. Search and the graph read the files directly, so the listings
+are the only derived state there is to refresh — and saving a concept buffer
+already refreshes them (`okfw index-md --no-adopt`). Run it by hand after
+editing concepts outside NeoVim.
+
+```vim
+:OkfwIndex
+```
+
+### `:OkfwRefreshTags`
+
+Refresh the cached tag list used by tag completion.
+
+---
+
 ## Deleting and Moving
 
-Use these rather than shelling out to `rm` / `mv`: they keep the search index,
-graph database, and `index.md` listings in step, and repair links.
+Use these rather than shelling out to `rm` / `mv`: they keep the `index.md`
+listings in step, and `:OkfwMove` repairs links.
 
 ### `:OkfwDelete`
 
@@ -200,8 +223,7 @@ Delete a concept. With no argument it acts on the current buffer.
 ```
 
 Asks for confirmation first, defaulting to **No**. On success it removes the
-concept's file, its search-index entry, its graph node, and its `index.md` line,
-then wipes the now-orphaned buffer.
+concept's file and its `index.md` line, then wipes the now-orphaned buffer.
 
 Concepts that still link to the deleted one are named in a warning but left
 untouched — OKF requires consumers to tolerate a link whose target does not
@@ -250,7 +272,7 @@ concepts were rewritten.
 | `:OkfwExport` | Export a portable subset to `ephemeral/` |
 | `:OkfwDaily [date]` | Open daily note |
 | `:OkfwDailyList[!]` | Browse daily notes (! for this week) |
-| `:OkfwDelete [path]` | Delete a concept (asks first) and its index/graph entries |
+| `:OkfwDelete [path]` | Delete a concept (asks first) and its `index.md` entry |
 | `:OkfwMove [src] <dest>` | Move/rename a concept, repairing links |
-| `:OkfwIndex [path]` | Index concepts |
+| `:OkfwIndex [path]` | Regenerate the `index.md` listings (`okfw index-md`) |
 | `:OkfwRefreshTags` | Refresh tag cache |
