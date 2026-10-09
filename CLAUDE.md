@@ -147,9 +147,14 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   its directory and so break silently when it changes directory. `delete`
   reports inbound links but never rewrites them: OKF section 6.1 requires
   consumers to tolerate a link whose target does not exist.
-- `WriteIndexFiles` also prunes listings for directories that no longer hold
-  concepts (and the emptied directory), or a delete would leave a generated
-  `index.md` still advertising what used to be there.
+- **okfw maintains only the `index.md` files it generated**, identified by
+  `IndexMarker` in the body. `WriteIndexFiles` (every write) creates missing
+  listings and rewrites marked ones, skipping any that are already current;
+  `AdoptIndexFiles` (`index-md`, `migrate`) also takes over unmarked listings in
+  directories holding okfw concepts. Only a marked listing is ever pruned (with
+  its emptied directory). OKF lets index files exist without a tool, so an
+  unmarked one is someone else's — treating every `index.md` as okfw's deleted
+  hand-written listings of foreign concepts.
 - **A directory listing past `indexEnumerateLimit` (50) groups by `type` instead
   of naming every concept.** OKF section 8 gives `index.md` one job — showing
   what is available *before* opening documents — and an exhaustive listing stops
@@ -190,7 +195,7 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - CUE schemas enforce all frontmatter validation
 - okfw carries no database: no search index, no graph store. Do not add one
   without revisiting the "computed from the files" rule above
-- Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing, auto-maintained by okfw on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
+- Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing; okfw maintains the ones it marked on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
 - The Neovim plugin uses snacks.nvim for pickers (not telescope), and needs `plenary.job` at **runtime**, not only for tests
 - `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated
   tools, advertised as `okfw_search`/`okfw_create`/`okfw_read`/`okfw_update`/

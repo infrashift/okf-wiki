@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -50,9 +51,36 @@ func LiveConceptIDs(root string) (map[string]bool, error) {
 	return live, err
 }
 
-// WriteIndexFiles regenerates the auto-maintained index.md listing in every
-// bundle directory. Returns the number of index files written.
+// IndexMarker identifies an index.md that okfw generated and so may overwrite
+// or delete. OKF lets index files exist without any tool (section 8), and a
+// bundle can hold listings someone wrote by hand; okfw used to treat every
+// index.md as its own, so a single `okfw create` replaced a hand-written root
+// listing and deleted any index.md in a directory holding no okfw concept.
+const IndexMarker = "<!-- okfw:generated — maintained by okfw; edits here are overwritten -->"
+
+// IsGeneratedIndex reports whether index.md content carries IndexMarker.
+func IsGeneratedIndex(content []byte) bool {
+	return bytes.Contains(content, []byte("<!-- okfw:generated"))
+}
+
+// WriteIndexFiles regenerates the index.md listings okfw owns: it creates one
+// where a directory has none and rewrites those carrying IndexMarker, leaving
+// any other index.md alone. Only marked listings are ever pruned. Returns the
+// number of index files written; a listing that is already current is not
+// rewritten.
 func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
+	return writeIndexFiles(root, false)
+}
+
+// AdoptIndexFiles is WriteIndexFiles for an explicit regeneration (`okfw
+// index-md`, `okfw migrate`): it also takes over unmarked index.md files in
+// directories that hold okfw concepts, which is how listings written before the
+// marker existed come back under maintenance. It still never prunes one.
+func AdoptIndexFiles(cfg *config.Config, root string) (int, error) {
+	return writeIndexFiles(root, true)
+}
+
+func writeIndexFiles(root string, adopt bool) (int, error) {
 	concepts := map[string][]indexEntry{}
 	dirs := map[string]bool{"": true}
 
@@ -127,11 +155,12 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 			heading = "/"
 		}
 		b.WriteString("# " + heading + "\n\n")
+		b.WriteString(IndexMarker + "\n\n")
 		if subs := subdirs[d]; len(subs) > 0 {
 			sort.Strings(subs)
 			b.WriteString("## Subdirectories\n\n")
 			for _, s := range subs {
-				b.WriteString("* [" + s + "/](" + s + "/)\n")
+				b.WriteString("* [" + escapeLinkText(s) + "/](" + escapeHref(s) + "/)\n")
 			}
 			b.WriteString("\n")
 		}
@@ -148,7 +177,16 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 			b.WriteString("\n")
 		}
 		out := filepath.Join(root, filepath.FromSlash(d), "index.md")
-		if err := os.WriteFile(out, []byte(b.String()), 0644); err != nil {
+		want := []byte(b.String())
+		if have, err := os.ReadFile(out); err == nil {
+			if bytes.Equal(have, want) {
+				continue
+			}
+			if !IsGeneratedIndex(have) && !adopt {
+				continue // someone else's listing
+			}
+		}
+		if err := os.WriteFile(out, want, 0644); err != nil {
 			return count, err
 		}
 		count++
@@ -185,11 +223,27 @@ type indexEntry struct{ title, desc, href, typ string }
 const indexPerTypeLimit = 10
 
 func indexLine(title, desc, href string) string {
-	line := "* [" + title + "](" + href + ")"
-	if desc != "" {
+	line := "* [" + escapeLinkText(title) + "](" + escapeHref(href) + ")"
+	// A listing entry is one line: a newline in a description would end the
+	// bullet and spill the rest into the listing as free text.
+	if desc = strings.Join(strings.Fields(desc), " "); desc != "" {
 		line += " - " + desc
 	}
 	return line + "\n"
+}
+
+// escapeLinkText escapes the characters that would end or nest a markdown link
+// text. A title of "Weird ] title [x](evil.md)" otherwise produced a working
+// link to evil.md in the listing.
+func escapeLinkText(s string) string {
+	return strings.NewReplacer(`\`, `\\`, `[`, `\[`, `]`, `\]`).Replace(s)
+}
+
+// escapeHref percent-encodes the characters that end or break a markdown link
+// destination; okfw's own filenames never contain them, but a hand-named
+// concept can.
+func escapeHref(s string) string {
+	return strings.NewReplacer("%", "%25", " ", "%20", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(s)
 }
 
 // writeGroupedIndex renders a large directory as counts by type plus a sample
@@ -237,8 +291,10 @@ func writeGroupedIndex(b *strings.Builder, cs []indexEntry) {
 //
 // Without this, emptying a directory left its listing behind still advertising
 // the concepts that used to be there — a generated file making false claims,
-// which `okfw delete` and `okfw move` now produce routinely. index.md is
-// okfw-owned and overwritten on every change, so removing one is in remit.
+// which `okfw delete` and `okfw move` now produce routinely. Only a listing
+// carrying IndexMarker is removed: an unmarked index.md is someone else's, and
+// a directory with no okfw concept in it is exactly where a hand-written
+// listing of foreign concepts lives.
 func pruneOrphanedIndexes(root string, keep map[string]bool) error {
 	var stale []string
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
@@ -262,7 +318,10 @@ func pruneOrphanedIndexes(root string, keep map[string]bool) error {
 		if d == "." {
 			d = "" // the bundle root's index.md is always kept
 		}
-		if !keep[d] {
+		if keep[d] {
+			return nil
+		}
+		if content, err := os.ReadFile(p); err == nil && IsGeneratedIndex(content) {
 			stale = append(stale, p)
 		}
 		return nil

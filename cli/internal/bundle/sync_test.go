@@ -344,3 +344,94 @@ func readIndex(t *testing.T, root, dir string) string {
 	}
 	return string(b)
 }
+
+// --- ownership: okfw maintains only the listings it generated ---
+
+// TestIndexListingsOkfwDidNotWriteSurvive: OKF lets index.md exist without any
+// tool, and a bundle can hold listings of concepts okfw does not manage. A
+// single `okfw create` used to replace a hand-written root listing, and delete
+// every index.md in a directory holding no okfw concept along with the
+// directory itself.
+func TestIndexListingsOkfwDidNotWriteSurvive(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
+	const rootListing = "---\nokf_version: \"1.0\"\n---\n\n# Finance\n\n* [Revenue](computations/revenue.md) - Recognized revenue.\n"
+	const subListing = "# Computations\n\n* [Revenue](revenue.md) - Recognized revenue.\n"
+	writeConcept(t, root, "index.md", rootListing)
+	writeConcept(t, root, "computations/index.md", subListing)
+	// A foreign concept: spec-conformant, but carrying no okfw id.
+	writeConcept(t, root, "computations/revenue.md", "---\ntype: Attested Computation\n---\n\n# Revenue\n")
+	writeConcept(t, root, "mine--0001.md", GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "Mine", "", nil))
+
+	for _, run := range []func(*config.Config, string) (int, error){WriteIndexFiles, AdoptIndexFiles} {
+		if _, err := run(cfg, root); err != nil {
+			t.Fatal(err)
+		}
+		if got := readIndex(t, root, "computations"); got != subListing {
+			t.Fatalf("a hand-written listing in a directory without okfw concepts changed:\n%s", got)
+		}
+	}
+}
+
+func TestOnlyExplicitRegenerationAdoptsUnmarkedListings(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
+	const legacy = "---\nokf_version: \"0.2\"\n---\n\n# /\n\n## Concepts\n\n* [Old](old.md)\n"
+	writeConcept(t, root, "index.md", legacy)
+	writeConcept(t, root, "mine--0001.md", GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "Mine", "", nil))
+
+	if _, err := WriteIndexFiles(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	if got := readIndex(t, root, ""); got != legacy {
+		t.Fatalf("automatic sync overwrote an unmarked listing:\n%s", got)
+	}
+	if _, err := AdoptIndexFiles(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	got := readIndex(t, root, "")
+	if !IsGeneratedIndex([]byte(got)) || !strings.Contains(got, "[Mine](mine--0001.md)") {
+		t.Fatalf("explicit regeneration did not adopt the listing:\n%s", got)
+	}
+	// Once adopted, ordinary sync maintains it.
+	writeConcept(t, root, "more--0002.md", GenerateBasicNote("019680f0-7e00-7abc-8def-200000000000", "More", "", nil))
+	if _, err := WriteIndexFiles(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	if got := readIndex(t, root, ""); !strings.Contains(got, "[More](more--0002.md)") {
+		t.Errorf("adopted listing is not maintained:\n%s", got)
+	}
+}
+
+// A listing that is already current is not rewritten: every concept write runs
+// this, and rewriting every index.md each time churned mtimes and git status.
+func TestWriteIndexFilesSkipsCurrentListings(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
+	writeConcept(t, root, "a/one--0001.md", GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "One", "", nil))
+	if n, err := WriteIndexFiles(cfg, root); err != nil || n != 2 {
+		t.Fatalf("first run wrote %d, %v; want 2", n, err)
+	}
+	if n, err := WriteIndexFiles(cfg, root); err != nil || n != 0 {
+		t.Errorf("second run wrote %d, %v; want 0", n, err)
+	}
+}
+
+func TestIndexEntriesAreEscaped(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.ConfigFor(root)
+	note := GenerateBasicNote("019680f0-7e00-7abc-8def-100000000000", "Weird ] title [x](evil.md)", "", nil)
+	withDesc, err := UpdateFrontmatter([]byte(note), map[string]string{"description": "line one\nline two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeConcept(t, root, "my notes (draft).md", string(withDesc))
+	if _, err := WriteIndexFiles(cfg, root); err != nil {
+		t.Fatal(err)
+	}
+	got := readIndex(t, root, "")
+	want := `* [Weird \] title \[x\](evil.md)](my%20notes%20%28draft%29.md) - line one line two` + "\n"
+	if !strings.Contains(got, want) {
+		t.Errorf("entry not escaped; want %q in:\n%s", want, got)
+	}
+}

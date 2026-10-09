@@ -194,7 +194,13 @@ wiki exists.`,
 		Short: "Generate OKF index.md directory listings",
 		Long: `Generate an OKF index.md in every bundle directory for progressive
 disclosure. The root index.md carries the okf_version declaration; all other
-index files have no frontmatter. Safe to re-run (overwrites).`,
+index files have no frontmatter. Safe to re-run.
+
+okfw marks the listings it generates and maintains only those on every change.
+This command also takes over an unmarked index.md in a directory holding okfw
+concepts — which is how listings from before the marker come back under
+maintenance — but never deletes one: an index.md okfw did not write is pruned
+by nobody but you.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Listings are bundle-wide and the root one carries okf_version, so
@@ -1277,9 +1283,11 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 		fmt.Fprintf(os.Stderr, "%d concept(s) carry a timestamp migrate cannot repair.\n", repair)
 	}
 	if changed > 0 && !dryRun {
-		// One refresh for the whole run: WriteIndexFiles walks the bundle, so
+		// One refresh for the whole run: the index walk covers the bundle, so
 		// refreshing per file made migrating 300 concepts take 28 seconds.
-		if err := bundle.AutoSync(cfg, cfg.RootPath); err != nil {
+		// Adopting also brings listings written before IndexMarker existed
+		// back under maintenance.
+		if _, err := bundle.AdoptIndexFiles(cfg, cfg.RootPath); err != nil {
 			return err
 		}
 	}
@@ -1468,7 +1476,7 @@ func bundleArg(args []string) (*config.Config, string, error) {
 // disclosure). The root index.md carries the okf_version declaration; all other
 // index files have no frontmatter.
 func runIndexMd(cfg *config.Config, root string) error {
-	count, err := bundle.WriteIndexFiles(cfg, root)
+	count, err := bundle.AdoptIndexFiles(cfg, root)
 	if err != nil {
 		return err
 	}
