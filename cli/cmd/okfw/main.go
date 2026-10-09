@@ -1591,10 +1591,11 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 	dailyDir := filepath.Join(cfg.RootPath, "daily",
 		targetDate.Format("2006"), targetDate.Format("01"))
 
-	// Check if any daily note already exists for this date
-	entries, _ := filepath.Glob(filepath.Join(dailyDir, "*.md"))
-	if len(entries) > 0 {
-		return entries[0], false, nil
+	// Reuse the note for this date if there is one. This used to return the
+	// first *.md in the month directory — any day's note, or its index.md —
+	// so a month held exactly one daily note.
+	if existing := findDailyNote(dailyDir, dateStr); existing != "" {
+		return existing, false, nil
 	}
 
 	if err := os.MkdirAll(dailyDir, 0755); err != nil {
@@ -1619,6 +1620,48 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 		fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
 	}
 	return filePath, true, nil
+}
+
+// findDailyNote returns the daily note for date (YYYY-MM-DD) in dir, or "".
+func findDailyNote(dir, date string) string {
+	entries, _ := filepath.Glob(filepath.Join(dir, "*.md"))
+	for _, e := range entries {
+		if bundle.IsReservedBase(filepath.Base(e)) {
+			continue
+		}
+		content, err := os.ReadFile(e)
+		if err != nil {
+			continue
+		}
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			continue
+		}
+		if d, ok := dailyDate(z); ok && d.Format("2006-01-02") == date {
+			return e
+		}
+	}
+	return ""
+}
+
+// dailyDate returns the calendar date a daily note is for. The title is
+// "YYYY-MM-DD Weekday" by construction and is the only record of the day the
+// note is *for*: a backdated note's created stamp is the day it was written,
+// and the time embedded in its id is UTC, which puts an evening note west of
+// UTC on the following day.
+func dailyDate(z *config.Concept) (time.Time, bool) {
+	if len(z.Title) >= 10 {
+		if d, err := time.ParseInLocation("2006-01-02", z.Title[:10], time.Local); err == nil {
+			return d, true
+		}
+	}
+	if !z.Created.IsZero() {
+		return z.Created.In(time.Local), true
+	}
+	if t, err := bundle.TimeFromID(z.ID); err == nil {
+		return t.In(time.Local), true
+	}
+	return time.Time{}, false
 }
 
 // listDailyNotes lists recent daily notes
@@ -1671,8 +1714,9 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 			return nil
 		}
 
-		// Filenames are slug--shortid.md, so the date comes from frontmatter:
-		// `created` when present, else the creation time encoded in the id.
+		if bundle.IsReservedBase(info.Name()) {
+			return nil
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			return nil
@@ -1681,13 +1725,9 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 		if err != nil || z.ID == "" {
 			return nil // not a concept
 		}
-
-		fileDate := z.Created
-		if fileDate.IsZero() {
-			fileDate, err = bundle.TimeFromID(z.ID)
-			if err != nil {
-				return nil
-			}
+		fileDate, ok := dailyDate(z)
+		if !ok {
+			return nil
 		}
 
 		// Check if within date range

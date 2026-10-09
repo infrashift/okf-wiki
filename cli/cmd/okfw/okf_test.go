@@ -186,6 +186,60 @@ func TestListDailyNotes_SlugFilenames(t *testing.T) {
 	}
 }
 
+// TestDailyNotesAreOnePerDay: createOrOpenDaily used to return the first *.md
+// in the month directory, so every later day of the month reopened the first
+// day's note — or the directory's index.md.
+func TestDailyNotesAreOnePerDay(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	paths := map[string]string{}
+	for _, d := range []string{"2026-03-01", "2026-03-02", "2026-03-15"} {
+		date, _ := time.Parse("2006-01-02", d)
+		p, created, err := createOrOpenDaily(cfg, date)
+		if err != nil || !created {
+			t.Fatalf("%s: created=%v err=%v", d, created, err)
+		}
+		if !strings.Contains(readFile(t, p), "title: \""+d+" ") {
+			t.Errorf("%s: note at %s is for another day", d, p)
+		}
+		paths[d] = p
+	}
+	if len(map[string]bool{paths["2026-03-01"]: true, paths["2026-03-02"]: true, paths["2026-03-15"]: true}) != 3 {
+		t.Fatalf("days share a note: %v", paths)
+	}
+	date, _ := time.Parse("2006-01-02", "2026-03-02")
+	again, created, err := createOrOpenDaily(cfg, date)
+	if err != nil || created || again != paths["2026-03-02"] {
+		t.Errorf("reopening 2026-03-02 gave %s (created=%v, err=%v), want %s", again, created, err, paths["2026-03-02"])
+	}
+}
+
+// A backdated daily note lists under the day it is for, not the day it was
+// written: the listing used to date notes by `created`.
+func TestBackdatedDailyNoteListsUnderItsOwnDate(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	day := time.Now().AddDate(0, 0, -3)
+	date, _ := time.Parse("2006-01-02", day.Format("2006-01-02"))
+	if _, _, err := createOrOpenDaily(cfg, date); err != nil {
+		t.Fatal(err)
+	}
+
+	old := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := listDailyNotes(cfg, false, false, true)
+	w.Close()
+	os.Stdout = old
+	out, _ := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"date": "` + day.Format("2006-01-02") + `"`; !strings.Contains(string(out), want) {
+		t.Errorf("listing should carry %s:\n%s", want, out)
+	}
+}
+
 // --- init ---
 
 func TestRunInit(t *testing.T) {
