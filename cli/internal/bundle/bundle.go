@@ -2,6 +2,7 @@ package bundle
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -128,7 +129,13 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 	// Otherwise it is an ID: search the whole bundle for a concept whose
 	// frontmatter id matches. Concepts may live in any directory, and
 	// filenames are slug--shortid.md rather than <id>.md.
+	//
+	// A unique prefix of at least 8 hex digits also resolves (dashes ignored),
+	// which is how the docs and `okfw search` output abbreviate ids.
+	compactRef := compactID(idOrPath)
+	prefixOK := len(compactRef) >= 8 && isHex(compactRef)
 	var found string
+	var prefixed []string
 	err := filepath.Walk(cfg.RootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -147,9 +154,13 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 			found = path
 			return filepath.SkipAll
 		}
-		if config.ReadConceptID(path) == idOrPath {
+		id := config.ReadConceptID(path)
+		if id == idOrPath {
 			found = path
 			return filepath.SkipAll
+		}
+		if prefixOK && id != "" && strings.HasPrefix(compactID(id), compactRef) {
+			prefixed = append(prefixed, path)
 		}
 		return nil
 	})
@@ -157,16 +168,33 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 		return "", fmt.Errorf("error searching for concept: %w", err)
 	}
 
+	if found == "" && len(prefixed) == 1 {
+		found = prefixed[0]
+	}
 	if found != "" {
 		return filepath.Abs(found)
+	}
+	if len(prefixed) > 1 {
+		names := make([]string, 0, len(prefixed))
+		for _, p := range prefixed {
+			if rel, err := relSlash(cfg.RootPath, p); err == nil {
+				names = append(names, rel)
+			}
+		}
+		return "", fmt.Errorf("id prefix %s is ambiguous; it matches %d concepts: %s",
+			idOrPath, len(prefixed), strings.Join(names, ", "))
 	}
 	// A bare OKF concept ID for a concept at the bundle root.
 	if p := filepath.Join(cfg.RootPath, idOrPath+".md"); !IsReservedBase(idOrPath+".md") && fileExists(p) {
 		return p, nil
 	}
 
-	return "", fmt.Errorf("concept not found: %s", idOrPath)
+	return "", fmt.Errorf("%w: %s", ErrConceptNotFound, idOrPath)
 }
+
+// ErrConceptNotFound is wrapped by ResolveConceptPath when nothing matches, as
+// opposed to a reference that matched something it must refuse.
+var ErrConceptNotFound = errors.New("concept not found")
 
 func resolvePathRef(cfg *config.Config, ref string) (string, error) {
 	var cands []string
@@ -222,4 +250,17 @@ func Within(root, p string) bool {
 func fileExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && !fi.IsDir()
+}
+
+// compactID lowercases an id and drops its dashes, so prefixes compare the
+// same whether or not the caller typed them.
+func compactID(id string) string { return strings.ToLower(strings.ReplaceAll(id, "-", "")) }
+
+func isHex(s string) bool {
+	for _, c := range s {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			return false
+		}
+	}
+	return true
 }

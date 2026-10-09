@@ -359,7 +359,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			nodes, err := queryGraph(g, graphStartFlag, graphLimitFlag, graphDepthFlag)
+			nodes, err := queryGraph(cfg, g, graphStartFlag, graphLimitFlag, graphDepthFlag)
 			if err != nil {
 				return err
 			}
@@ -524,7 +524,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			nodes, err := queryGraph(g, exportStartFlag, exportLimitFlag, exportDepthFlag)
+			nodes, err := queryGraph(cfg, g, exportStartFlag, exportLimitFlag, exportDepthFlag)
 			if err != nil {
 				return err
 			}
@@ -1135,12 +1135,18 @@ func runInit(target string) error {
 // skipped: hidden directories (.index, .git, ...) and the ephemeral/ export
 // dir — but never the walk root itself, which is the hidden .okfw directory.
 // queryGraph runs FindConnected or FindAllConnected based on startID.
-func queryGraph(g *graph.Graph, startID string, limit, depth int) ([]*graph.Node, error) {
-	if startID != "" {
-		if g.GetNode(startID) == nil {
-			return nil, fmt.Errorf("start node %q not found in graph", startID)
+func queryGraph(cfg *config.Config, g *graph.Graph, start string, limit, depth int) ([]*graph.Node, error) {
+	if start != "" {
+		// Accept any concept reference, as every other command does: a full
+		// id, a unique prefix, an OKF concept ID or a path.
+		key, err := bundle.ConceptKeyOf(cfg, start)
+		if err != nil {
+			return nil, err
 		}
-		return g.FindConnected(startID, limit, depth), nil
+		if g.GetNode(key) == nil {
+			return nil, fmt.Errorf("start node %q not found in graph", start)
+		}
+		return g.FindConnected(key, limit, depth), nil
 	}
 	return g.FindAllConnected(limit, depth), nil
 }

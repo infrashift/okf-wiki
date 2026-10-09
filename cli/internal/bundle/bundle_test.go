@@ -377,3 +377,32 @@ func TestConcurrentCreatesOfOneTitleAllSurvive(t *testing.T) {
 		}
 	}
 }
+
+// The docs and search output abbreviate ids (`okfw set-lifecycle 019f0494
+// draft`); the resolver used to accept only a full id, so every such example
+// failed with "concept not found".
+func TestResolveConceptPathAcceptsAUniqueIDPrefix(t *testing.T) {
+	cfg, root := testCfg(t)
+	write := func(rel, id string) string {
+		p := filepath.Join(root, rel)
+		if err := os.WriteFile(p, []byte(GenerateBasicNote(id, "X", "", nil)), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a := write("a--0001.md", "019f0494-1111-7abc-8def-1234567890ab")
+	write("b--0002.md", "019f0495-2222-7abc-8def-1234567890ab")
+	write("c--0003.md", "019f0495-3333-7abc-8def-1234567890ab")
+
+	for _, ref := range []string{"019f0494", "019F0494", "019f04941111", "019f0494-1111"} {
+		if got, err := ResolveConceptPath(cfg, ref); err != nil || got != a {
+			t.Errorf("%s: got %q, %v; want %s", ref, got, err, a)
+		}
+	}
+	if _, err := ResolveConceptPath(cfg, "019f0495"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("an ambiguous prefix: err = %v", err)
+	}
+	if _, err := ResolveConceptPath(cfg, "019f049"); err == nil {
+		t.Error("a 7-digit prefix resolved; prefixes need at least 8 digits")
+	}
+}

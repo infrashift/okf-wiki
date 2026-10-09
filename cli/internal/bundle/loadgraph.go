@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -126,10 +127,10 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 func ConceptKeyOf(cfg *config.Config, ref string) (string, error) {
 	p, err := ResolveConceptPath(cfg, ref)
 	if err != nil {
-		if strings.HasSuffix(ref, ".md") || strings.Contains(ref, "/") {
-			return "", err
+		if errors.Is(err, ErrConceptNotFound) && !strings.HasSuffix(ref, ".md") && !strings.Contains(ref, "/") {
+			return ref, nil
 		}
-		return ref, nil
+		return "", err
 	}
 	rel, err := relSlash(cfg.RootPath, p)
 	if err != nil {
