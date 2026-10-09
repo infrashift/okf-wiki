@@ -108,14 +108,21 @@ func GenerateBasicNote(id, title, project string, tags []string) string {
 	return buf.String()
 }
 
-// ResolveConceptPath resolves a concept ID or file path to an absolute file path.
+// ResolveConceptPath resolves a concept reference to the absolute path of a file
+// inside the bundle. A reference is one of:
+//
+//   - the frontmatter id, or a legacy <id>.md filename;
+//   - an OKF concept ID (section 2): the bundle-relative path, with or without
+//     ".md", optionally with a leading "/";
+//   - a file path, absolute or relative to the working directory.
+//
+// Path forms are tried bundle-relative first. A file that exists but lies
+// outside the bundle — via "..", an absolute path, or a symlink — is refused:
+// every caller goes on to read or rewrite what this returns, and an MCP client
+// supplies the reference unvetted.
 func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
-	// If it looks like a file path, use it directly
 	if strings.HasSuffix(idOrPath, ".md") || strings.Contains(idOrPath, "/") {
-		if _, err := os.Stat(idOrPath); err != nil {
-			return "", fmt.Errorf("file not found: %s", idOrPath)
-		}
-		return filepath.Abs(idOrPath)
+		return resolvePathRef(cfg, idOrPath)
 	}
 
 	// Otherwise it is an ID: search the whole bundle for a concept whose
@@ -153,6 +160,66 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 	if found != "" {
 		return filepath.Abs(found)
 	}
+	// A bare OKF concept ID for a concept at the bundle root.
+	if p := filepath.Join(cfg.RootPath, idOrPath+".md"); !IsReservedBase(idOrPath+".md") && fileExists(p) {
+		return p, nil
+	}
 
 	return "", fmt.Errorf("concept not found: %s", idOrPath)
+}
+
+func resolvePathRef(cfg *config.Config, ref string) (string, error) {
+	var cands []string
+	bundleRel := filepath.Join(cfg.RootPath, filepath.FromSlash(strings.TrimPrefix(ref, "/")))
+	if filepath.IsAbs(ref) {
+		cands = append(cands, ref)
+	}
+	cands = append(cands, bundleRel)
+	if !strings.HasSuffix(ref, ".md") {
+		cands = append(cands, bundleRel+".md")
+	}
+	if !filepath.IsAbs(ref) {
+		if abs, err := filepath.Abs(ref); err == nil {
+			cands = append(cands, abs)
+		}
+	}
+
+	outside := false
+	for _, c := range cands {
+		fi, err := os.Stat(c)
+		if err != nil || fi.IsDir() {
+			continue
+		}
+		if !Within(cfg.RootPath, c) {
+			outside = true
+			continue
+		}
+		return filepath.Clean(c), nil
+	}
+	if outside {
+		return "", fmt.Errorf("%s is outside the wiki at %s", ref, cfg.RootPath)
+	}
+	return "", fmt.Errorf("file not found: %s", ref)
+}
+
+// Within reports whether path p lies inside root once symlinks are resolved.
+// Both must exist for symlinks to resolve; a path that does not is compared as
+// written.
+func Within(root, p string) bool {
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	if q, err := filepath.EvalSymlinks(p); err == nil {
+		p = q
+	}
+	rel, err := filepath.Rel(root, p)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }

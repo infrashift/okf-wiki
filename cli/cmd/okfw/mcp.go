@@ -248,23 +248,14 @@ func relPath(cfg *config.Config, abs string) string {
 	return abs
 }
 
-// resolveRef resolves a tool `ref` (concept id, wiki-relative path, or
-// absolute path) to an absolute file path.
-func resolveRef(cfg *config.Config, ref string) (string, error) {
-	if strings.HasSuffix(ref, ".md") || strings.Contains(ref, "/") {
-		p := ref
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(cfg.RootPath, filepath.FromSlash(ref))
+func (s *mcpServer) callTool(name string, args json.RawMessage) (res *toolResult) {
+	// One bad argument must not take the server down with it: a panic here
+	// kills the stdio loop, and the client sees every later call hang.
+	defer func() {
+		if r := recover(); r != nil {
+			res = errResult(fmt.Errorf("internal error in %s: %v", name, r))
 		}
-		if _, err := os.Stat(p); err != nil {
-			return "", fmt.Errorf("file not found: %s", ref)
-		}
-		return p, nil
-	}
-	return bundle.ResolveConceptPath(cfg, ref)
-}
-
-func (s *mcpServer) callTool(name string, args json.RawMessage) *toolResult {
+	}()
 	if args == nil {
 		args = json.RawMessage("{}")
 	}
@@ -304,6 +295,10 @@ type mcpHit struct {
 	Snippet string   `json:"snippet,omitempty"`
 }
 
+// maxSearchLimit bounds a single search page. The caller can page past it
+// with offset; nothing bounded it before, so `limit: 100000` dumped the bundle.
+const maxSearchLimit = 100
+
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
 		Q       string `json:"q"`
@@ -322,6 +317,8 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 	if a.Limit <= 0 {
 		a.Limit = 10
 	}
+	a.Limit = min(a.Limit, maxSearchLimit)
+	a.Offset = max(a.Offset, 0)
 
 	opts := search.Options{
 		Query:   a.Q,
@@ -430,7 +427,7 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 	if err := json.Unmarshal(args, &a); err != nil || a.Ref == "" {
 		return errResult(fmt.Errorf("ref is required"))
 	}
-	path, err := resolveRef(cfg, a.Ref)
+	path, err := bundle.ResolveConceptPath(cfg, a.Ref)
 	if err != nil {
 		return errResult(err)
 	}
@@ -548,7 +545,7 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		return errResult(fmt.Errorf("value is required for %s", a.Action))
 	}
 
-	path, err := resolveRef(cfg, a.Ref)
+	path, err := bundle.ResolveConceptPath(cfg, a.Ref)
 	if err != nil {
 		return errResult(err)
 	}
@@ -695,7 +692,7 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 			return errResult(fmt.Errorf("ref is required for %s", a.Action))
 		}
 		if strings.HasSuffix(id, ".md") || strings.Contains(id, "/") {
-			p, err := resolveRef(cfg, id)
+			p, err := bundle.ResolveConceptPath(cfg, id)
 			if err != nil {
 				return errResult(err)
 			}

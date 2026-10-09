@@ -197,15 +197,13 @@ disclosure. The root index.md carries the okf_version declaration; all other
 index files have no frontmatter. Safe to re-run (overwrites).`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
+			// Listings are bundle-wide and the root one carries okf_version, so
+			// a path argument only selects which bundle, never a subtree.
+			cfg, _, err := bundleArg(args)
 			if err != nil {
 				return err
 			}
-			root := cfg.RootPath
-			if len(args) > 0 {
-				root = args[0]
-			}
-			return runIndexMd(cfg, root)
+			return runIndexMd(cfg, cfg.RootPath)
 		},
 	}
 
@@ -218,13 +216,9 @@ Creation/Update/Deprecation entries using each commit's message. Requires the
 bundle to be a git repository.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
+			cfg, root, err := bundleArg(args)
 			if err != nil {
 				return err
-			}
-			root := cfg.RootPath
-			if len(args) > 0 {
-				root = args[0]
 			}
 			return runLog(cfg, root)
 		},
@@ -369,11 +363,14 @@ Examples:
 	}
 
 	var setProjectCmd = &cobra.Command{
-		Use:   "set-project [file_path] [project]",
+		Use:   "set-project [id_or_file] [project]",
 		Short: "Set or update the project for a concept",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filePath := args[0]
+			cfg, filePath, err := resolveRefArg(args[0])
+			if err != nil {
+				return err
+			}
 			project := args[1]
 
 			content, err := os.ReadFile(filePath)
@@ -393,17 +390,9 @@ Examples:
 			}
 
 			fmt.Printf("Updated project to: %s\n", project)
-
-			// Auto-index the updated note (best-effort)
-			cfg, cfgErr := config.Discover("")
-			if cfgErr != nil {
-				fmt.Fprintf(os.Stderr, "Warning: config load failed, skipping index update: %v\n", cfgErr)
-			} else {
-				if err := bundle.AutoSync(cfg, filePath); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to index note: %v\n", err)
-				}
+			if err := bundle.AutoSync(cfg, filePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to refresh index.md listings: %v\n", err)
 			}
-
 			return nil
 		},
 	}
@@ -542,7 +531,11 @@ Examples:
 			// Map each exported concept's bundle-relative path to its ID so that
 			// in-bundle markdown links can be flattened to <id>.md in the export.
 			pathToID := make(map[string]string, len(nodes))
+			exported := 0
 			for _, n := range nodes {
+				if !safeExportName(n.ID) {
+					continue
+				}
 				if rel, err := filepath.Rel(cfg.RootPath, n.FilePath); err == nil {
 					pathToID[filepath.ToSlash(rel)] = n.ID
 				}
@@ -556,6 +549,13 @@ Examples:
 
 			// Export each note with links flattened to the exported file names.
 			for _, node := range nodes {
+				// The id names the output file, and it comes from frontmatter
+				// anyone can write: `id: "../../x"` once planted a file outside
+				// ephemeral/.
+				if !safeExportName(node.ID) {
+					fmt.Fprintf(os.Stderr, "Warning: skipping %s: id %q is not a safe file name\n", node.FilePath, node.ID)
+					continue
+				}
 				content, err := os.ReadFile(node.FilePath)
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to read %s: %v\n", node.FilePath, err)
@@ -580,9 +580,10 @@ Examples:
 					fmt.Fprintf(os.Stderr, "Warning: failed to write %s: %v\n", outPath, err)
 					continue
 				}
+				exported++
 			}
 
-			fmt.Fprintf(os.Stderr, "Exported %d files to ephemeral/\n", len(nodes))
+			fmt.Fprintf(os.Stderr, "Exported %d files to ephemeral/\n", exported)
 			return nil
 		},
 	}
@@ -697,18 +698,9 @@ Examples:
   okfw add-tags 202602131045 security review`,
 		Args: cobra.MinimumNArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			filePath := args[0]
-
-			// If it looks like an ID (not a file path), resolve it
-			if !strings.HasSuffix(filePath, ".md") && !strings.Contains(filePath, "/") {
-				cfg, err := config.Discover("")
-				if err != nil {
-					return err
-				}
-				filePath, err = bundle.ResolveConceptPath(cfg, args[0])
-				if err != nil {
-					return err
-				}
+			_, filePath, err := resolveRefArg(args[0])
+			if err != nil {
+				return err
 			}
 
 			content, err := os.ReadFile(filePath)
@@ -793,13 +785,9 @@ Examples:
   okfw migrate               # apply`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, err := config.Discover("")
+			cfg, root, err := bundleArg(args)
 			if err != nil {
 				return err
-			}
-			root := cfg.RootPath
-			if len(args) > 0 {
-				root = args[0]
 			}
 			return runMigrate(cfg, root, migrateDryRun)
 		},
@@ -1403,6 +1391,45 @@ func runValidateOKF(cfg *config.Config, root string) error {
 		return fmt.Errorf("%d conformance violation(s)", violations)
 	}
 	return nil
+}
+
+// safeExportName reports whether a concept id can name a file directly inside
+// the export directory.
+func safeExportName(id string) bool {
+	return id != "" && id != "." && id != ".." && !strings.ContainsAny(id, `/\`)
+}
+
+// bundleArg resolves the optional [path] argument of a command that writes to
+// the bundle. The path may name the bundle, a directory inside it, or the
+// project containing it; the bundle is discovered from there, as it would be
+// from the working directory. The returned root is the path itself when it lies
+// inside the bundle, otherwise the bundle root — so a write never lands in a
+// directory that no discovered bundle contains. `okfw index-md ~/elsewhere`
+// used to prune hand-written index.md files there, and delete the directories
+// it emptied.
+func bundleArg(args []string) (*config.Config, string, error) {
+	start := ""
+	if len(args) > 0 {
+		start = args[0]
+		if fi, err := os.Stat(start); err != nil || !fi.IsDir() {
+			return nil, "", fmt.Errorf("%s is not a directory", start)
+		}
+	}
+	cfg, err := config.Discover(start)
+	if err != nil {
+		return nil, "", err
+	}
+	if start == "" {
+		return cfg, cfg.RootPath, nil
+	}
+	abs, err := filepath.Abs(start)
+	if err != nil {
+		return nil, "", err
+	}
+	if bundle.Within(cfg.RootPath, abs) {
+		return cfg, abs, nil
+	}
+	return cfg, cfg.RootPath, nil
 }
 
 // runIndexMd generates an OKF index.md in each bundle directory (progressive

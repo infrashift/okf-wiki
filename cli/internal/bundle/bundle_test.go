@@ -259,3 +259,81 @@ func TestResolveConceptPathAcceptsDirectFilePath(t *testing.T) {
 		t.Error("expected an error for a missing file path")
 	}
 }
+
+// An OKF concept ID is the bundle-relative path minus ".md" (section 2). It
+// must resolve in every spelling an agent is likely to produce.
+func TestResolveConceptPathAcceptsOKFConceptIDs(t *testing.T) {
+	cfg, root := testCfg(t)
+	nested := filepath.Join(root, "metrics", "income--0001.md")
+	top := filepath.Join(root, "overview--0002.md")
+	for _, p := range []string{nested, top} {
+		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("---\nid: \"x\"\n---\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for ref, want := range map[string]string{
+		"metrics/income--0001":     nested,
+		"metrics/income--0001.md":  nested,
+		"/metrics/income--0001.md": nested,
+		"/metrics/income--0001":    nested,
+		"overview--0002":           top,
+		"overview--0002.md":        top,
+	} {
+		got, err := ResolveConceptPath(cfg, ref)
+		if err != nil {
+			t.Errorf("%s: %v", ref, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s resolved to %q, want %q", ref, got, want)
+		}
+	}
+	// A bare reserved name is not a concept.
+	if err := os.WriteFile(filepath.Join(root, "index.md"), []byte("# /\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := ResolveConceptPath(cfg, "index"); err == nil {
+		t.Errorf("bare \"index\" resolved to %q; reserved files are not concepts", got)
+	}
+}
+
+// Every caller reads or rewrites what the resolver returns, and an MCP client
+// supplies the reference unvetted, so nothing outside the bundle may resolve —
+// not by "..", not by absolute path, not through a symlink.
+func TestResolveConceptPathRefusesFilesOutsideTheBundle(t *testing.T) {
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.md")
+	if err := os.WriteFile(secret, []byte("---\nid: \"s\"\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, root := testCfg(t)
+	if err := os.Symlink(secret, filepath.Join(root, "link.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "linkdir")); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := filepath.Rel(root, secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{
+		secret,                // absolute
+		filepath.ToSlash(rel), // ../<tmp>/secret.md
+		"link.md",             // symlinked file
+		"linkdir/secret.md",   // symlinked directory
+		"linkdir/secret",      // ...as a concept id
+	} {
+		got, err := ResolveConceptPath(cfg, ref)
+		if err == nil {
+			t.Errorf("%s resolved to %q outside the bundle", ref, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "outside the wiki") {
+			t.Errorf("%s: err = %v, want an outside-the-wiki refusal", ref, err)
+		}
+	}
+}

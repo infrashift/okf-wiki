@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -506,5 +508,65 @@ Links to [Bulk 0](/bulk00--00.md) and [Nowhere](/gone-%d.md).
 				t.Errorf("%s returned %d bytes without announcing a cap", name, len(out))
 			}
 		})
+	}
+}
+
+// TestMCPRefsCannotLeaveTheBundle: a ref is supplied by the client unvetted.
+// It used to be joined to the bundle root with no containment check, so
+// okfw_read returned /etc/hostname and okfw_update set_body rewrote a markdown
+// file anywhere on disk.
+func TestMCPRefsCannotLeaveTheBundle(t *testing.T) {
+	s, _ := mcpTestServer(t)
+	outside := filepath.Join(t.TempDir(), "victim.md")
+	const original = "---\ntype: \"note\"\n---\n\noriginal\n"
+	if err := os.WriteFile(outside, []byte(original), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, ref := range []string{outside, "../../../../../../" + strings.TrimPrefix(outside, "/")} {
+		if out, isErr := callTool(t, s, "read", fmt.Sprintf(`{"ref":%q}`, ref)); !isErr {
+			t.Errorf("read %s succeeded: %s", ref, out)
+		}
+		if out, isErr := callTool(t, s, "update",
+			fmt.Sprintf(`{"ref":%q,"action":"set_body","value":"PWNED"}`, ref)); !isErr {
+			t.Errorf("update %s succeeded: %s", ref, out)
+		}
+	}
+	if got, _ := os.ReadFile(outside); string(got) != original {
+		t.Errorf("file outside the bundle was rewritten:\n%s", got)
+	}
+}
+
+// TestMCPReadAcceptsAnOKFConceptID: the spec names a concept by its path minus
+// ".md", and that spelling used to come back "file not found".
+func TestMCPReadAcceptsAnOKFConceptID(t *testing.T) {
+	s, _ := mcpTestServer(t)
+	text, isErr := callTool(t, s, "create", `{"title":"Income Statement","dir":"metrics"}`)
+	if isErr {
+		t.Fatalf("create: %s", text)
+	}
+	var created struct{ Path string }
+	if err := json.Unmarshal([]byte(text), &created); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.TrimSuffix(created.Path, ".md")
+	if out, isErr := callTool(t, s, "read", fmt.Sprintf(`{"ref":%q}`, id)); isErr || !strings.Contains(out, "Income Statement") {
+		t.Errorf("read %s: %s", id, out)
+	}
+}
+
+// TestMCPSearchSurvivesBadPaging: a negative offset sliced out of range and
+// the panic killed the stdio server, so every later call hung.
+func TestMCPSearchSurvivesBadPaging(t *testing.T) {
+	s, _ := mcpTestServer(t)
+	if _, isErr := callTool(t, s, "create", `{"title":"Paged"}`); isErr {
+		t.Fatal("create failed")
+	}
+	for _, args := range []string{`{"offset":-1}`, `{"limit":-5,"offset":-100}`, `{"limit":100000}`} {
+		if out, isErr := callTool(t, s, "search", args); isErr || !strings.Contains(out, "Paged") {
+			t.Errorf("search %s: %s", args, out)
+		}
+	}
+	if resp := s.handleLine(`{"jsonrpc":"2.0","id":9,"method":"ping"}`); resp == nil || resp.Error != nil {
+		t.Errorf("server unresponsive after bad paging: %+v", resp)
 	}
 }

@@ -175,6 +175,9 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	})
 
 	total := len(all)
+	if opts.Offset < 0 {
+		opts.Offset = 0
+	}
 	if opts.Offset >= total {
 		return nil, total, nil
 	}
