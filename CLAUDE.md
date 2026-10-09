@@ -93,8 +93,14 @@ it, and that is the mistake to avoid repeating:
   `[^id]` body footnotes — keyed, not positional, so reordering cannot silently
   misattribute a claim.
 
-Attested Computation (§10) is deliberately out of scope: the spec still defers
-its receipt/verdict wire formats, attester ABI, and sandboxing.
+Attested Computation (§10) is deliberately not *implemented* — the spec still
+defers its receipt/verdict wire formats, attester ABI, and sandboxing (§12) — but
+its keys (`runtime`, `parameters`, `computation`, `executor`, `attester`) are
+declared in the schema so okfw can hold such a concept; a closed schema that
+rejected them left no workaround, since `x:` cannot carry spec-defined keys.
+`type: Attested Computation` requires `runtime` (§10.2), enforced in
+`ValidateBusinessRules` because a CUE comprehension on the abstract `type` breaks
+the schema-compiles check.
 
 **Two deliberate divergences from OKF, both load-bearing — do not "fix" them
 toward the spec.** okfw requires six fields (`id`, `title`, `type`, `tags`,

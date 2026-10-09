@@ -98,6 +98,9 @@ type Concept struct {
 	Generated *Generated   `yaml:"generated,omitempty"`
 	Verified  VerifiedList `yaml:"verified,omitempty"`
 
+	// OKF Attested Computation (section 10); the other keys pass through.
+	Runtime string `yaml:"runtime,omitempty"`
+
 	// OKF provenance
 	Sources     []Source     `yaml:"sources,omitempty"`
 	UsageWindow *UsageWindow `yaml:"usage_window,omitempty"`
@@ -299,6 +302,11 @@ func ExtractBody(content []byte) string {
 // production or test — so none of them ran. They are now part of
 // ParseAndValidate, which every validation path goes through.
 func ValidateBusinessRules(z *Concept) error {
+	// OKF section 10.2: runtime is "REQUIRED for this type". A CUE comprehension
+	// on type cannot be checked while the schema's type is still abstract.
+	if z.Type == "Attested Computation" && strings.TrimSpace(z.Runtime) == "" {
+		return fmt.Errorf("an Attested Computation requires runtime (OKF section 10.2)")
+	}
 	for i, s := range z.Sources {
 		if strings.TrimSpace(s.Resource) == "" {
 			return fmt.Errorf("sources[%d]: resource is required within an entry", i)

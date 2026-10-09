@@ -59,13 +59,29 @@
 }
 
 #Source: {
-	resource:      string & !="" // a path/URL, or a scope descriptor
-	id?:           string & !="" // join key for [^id] body footnotes
-	title?:        string & !=""
-	author?:       #Actor
-	usage_count?:  int & >=0
+	resource:       string & !="" // a path/URL, or a scope descriptor
+	id?:            string & !="" // join key for [^id] body footnotes
+	title?:         string & !=""
+	author?:        #Actor
+	usage_count?:   int & >=0
 	last_modified?: #DateTime
-	usage_window?: #UsageWindow // overrides the concept-level window
+	usage_window?:  #UsageWindow // overrides the concept-level window
+}
+
+// Attested Computation (OKF section 10.2)
+#Parameter: {
+	name:      string & !=""
+	type:      string & !=""
+	required?: bool
+}
+
+#Executor: {
+	resource?: string & !=""
+	receipt?: [...(string & !="")]
+}
+
+#Attester: {
+	resource?: string & !=""
 }
 
 #Concept: {
@@ -83,11 +99,22 @@
 
 	// --- OKF trust (section 5.2) ---
 	generated?: #Generated
-	verified?:  #Verification | [...#Verification]
+	verified?: #Verification | [...#Verification]
 
 	// --- OKF provenance (section 5.1) ---
 	sources?: [...#Source]
 	usage_window?: #UsageWindow
+
+	// --- OKF Attested Computation (section 10) ---
+	// okfw does not execute or attest anything; these are declared so a bundle
+	// can hold an Attested Computation concept at all. They are spec-defined
+	// top-level keys, so the closed schema rejected them, and the x: escape
+	// hatch could not help.
+	runtime?: string & !=""
+	parameters?: [...#Parameter]
+	computation?: string & !="" // a path (section 6.2); absent means the body fence
+	executor?:    #Executor
+	attester?:    #Attester // runtime is required for this type: see ValidateBusinessRules
 
 	// --- okfw extensions ---
 	id:        #ConceptID // okfw-required; OKF derives concept identity from the file path
@@ -96,7 +123,7 @@
 	parent?:   #ConceptID
 	created:   #DateTime
 	timestamp: #DateTime // mirrors generated.at; see TouchTimestamp
-	category?: string   // legacy (untethered/tethered), tolerated but ignored
+	category?: string    // legacy (untethered/tethered), tolerated but ignored
 
 	// The one open struct in an otherwise closed schema: user-defined metadata
 	// passes through untouched. This is what makes a closed #Concept liveable —

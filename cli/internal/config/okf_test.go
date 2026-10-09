@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -390,5 +391,37 @@ func TestConceptKey(t *testing.T) {
 	}
 	if got := ConceptKey(&Concept{}, "dir/x.MD"); got != "dir/x" {
 		t.Errorf("without an id: %q", got)
+	}
+}
+
+// --- Attested Computation (OKF section 10) ---
+
+// The closed schema rejected every section 10 key, so okfw could not hold an
+// Attested Computation concept at all; x: cannot carry spec-defined keys.
+func TestAttestedComputationKeysValidate(t *testing.T) {
+	content, err := os.ReadFile("../../testdata/valid_concept_attested.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	z, err := ParseAndValidate(content)
+	if err != nil {
+		t.Fatalf("the spec's own example does not validate: %v", err)
+	}
+	if z.Runtime != "bigquery" {
+		t.Errorf("runtime = %q", z.Runtime)
+	}
+
+	withoutRuntime := strings.Replace(string(content), "runtime: bigquery\n", "", 1)
+	if _, err := ParseAndValidate([]byte(withoutRuntime)); err == nil || !strings.Contains(err.Error(), "requires runtime") {
+		t.Errorf("an Attested Computation without runtime: err = %v", err)
+	}
+	for name, bad := range map[string]string{
+		"parameter without type": "parameters:\n  - { name: year }\n",
+		"unknown executor key":   "executor:\n  resource: x.md\n  shell: true\n",
+		"receipt not a list":     "executor:\n  receipt: job_id\n",
+	} {
+		if _, err := ParseAndValidate(concept(bad)); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
 	}
 }
