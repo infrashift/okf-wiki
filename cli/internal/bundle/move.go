@@ -232,16 +232,19 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 	//    targets from its new directory.
 	body := config.ExtractBody(content)
 	fixedBody := graph.RewriteLinks(body, func(href string) string {
-		if strings.HasPrefix(href, "/") {
-			return "" // bundle-absolute links are unaffected by a move
-		}
 		target := graph.NormalizeTarget(href, oldDir)
 		if target == "" {
 			return ""
 		}
+		// A link to itself follows the concept, whatever its form. Step 2
+		// skips the moved file, so a bundle-absolute self-link used to be left
+		// pointing at the old path.
 		if target == oldRel {
 			res.SelfLink = true
 			return retarget(href, newDir, newRel)
+		}
+		if strings.HasPrefix(href, "/") {
+			return "" // bundle-absolute links to other concepts survive a move
 		}
 		return retarget(href, newDir, target)
 	})

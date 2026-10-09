@@ -445,3 +445,53 @@ func TestInboundLinksIgnoresSelfAndExternal(t *testing.T) {
 		t.Errorf("InboundLinks = %v, want just the other concept", got)
 	}
 }
+
+// A bundle-absolute self-link must follow the concept too. Step 1 skipped every
+// "/"-prefixed link and step 2 skips the moved file, so it was left pointing at
+// the old path and the move reported self_link: false.
+func TestMoveConceptRetargetsAbsoluteSelfLink(t *testing.T) {
+	cfg, root := testCfg(t)
+	p := concept(t, cfg, "selfy--0001.md", "selfy", "Back to [top](/selfy--0001.md#top).\n")
+	dst := filepath.Join(root, "arch", "selfy--0001.md")
+	res, err := MoveConcept(cfg, p, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.SelfLink {
+		t.Error("SelfLink = false")
+	}
+	if got := bodyOf(t, dst); !strings.Contains(got, "(/arch/selfy--0001.md#top)") {
+		t.Errorf("absolute self-link not retargeted: %q", got)
+	}
+}
+
+// Inbound links in every form the grammar allows are repaired, and link-shaped
+// text inside code is not touched.
+func TestMoveConceptRepairsEveryLinkFormAndLeavesCodeAlone(t *testing.T) {
+	cfg, root := testCfg(t)
+	target := concept(t, cfg, "notes/target--0001.md", "target", "# target\n")
+	body := "Titled [T](/notes/target--0001.md \"Target\").\n" +
+		"Angled [T](<./target--0001.md>).\n" +
+		"Encoded [T](/notes/target%2D%2D0001.md).\n" +
+		"Ref [T][t].\n\n[t]: ./target--0001.md\n\n" +
+		"```md\nExample: [T](/notes/target--0001.md)\n```\n" +
+		"Inline `[T](./target--0001.md)` too.\n"
+	linker := concept(t, cfg, "notes/linker--0002.md", "linker", body)
+
+	if _, err := MoveConcept(cfg, target, filepath.Join(root, "archive", "target--0001.md")); err != nil {
+		t.Fatal(err)
+	}
+	got := bodyOf(t, linker)
+	for _, want := range []string{
+		"[T](/archive/target--0001.md \"Target\")",
+		"[T](<../archive/target--0001.md>)",
+		"[T](/archive/target--0001.md)",
+		"[t]: ../archive/target--0001.md",
+		"Example: [T](/notes/target--0001.md)",
+		"`[T](./target--0001.md)`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}

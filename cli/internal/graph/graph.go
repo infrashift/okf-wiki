@@ -2,8 +2,8 @@ package graph
 
 import (
 	"fmt"
+	"net/url"
 	"path"
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -448,22 +448,15 @@ func GenerateMermaid(nodes []*Node, edges []Edge) string {
 
 // --- Vanilla markdown link helpers (OKF) ---
 
-// mdLinkPattern matches markdown links whose target ends in .md, optionally with
-// a #fragment. Capture group 1 is the bare target path (without any fragment).
-var mdLinkPattern = regexp.MustCompile(`\[[^\]]*\]\(\s*([^)>\s#]+\.md)(?:#[^)\s]*)?\s*\)`)
-
-// ExtractLinkTargets returns the deduplicated href targets of internal markdown
-// links in body (in order of first appearance). External links (with a scheme)
-// are excluded.
+// ExtractLinkTargets returns the deduplicated destinations of internal markdown
+// links in body, in order of first appearance and as written (still
+// percent-encoded, fragment removed). External links are excluded. See
+// linkDests for what counts as a link.
 func ExtractLinkTargets(body string) []string {
-	matches := mdLinkPattern.FindAllStringSubmatch(body, -1)
 	var out []string
 	seen := make(map[string]bool)
-	for _, m := range matches {
-		href := m[1]
-		if strings.Contains(href, "://") {
-			continue
-		}
+	for _, d := range linkDests(body) {
+		href := body[d.start:d.end]
 		if !seen[href] {
 			seen[href] = true
 			out = append(out, href)
@@ -473,7 +466,7 @@ func ExtractLinkTargets(body string) []string {
 }
 
 // NormalizeTarget converts a markdown href into a clean bundle-relative path
-// (forward slashes, no leading slash). Relative hrefs resolve against fromDir,
+// (forward slashes, no leading slash, percent-decoded). Relative hrefs resolve against fromDir,
 // the linking file's bundle-relative directory. Returns "" for external links.
 func NormalizeTarget(href, fromDir string) string {
 	if strings.Contains(href, "://") {
@@ -486,50 +479,68 @@ func NormalizeTarget(href, fromDir string) string {
 	if href == "" {
 		return ""
 	}
+	if u, err := url.PathUnescape(href); err == nil {
+		href = u
+	}
 	var p string
 	if strings.HasPrefix(href, "/") {
 		p = path.Clean(strings.TrimPrefix(href, "/"))
 	} else {
 		p = path.Clean(path.Join(fromDir, href))
 	}
+	// A link that climbs out of the bundle names nothing in it, and resolving
+	// it anyway made readers open files outside the bundle.
+	if p == ".." || strings.HasPrefix(p, "../") {
+		return ""
+	}
 	return strings.TrimPrefix(p, "/")
 }
 
-// RewriteLinks applies rewrite to the target of every internal markdown link in
-// body. rewrite receives the raw href and returns a replacement href; returning
-// "" or the same value leaves the link unchanged.
+// RewriteLinks applies rewrite to the destination of every internal markdown
+// link in body. rewrite receives the destination as written (fragment removed)
+// and returns a replacement path; returning "" or the same value leaves the
+// link unchanged. The fragment, any title and the link text are kept.
 //
-// The replacement is spliced at the capture group's own offsets rather than by
+// The replacement is spliced at the destination's own offsets rather than by
 // substring substitution: when a link's text equals its target —
 // "[/dir/a.md](/dir/a.md)", which is exactly what the plugin's link-insert
 // keymap produces — replacing the first occurrence of the href rewrote the
 // visible text and left the actual target untouched.
+//
+// A replacement containing characters that end a bare destination (spaces,
+// parentheses, angle brackets) is percent-encoded, unless the original was
+// written in angle brackets, where spaces are legal.
 func RewriteLinks(body string, rewrite func(href string) string) string {
-	matches := mdLinkPattern.FindAllStringSubmatchIndex(body, -1)
-	if len(matches) == 0 {
+	dests := linkDests(body)
+	if len(dests) == 0 {
 		return body
 	}
-
 	var b strings.Builder
 	last := 0
-	for _, m := range matches {
-		// m[2]:m[3] bounds capture group 1, the href.
-		start, end := m[2], m[3]
-		if start < 0 {
-			continue
-		}
-		href := body[start:end]
+	for _, d := range dests {
+		href := body[d.start:d.end]
 		nh := rewrite(href)
 		if nh == "" || nh == href {
 			continue
 		}
-		b.WriteString(body[last:start])
+		if d.angled {
+			nh = strings.NewReplacer("<", "%3C", ">", "%3E", "\n", "%0A").Replace(nh)
+		} else {
+			nh = encodeDest(nh)
+		}
+		b.WriteString(body[last:d.start])
 		b.WriteString(nh)
-		last = end
+		last = d.end
 	}
 	if last == 0 {
 		return body
 	}
 	b.WriteString(body[last:])
 	return b.String()
+}
+
+// encodeDest percent-encodes the characters that would end or break a bare
+// link destination.
+func encodeDest(s string) string {
+	return strings.NewReplacer(" ", "%20", "\t", "%09", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(s)
 }
