@@ -288,6 +288,17 @@ link_picker({opts})     Open picker for linking.
                         opts.include_title: use the concept title as the
                         link text
 
+                                                          *okfw.follow_link()*
+follow_link()           Open the concept named by the link under the cursor;
+                        the ftplugin maps it to gf in concept buffers. Reads
+                        the [text](dest) link the cursor is on, or else the
+                        path under it, so it also follows a path-valued
+                        frontmatter field such as `resource: /tables/x.md`.
+                        A path starting with / resolves against the wiki root,
+                        any other against the current file's directory. A
+                        #fragment is ignored, a URL is reported rather than
+                        opened, and a missing target is reported.
+
 Backlinks ~
                                                         *okfw.get_backlinks()*
 get_backlinks({id}, {callback})

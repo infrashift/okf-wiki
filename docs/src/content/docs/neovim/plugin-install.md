@@ -484,6 +484,24 @@ require("okfw").link_picker()  -- Opens picker, <CR> inserts [path](/path.md)
 require("okfw").link_picker({ include_title = true })  -- <CR> inserts [title](/path.md)
 ```
 
+#### `follow_link()`
+
+Open the concept named by the link under the cursor. This is what `gf` invokes
+in a concept buffer; call it yourself to bind it to another key.
+
+It reads the markdown link (`[text](dest)`) the cursor is on, or failing that
+the path under the cursor, so it also follows a path-valued frontmatter field
+such as `resource: "/tables/orders.md"` or a `sources[].resource`. A path
+starting with `/` resolves against the wiki root, any other against the current
+file's directory. A `#fragment` is ignored, a URL is reported rather than
+opened, and a target that does not exist is reported.
+
+```lua
+vim.keymap.set("n", "<CR>", function()
+    require("okfw").follow_link()
+end, { buffer = true, desc = "Follow okfw link" })
+```
+
 ### `get_tags(callback)`
 
 Get all unique tags used across the wiki's concepts (async).

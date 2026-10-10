@@ -169,13 +169,14 @@ end
 -- hand-listed `type(okfw.x) == "function"` checks, which could not notice a
 -- function the docs promise but the module dropped, or one added and never
 -- listed. Read from the sources users copy from: the help file, the site, the
--- README, the :Okfw* commands and the plugin's own string references
--- (v:lua.require'okfw'.omnifunc). A name followed by "(" must be a function;
+-- README, the :Okfw* commands, the ftplugin keymaps in after/ and the plugin's
+-- own string references (v:lua.require'okfw'.omnifunc). A name followed by "(" must be a function;
 -- a bare field (require("okfw").templates) must merely exist.
 log("")
 log("Test 6: documented API exists")
 do
     local sources = { repo_root .. "/doc/okfw.txt", repo_root .. "/plugin/okfw.lua", repo_root .. "/README.md" }
+    vim.list_extend(sources, vim.fn.globpath(repo_root .. "/after", "**/*.lua", false, true))
     vim.list_extend(sources, vim.fn.globpath(repo_root .. "/docs/src/content/docs", "**/*.md", false, true))
     vim.list_extend(sources, vim.fn.globpath(repo_root .. "/lua", "**/*.lua", false, true))
     local called, fields = {}, {}
@@ -508,6 +509,14 @@ do
     vim.api.nvim_win_set_cursor(0, { 3, 7 })
     okfw.follow_link()
     assert_eq(vim.fn.expand("%:t"), "follow-b--00000000.md", "follow_link navigated to target")
+
+    -- A path-valued frontmatter field is a link too (OKF section 6.2), and gf
+    -- follows it: with no [text](dest) under the cursor, the path under it.
+    vim.fn.writefile({ "---", 'resource: "./follow-b--00000000.md"', "---", "# C" }, dir .. "/follow-c--00000000.md")
+    vim.cmd("edit " .. dir .. "/follow-c--00000000.md")
+    vim.api.nvim_win_set_cursor(0, { 2, 14 })
+    okfw.follow_link()
+    assert_eq(vim.fn.expand("%:t"), "follow-b--00000000.md", "follow_link follows a frontmatter path")
 end
 
 -- Test 28: CLI validate --okf passes on a conformant bundle
