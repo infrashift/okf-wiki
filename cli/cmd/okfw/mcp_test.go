@@ -269,6 +269,37 @@ func TestMCPUpdateKeepsACRLFConceptCRLF(t *testing.T) {
 	}
 }
 
+// TestMCPCitationsMustResolve: an agent appending a [^label] claim before the
+// source exists is refused with the fix, the fix lets the same append through,
+// and add_source will not create a second entry under an id already taken.
+func TestMCPCitationsMustResolve(t *testing.T) {
+	s, _ := mcpTestServer(t)
+	text, isErr := callTool(t, s, "create", `{"title":"GA4 Export","body":"The export."}`)
+	if isErr {
+		t.Fatalf("create failed: %s", text)
+	}
+	var created struct{ Path string }
+	_ = json.Unmarshal([]byte(text), &created)
+	update := func(action, value string) (string, bool) {
+		return callTool(t, s, "update", fmt.Sprintf(`{"ref":%q,"action":%q,"value":%q}`, created.Path, action, value))
+	}
+
+	claim := "Sharded daily.[^ga4-schema]"
+	if text, isErr := update("append", claim); !isErr || !strings.Contains(text, "add-source") {
+		t.Fatalf("append citing nothing: isErr=%v %s; want a refusal naming the fix", isErr, text)
+	}
+	source := `{"resource":"https://example.com/schema","id":"ga4-schema"}`
+	if text, isErr := update("add_source", source); isErr {
+		t.Fatalf("add_source: %s", text)
+	}
+	if text, isErr := update("append", claim); isErr {
+		t.Fatalf("append after add_source: %s", text)
+	}
+	if text, isErr := update("add_source", source); !isErr || !strings.Contains(text, "already has an entry") {
+		t.Errorf("second add_source with the same id: isErr=%v %s", isErr, text)
+	}
+}
+
 // TestMCPSearchFiltersByKindAndType: kind and type are the agent's levers for
 // narrowing a mixed bundle, and each hit must say what it is so a mixed result
 // set stays legible after the fact.

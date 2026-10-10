@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"okfw/cli/internal/graph"
 )
 
 // Trust tiers derived from `verified` (OKF v0.2 section 5.3).
@@ -304,10 +306,24 @@ func ValidateBusinessRules(z *Concept) error {
 	if z.Type == "Attested Computation" && strings.TrimSpace(z.Runtime) == "" {
 		return fmt.Errorf("an Attested Computation requires runtime (OKF section 10.2)")
 	}
+	// sources[].id is the join key for [^id] footnotes (OKF section 5.1). Two
+	// entries sharing one leave a citation resolvable to either, which is the
+	// silent misattribution keyed labels exist to prevent. Compared the way
+	// markdown compares footnote labels, case-insensitively: [^GA4] and [^ga4]
+	// are one footnote, so ids differing only in case cannot be cited apart.
+	firstWithID := make(map[string]int)
 	for i, s := range z.Sources {
 		if strings.TrimSpace(s.Resource) == "" {
 			return fmt.Errorf("sources[%d]: resource is required within an entry", i)
 		}
+		if s.ID == "" {
+			continue
+		}
+		if j, dup := firstWithID[graph.FootnoteKey(s.ID)]; dup {
+			return fmt.Errorf("sources[%d] and sources[%d] share id %q; a [^%s] footnote cannot tell them apart",
+				j, i, s.ID, s.ID)
+		}
+		firstWithID[graph.FootnoteKey(s.ID)] = i
 	}
 	// generated.at mirrors timestamp; a disagreement means one was hand-edited
 	// and consumers would disagree about when the content last changed.
@@ -322,6 +338,40 @@ func ValidateBusinessRules(z *Concept) error {
 		}
 	}
 	return nil
+}
+
+// ValidateCitations rejects a footnote reference that resolves to nothing: a
+// [^label] in body matching neither a sources[].id nor a [^label]: definition.
+// Such a reference attributes its claim to no source and renders as literal
+// text. A reference with a definition but no source passes, because it cannot
+// be told apart from an ordinary footnote.
+func ValidateCitations(z *Concept, body string) error {
+	refs, defs := graph.Footnotes(body)
+	if len(refs) == 0 {
+		return nil
+	}
+	known := make(map[string]bool)
+	for _, d := range defs {
+		known[graph.FootnoteKey(d)] = true
+	}
+	for _, s := range z.Sources {
+		if s.ID != "" {
+			known[graph.FootnoteKey(s.ID)] = true
+		}
+	}
+	var missing []string
+	for _, r := range refs {
+		if !known[graph.FootnoteKey(r)] {
+			missing = append(missing, "[^"+r+"]")
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("footnote %s cites nothing: no sources[].id or definition matches it "+
+		"(add the source with `okfw add-source --id <label>` or the update tool's add_source action, "+
+		"or define the footnote)",
+		strings.Join(missing, ", "))
 }
 
 // ParseAndValidate extracts frontmatter from content, validates it against the
@@ -344,6 +394,9 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 	}
 
 	if err := ValidateBusinessRules(&z); err != nil {
+		return nil, err
+	}
+	if err := ValidateCitations(&z, ExtractBody(content)); err != nil {
 		return nil, err
 	}
 

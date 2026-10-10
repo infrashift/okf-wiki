@@ -288,6 +288,63 @@ func TestSourceRequiresResource(t *testing.T) {
 	}
 }
 
+// TestSourceIDsMustBeUnique: sources[].id is the join key for [^id] footnotes,
+// so two entries sharing one make a citation resolvable to either. Markdown
+// matches footnote labels case-insensitively, so case does not separate them.
+func TestSourceIDsMustBeUnique(t *testing.T) {
+	for _, second := range []string{"ga4", "GA4"} {
+		_, err := ParseAndValidate(concept("sources:\n" +
+			"  - resource: \"https://a.example\"\n    id: \"ga4\"\n" +
+			"  - resource: \"https://b.example\"\n    id: \"" + second + "\"\n"))
+		if err == nil || !strings.Contains(err.Error(), "share id") {
+			t.Errorf("ids ga4 and %s: err = %v, want a shared-id rejection", second, err)
+		}
+	}
+	// Entries without an id do not collide with one another.
+	if _, err := ParseAndValidate(concept("sources:\n" +
+		"  - resource: \"https://a.example\"\n  - resource: \"https://b.example\"\n")); err != nil {
+		t.Errorf("two id-less sources: %v", err)
+	}
+}
+
+// citing returns a valid concept with the given sources block and body.
+func citing(sources, body string) []byte {
+	c := string(concept(sources))
+	return []byte(c[:strings.Index(c, "---\n\n")+5] + body)
+}
+
+// TestFootnoteMustResolve: a [^label] matching neither a source nor a
+// definition attributes its claim to nothing.
+func TestFootnoteMustResolve(t *testing.T) {
+	source := "sources:\n  - resource: \"https://example.com/schema\"\n    id: \"ga4-schema\"\n"
+	for _, tc := range []struct {
+		name, sources, body string
+		ok                  bool
+	}{
+		{"cites a source", source, "Sharded daily.[^ga4-schema]\n", true},
+		{"cites a source, other case", source, "Sharded daily.[^GA4-Schema]\n", true},
+		{"ordinary footnote", "", "A claim.[^1]\n\n[^1]: An aside.\n", true},
+		{"source and definition", source, "Sharded.[^ga4-schema]\n\n[^ga4-schema]: GA4 schema\n", true},
+		{"example in code", "", "Use `[^a-z]` or:\n\n```\n[^x]\n```\n", true},
+		{"cites nothing", "", "Sharded daily.[^ga4-schema]\n", false},
+		{"source renamed away", source, "Sharded daily.[^ga4]\n", false},
+		{"orphaned definition elsewhere", "", "A.[^a] B.[^b]\n\n[^a]: defined\n", false},
+	} {
+		_, err := ParseAndValidate(citing(tc.sources, tc.body))
+		if tc.ok && err != nil {
+			t.Errorf("%s: rejected: %v", tc.name, err)
+		}
+		if !tc.ok && (err == nil || !strings.Contains(err.Error(), "cites nothing")) {
+			t.Errorf("%s: err = %v, want a cites-nothing rejection", tc.name, err)
+		}
+	}
+	// The error names every unresolved label, and only those.
+	_, err := ParseAndValidate(citing("", "A.[^a] B.[^b] C.[^c]\n\n[^b]: defined\n"))
+	if err == nil || !strings.Contains(err.Error(), "[^a], [^c]") || strings.Contains(err.Error(), "[^b]") {
+		t.Errorf("err = %v, want it to name [^a] and [^c] only", err)
+	}
+}
+
 // --- the x: escape hatch ---
 
 // The schema is closed, so this is the only way to attach custom metadata.

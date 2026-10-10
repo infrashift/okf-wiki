@@ -653,6 +653,13 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	if err != nil {
 		return errResult(err)
 	}
+	// Against the content as read, once, for every action. The per-action
+	// guards compare frontmatter edits, and append/set_body hand them content
+	// whose body has already changed, so a body that breaks validation (a
+	// [^label] citing nothing) was compared against itself and let through.
+	if err := bundle.GuardMutation(content, newContent); err != nil {
+		return errResult(err)
+	}
 
 	if err := os.WriteFile(path, newContent, 0644); err != nil {
 		return errResult(err)

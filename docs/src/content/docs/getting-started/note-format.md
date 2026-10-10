@@ -142,7 +142,7 @@ The `events_` table is sharded daily as `events_YYYYMMDD`.[^ga4-schema]
 [^ga4-schema]: GA4 BigQuery Export schema
 ```
 
-Labels are keyed rather than positional because reordering the `sources` list would otherwise silently misattribute every claim.
+Labels are keyed rather than positional because reordering the `sources` list would otherwise silently misattribute every claim. For the same reason `okfw validate` rejects two sources sharing an `id` (markdown matches footnote labels case-insensitively, so `GA4` and `ga4` collide), and a `[^label]` that matches neither a `sources[].id` nor a `[^label]:` definition, since that claim cites nothing. An ordinary footnote with its own definition is fine.
 
 ## Custom fields
 

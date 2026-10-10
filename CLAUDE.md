@@ -91,7 +91,13 @@ it, and that is the mistake to avoid repeating:
 - **Provenance** (§5.1): `sources[]` (`resource` required in-entry) plus a sibling
   `usage_window`. Writer: `add-source`. `sources[].id` is the join key for
   `[^id]` body footnotes — keyed, not positional, so reordering cannot silently
-  misattribute a claim.
+  misattribute a claim. Validation rejects two entries sharing an id
+  (case-insensitively, as markdown matches labels) and a `[^label]` that
+  resolves to neither a source nor a definition (`graph.Footnotes` scans, so
+  code is skipped). That is the one rule that reads the body, so the MCP
+  `update` tool guards every action against the content as read: `append`
+  handed the frontmatter guard an already-appended body, which it compared
+  against itself.
 
 Attested Computation (§10) is deliberately not *implemented* — the spec still
 defers its receipt/verdict wire formats, attester ABI, and sandboxing (§12) — but

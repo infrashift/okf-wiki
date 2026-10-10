@@ -21,6 +21,7 @@ import (
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
+	"okfw/cli/internal/graph"
 	"okfw/cli/internal/okfwskills"
 )
 
@@ -389,6 +390,22 @@ type sourceEntry struct {
 // addSourceMutator appends a provenance source.
 func addSourceMutator(e sourceEntry) func(*yaml.Node) error {
 	return func(m *yaml.Node) error {
+		// Refused here as well as by validation: the write guard lets edits
+		// through to an already-invalid concept, and a second entry with this
+		// id would make every [^id] citation ambiguous.
+		if e.id != "" {
+			if seq := bundle.MapGet(m, "sources"); seq != nil && seq.Kind == yaml.SequenceNode {
+				for _, have := range seq.Content {
+					if have.Kind != yaml.MappingNode {
+						continue
+					}
+					if id := bundle.MapGet(have, "id"); id != nil && graph.FootnoteKey(id.Value) == graph.FootnoteKey(e.id) {
+						return fmt.Errorf("sources already has an entry with id %q; a [^%s] footnote could not tell them apart",
+							id.Value, e.id)
+					}
+				}
+			}
+		}
 		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		bundle.MapSet(entry, "resource", bundle.QuotedScalar(e.resource))
 		for _, kv := range []struct{ k, v string }{

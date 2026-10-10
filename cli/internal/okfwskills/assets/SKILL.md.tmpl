@@ -101,6 +101,9 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
    the recorded decision"), or attach it to a `[^id]` footnote keyed to a
    `sources[]` entry. A concept that mixes the two silently turns a reader's
    opinion into the project's official reasoning the next time anyone asks.
+   Add the source (`okfw add-source --id <label>` / `okfw_update` action
+   `add_source`) before writing the claim that cites it: a `[^label]` matching
+   no source and no definition is refused.
 9. **Reorganize with `okfw move`, not `mv`.** It keeps the concept's `id`,
    retargets every inbound link, and fixes the moved concept's own relative
    links; moving the file yourself silently breaks both. `okfw delete`

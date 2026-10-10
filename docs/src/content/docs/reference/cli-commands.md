@@ -152,7 +152,13 @@ okfw validate 019f0494                 # by id
 ```
 
 Applies the full CUE `#Concept` schema: the six required fields, the declared
-value formats, and no undeclared top-level keys.
+value formats, and no undeclared top-level keys. It also checks citations: no
+two `sources` entries may share an `id` (compared case-insensitively, as
+markdown compares footnote labels), and every `[^label]` footnote reference in
+the body must match a `sources[].id` or a `[^label]:` definition. A reference
+with a definition but no source is an ordinary footnote and passes. Footnote
+syntax inside code is ignored, so `` `[^a-z]` `` is not a citation; write a
+regex character class in prose as code.
 
 ### Validate every concept in the wiki
 ```bash
@@ -611,7 +617,10 @@ okfw add-source 019f0494 --resource "all queries in project X" \
 
 `--resource` is required, and names either something a consumer can follow or a
 scope descriptor it cannot. `--id` is the join key for `[^id]` body footnotes,
-so a specific claim can cite a specific source.
+so a specific claim can cite a specific source. An `--id` the concept's
+`sources` already uses is refused, in any letter case. Add the source before
+the claim that cites it: an edit that leaves a `[^id]` matching nothing is
+refused.
 
 ### The described asset
 ```bash

@@ -285,6 +285,50 @@ func TestAddSourceCmd(t *testing.T) {
 	}
 }
 
+// TestAddSourceRefusesADuplicatedID: a second entry with an id already in
+// sources makes every [^id] citation ambiguous. The mutator refuses it itself,
+// because the write guard lets any edit through to an already-invalid concept.
+func TestAddSourceRefusesADuplicatedID(t *testing.T) {
+	cfg := bundleAt(t)
+	id := seedConcept(t, cfg)
+	if _, err := runCmd(t, newAddSourceCmd(), id, "--resource", "https://a.example", "--id", "ga4"); err != nil {
+		t.Fatalf("add-source: %v", err)
+	}
+	for _, dup := range []string{"ga4", "GA4"} {
+		if _, err := runCmd(t, newAddSourceCmd(), id, "--resource", "https://b.example", "--id", dup); err == nil ||
+			!strings.Contains(err.Error(), "already has an entry with id") {
+			t.Errorf("--id %s: err = %v, want a refusal", dup, err)
+		}
+	}
+
+	// Break the concept, so the write guard would let anything through.
+	matches, _ := filepath.Glob(filepath.Join(cfg.RootPath, "*--*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 concept, got %v", matches)
+	}
+	content, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	content = append(content, []byte("\nUncited.[^nowhere]\n")...)
+	if _, err := config.ParseAndValidate(content); err == nil {
+		t.Fatal("setup: the concept should now be invalid")
+	}
+	if err := os.WriteFile(matches[0], content, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runCmd(t, newAddSourceCmd(), id, "--resource", "https://b.example", "--id", "ga4"); err == nil {
+		t.Error("a duplicated id was appended to an already-invalid concept")
+	}
+	// The repair the error message suggests still goes through.
+	if _, err := runCmd(t, newAddSourceCmd(), id, "--resource", "https://n.example", "--id", "nowhere"); err != nil {
+		t.Fatalf("add-source --id nowhere: %v", err)
+	}
+	if _, z := readConcept(t, cfg); len(z.Sources) != 2 {
+		t.Errorf("sources = %+v, want ga4 and nowhere", z.Sources)
+	}
+}
+
 func TestAddSourceCmdRequiresResource(t *testing.T) {
 	cfg := bundleAt(t)
 	id := seedConcept(t, cfg)
