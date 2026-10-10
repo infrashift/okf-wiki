@@ -493,7 +493,9 @@ It reads the markdown link (`[text](dest)`) the cursor is on, or failing that
 the path under the cursor, so it also follows a path-valued frontmatter field
 such as `resource: "/tables/orders.md"` or a `sources[].resource`. A path
 starting with `/` resolves against the wiki root, any other against the current
-file's directory. A `#fragment` is ignored, a URL is reported rather than
+file's directory. Frontmatter is the exception: only `./` and `../` paths are
+relative there, so a bare `policies/refunds.md` resolves against the wiki root,
+as the CLI reads it. A `#fragment` is ignored, a URL is reported rather than
 opened, and a target that does not exist is reported.
 
 ```lua

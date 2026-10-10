@@ -80,7 +80,7 @@ func TestFrontmatterPathsAreGraphEdges(t *testing.T) {
 	cfg, _ := testCfg(t)
 	concept(t, cfg, "tables/orders.md", "Orders", "# Orders\n")
 	concept(t, cfg, "notes/derived.md", "Derived", "# Derived\n")
-	concept(t, cfg, "finance/computations/revenue.md", "Revenue", "# Revenue\n")
+	concept(t, cfg, "computations/revenue.md", "Revenue", "# Revenue\n")
 	referrer(t, cfg, "finance/report.md", allFiveRefs)
 
 	g, err := LoadGraph(cfg.RootPath)
@@ -88,19 +88,20 @@ func TestFrontmatterPathsAreGraphEdges(t *testing.T) {
 		t.Fatal(err)
 	}
 	srcKey, _ := ConceptKeyOf(cfg, "finance/report.md")
-	for _, target := range []string{"tables/orders.md", "notes/derived.md", "finance/computations/revenue.md"} {
+	for _, target := range []string{"tables/orders.md", "notes/derived.md", "computations/revenue.md"} {
 		key, _ := ConceptKeyOf(cfg, target)
 		back := g.Backlinks(key)
 		if len(back) != 1 || back[0].ID != srcKey {
 			t.Errorf("backlinks of %s = %v, want the referrer", target, back)
 		}
 	}
-	// executor.resource names a concept that does not exist: dangling, by path.
+	// executor.resource names a concept that does not exist: dangling, by path,
+	// and bare, so from the bundle root.
 	var dangling []string
 	for _, e := range g.Dangling() {
 		dangling = append(dangling, e.To)
 	}
-	if want := []string{"finance/references/skills/run-on-bq"}; !reflect.DeepEqual(dangling, want) {
+	if want := []string{"references/skills/run-on-bq"}; !reflect.DeepEqual(dangling, want) {
 		t.Errorf("dangling = %q, want %q (the URL, scope and .py are not links)", dangling, want)
 	}
 
@@ -119,13 +120,17 @@ func TestMoveRetargetsFrontmatterPaths(t *testing.T) {
 	cfg, _ := testCfg(t)
 	orders := concept(t, cfg, "tables/orders.md", "Orders", "# Orders\n")
 	concept(t, cfg, "notes/derived.md", "Derived", "# Derived\n")
-	concept(t, cfg, "finance/computations/revenue.md", "Revenue", "# Revenue\n")
+	revenue := concept(t, cfg, "computations/revenue.md", "Revenue", "# Revenue\n")
 	src := referrer(t, cfg, "finance/report.md", allFiveRefs)
 	bystander := referrer(t, cfg, "other.md", "resource: \"bigquery://p.d.orders\"\n")
 	before, _ := os.ReadFile(bystander)
 
-	// Inbound: the referrer's bundle-absolute path follows the target.
+	// Inbound: the referrer's bundle-absolute and bare paths follow their
+	// targets, each keeping its form.
 	if _, err := MoveConcept(cfg, orders, filepath.Join(cfg.RootPath, "warehouse", "orders.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := MoveConcept(cfg, revenue, filepath.Join(cfg.RootPath, "finance", "revenue.md")); err != nil {
 		t.Fatal(err)
 	}
 	// Own: moving the referrer keeps its relative paths resolving.
@@ -139,11 +144,11 @@ func TestMoveRetargetsFrontmatterPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"resource":            "/warehouse/orders.md",          // absolute form kept
-		"sources[2].resource": "../../notes/derived.md#method", // relative form, fragment kept
-		"computation":         "../../finance/computations/revenue.md",
-		"executor.resource":   "../../finance/references/skills/run-on-bq.md", // dangling still points at the same place
-		"sources[0].resource": "https://example.com/schema",                   // not paths: untouched
+		"resource":            "/warehouse/orders.md",           // absolute form kept
+		"sources[2].resource": "../../notes/derived.md#method",  // relative form, fragment kept
+		"computation":         "finance/revenue.md",             // bare form kept
+		"executor.resource":   "references/skills/run-on-bq.md", // bare paths survive the referrer's own move
+		"sources[0].resource": "https://example.com/schema",     // not paths: untouched
 		"sources[1].resource": "all queries in project X",
 		"attester.resource":   "references/attesters/sql-equality.py",
 	}
@@ -167,8 +172,31 @@ func TestMoveRetargetsFrontmatterPaths(t *testing.T) {
 	for _, e := range g.Dangling() {
 		dangling = append(dangling, e.To)
 	}
-	if want := []string{"finance/references/skills/run-on-bq"}; !reflect.DeepEqual(dangling, want) {
-		t.Errorf("after both moves dangling = %q, want only the edge that was already dangling", dangling)
+	if want := []string{"references/skills/run-on-bq"}; !reflect.DeepEqual(dangling, want) {
+		t.Errorf("after the moves dangling = %q, want only the edge that was already dangling", dangling)
+	}
+}
+
+// TestMoveNeverLeavesARelativePathBare: a move rewrites frontmatter paths with
+// the closures it uses for body links, where a bare path is relative. In
+// frontmatter a bare path is read from the bundle root, so ../a/x.md seen from
+// a/ must become ./x.md, not x.md, which names a different file.
+func TestMoveNeverLeavesARelativePathBare(t *testing.T) {
+	cfg, _ := testCfg(t)
+	concept(t, cfg, "a/x.md", "X", "# X\n")
+	concept(t, cfg, "x.md", "Decoy", "# Decoy\n")
+	src := referrer(t, cfg, "b/c.md", "resource: \"../a/x.md\"\n")
+
+	moved := filepath.Join(cfg.RootPath, "a", "c.md")
+	if _, err := MoveConcept(cfg, src, moved); err != nil {
+		t.Fatal(err)
+	}
+	z, err := config.ParseFrontmatter(mustRead(t, moved))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.Resource != "./x.md" {
+		t.Errorf("resource = %q, want ./x.md", z.Resource)
 	}
 }
 

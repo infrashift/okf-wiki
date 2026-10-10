@@ -517,6 +517,21 @@ do
     vim.api.nvim_win_set_cursor(0, { 2, 14 })
     okfw.follow_link()
     assert_eq(vim.fn.expand("%:t"), "follow-b--00000000.md", "follow_link follows a frontmatter path")
+
+    -- A bare frontmatter path is read from the bundle root, as the CLI reads
+    -- it, so gf must not open the same-named file beside the concept.
+    local bundle = okfw.bundle_root():gsub("/$", "")
+    local rooted = bundle .. "/follow-e--00000000.md"
+    vim.fn.writefile({ "# E (bundle root)" }, rooted)
+    vim.fn.writefile({ "# E (beside the concept)" }, dir .. "/follow-e--00000000.md")
+    vim.fn.writefile({ "---", 'resource: "follow-e--00000000.md"', "---", "# D" }, dir .. "/follow-d--00000000.md")
+    vim.cmd("edit " .. dir .. "/follow-d--00000000.md")
+    vim.api.nvim_win_set_cursor(0, { 2, 14 })
+    okfw.follow_link()
+    assert_eq(vim.fn.expand("%:p"), vim.fn.fnamemodify(rooted, ":p"),
+        "follow_link reads a bare frontmatter path from the bundle root")
+    vim.cmd("bwipeout")
+    vim.fn.delete(rooted)
 end
 
 -- Test 28: CLI validate --okf passes on a conformant bundle

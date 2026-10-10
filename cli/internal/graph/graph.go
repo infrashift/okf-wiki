@@ -521,11 +521,31 @@ func NormalizeTarget(href, fromDir string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-// NormalizeRef resolves a path-valued frontmatter field (OKF section 6.2) the
-// way NormalizeTarget resolves a body link, and returns "" unless it names a
-// markdown file inside the bundle. The same field may hold a URL, a scope
-// descriptor ("all queries in project X") or a non-concept file such as an
-// attester's .py, and none of those is an edge between concepts.
+// RefLink returns the body-link spelling of a path-valued frontmatter field
+// (OKF section 6.2): a path starting "./" or "../" resolves from the concept's
+// directory, as a body link does, and any other path from the bundle root, so
+// a bare one gains a leading "/". Body links are not read this way; section
+// 6.1 makes a bare body link a standard markdown relative path.
+//
+// Section 6.2 does not say what a bare path is relative to, and okfw first
+// read it from the concept's directory. That left the spec's own Appendix A
+// example (executor.resource: references/skills/run-on-bq.md, written from
+// computations/revenue.md) and 12 of 12 such paths in the upstream acme_retail
+// bundle pointing at nothing. This reading resolves every one of them and
+// §6.2's own ../computations/revenue.md, and is the one proposed in upstream
+// issues #245 and #408.
+func RefLink(value string) string {
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") {
+		return value
+	}
+	return "/" + value
+}
+
+// NormalizeRef resolves a path-valued frontmatter field (OKF section 6.2) by
+// RefLink's rule, and returns "" unless it names a markdown file inside the
+// bundle. The same field may hold a URL, a scope descriptor ("all queries in
+// project X") or a non-concept file such as an attester's .py, and none of
+// those is an edge between concepts.
 func NormalizeRef(value, fromDir string) string {
 	v := strings.TrimSpace(value)
 	if i := strings.IndexByte(v, '#'); i >= 0 {
@@ -534,7 +554,7 @@ func NormalizeRef(value, fromDir string) string {
 	if !isInternalMarkdown(v) {
 		return ""
 	}
-	return NormalizeTarget(v, fromDir)
+	return NormalizeTarget(RefLink(v), fromDir)
 }
 
 // RewriteLinks applies rewrite to the destination of every internal markdown

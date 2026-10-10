@@ -115,7 +115,9 @@ func TestExportRewritesFrontmatterPaths(t *testing.T) {
 		t.Fatalf("export: %v", err)
 	}
 	got := readFile(t, filepath.Join(cfg.RootPath, "ephemeral", "019680f0-7e00-7abc-8def-200000000000.md"))
-	if !strings.Contains(got, `resource: "019680f0-7e00-7abc-8def-100000000000.md"`) {
+	// Exported concepts sit side by side in ephemeral/, and a bare frontmatter
+	// path would be read from the bundle root, so the export spells it ./.
+	if !strings.Contains(got, `resource: "./019680f0-7e00-7abc-8def-100000000000.md"`) {
 		t.Errorf("export left the source pointing at the old path:\n%s", got)
 	}
 }

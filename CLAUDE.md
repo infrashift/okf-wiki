@@ -64,11 +64,18 @@ Links: vanilla markdown links to bundle-relative (`/dir/file.md`) or relative
 (`graph.NormalizeRef`). Every link consumer handles both: the graph, delete's
 inbound report, move at both ends, export and `validate --okf`.
 `Concept.PathRefs` reads the five fields and `bundle.pathRefNodes` rewrites
-them; `TestPathRefFieldsMatchTheRewriter` keeps the two lists in step. A
-relative frontmatter path resolves from the concept's directory, as §6.2's
-`../computations/revenue.md` example requires — chosen deliberately although
-the upstream `acme_retail` reference bundle writes them root-relative without
-a `/` (10 of its 12 then dangle); do not switch bases to match that data.
+them; `TestPathRefFieldsMatchTheRewriter` keeps the two lists in step.
+§6.2 never says what a frontmatter path is relative to, so okfw reads it by
+prefix (`graph.RefLink`): `./` and `../` resolve from the concept's directory,
+and any other path, bare `skills/x.md` included, from the bundle root. That is
+the one reading under which every example agrees: §6.2's
+`../computations/revenue.md`, Appendix A's `references/skills/run-on-bq.md`
+written from `computations/`, and all 12 paths in the upstream `acme_retail`
+bundle. It is the rule proposed upstream (issues #245, #408), and OKF4net
+adopted it. Reading bare paths from the concept's directory, as okfw first
+did, left the spec's own example dangling. Body links keep §6.1's rule, where
+a bare path is relative, so `RewritePathRefs` translates between the two
+spellings: move and export pass it their body-link closures.
 
 **okfw targets OKF v0.2** (`okf_version: "0.2"`, stamped on the bundle-root
 `index.md` only — the sole place the spec permits frontmatter in an index file).

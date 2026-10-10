@@ -46,10 +46,14 @@ func pathRefNodes(m *yaml.Node) []refNode {
 
 // RewritePathRefs applies rewrite to every path-valued frontmatter field that
 // names a concept (graph.NormalizeRef), with the contract of
-// graph.RewriteLinks: rewrite receives the path as written with any #fragment
-// removed, and returns its replacement, or "" (or the same path) to leave it;
-// the fragment is kept. Content is returned unchanged, and not re-encoded,
-// when nothing is rewritten.
+// graph.RewriteLinks: rewrite receives the path as a body link would spell it
+// (graph.RefLink) with any #fragment removed, and returns its replacement, or
+// "" (or the same path) to leave it; the fragment is kept. Callers can
+// therefore pass the closures they use for body links, and the replacement is
+// translated back: a bare path, which rewrite sees as bundle-absolute, is
+// written back bare, and a bare replacement, which in a body link is relative,
+// gains a "./" so it is not read from the bundle root. Content is returned
+// unchanged, and not re-encoded, when nothing is rewritten.
 func RewritePathRefs(content []byte, fromDir string, rewrite func(href string) string) ([]byte, error) {
 	apply := func(value string) (string, bool) {
 		if graph.NormalizeRef(value, fromDir) == "" {
@@ -59,10 +63,20 @@ func RewritePathRefs(content []byte, fromDir string, rewrite func(href string) s
 		if i := strings.IndexByte(value, '#'); i >= 0 {
 			p, frag = value[:i], value[i:]
 		}
-		if v := rewrite(p); v != "" && v != p {
-			return v + frag, true
+		href := graph.RefLink(p)
+		v := rewrite(href)
+		if v == "" || v == href {
+			return "", false
 		}
-		return "", false
+		switch {
+		case strings.HasPrefix(v, "/"):
+			if href != p {
+				v = v[1:]
+			}
+		case graph.RefLink(v) != v:
+			v = "./" + v
+		}
+		return v + frag, true
 	}
 	z, err := config.ParseFrontmatter(content)
 	if err != nil {

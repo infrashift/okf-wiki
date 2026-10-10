@@ -1127,8 +1127,21 @@ M.insert_link = function(entry, use_title)
     vim.api.nvim_win_set_cursor(0, { row, col + #link })
 end
 
+-- Whether the cursor sits inside the buffer's YAML frontmatter.
+local function cursor_in_frontmatter()
+    if vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= "---" then return false end
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    if row == 1 then return false end
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(0, 1, -1, false)) do
+        if l == "---" or l == "..." then return row <= i end
+    end
+    return false
+end
+
 -- Follow the markdown link under the cursor. Absolute ("/...") targets resolve
 -- against the bundle root; relative targets against the current file's directory.
+-- A path-valued frontmatter field follows the CLI's rule (graph.RefLink): only
+-- "./" and "../" are relative there, and a bare path is read from the bundle root.
 M.follow_link = function()
     local line = vim.api.nvim_get_current_line()
     local col = vim.api.nvim_win_get_cursor(0)[2] + 1
@@ -1156,6 +1169,9 @@ M.follow_link = function()
     if href:match("^%a[%w+.-]*://") then
         vim.notify("External link: " .. href, vim.log.levels.INFO)
         return
+    end
+    if not href:match("^%.%.?/") and href:sub(1, 1) ~= "/" and cursor_in_frontmatter() then
+        href = "/" .. href
     end
 
     local target
