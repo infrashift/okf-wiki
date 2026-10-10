@@ -316,29 +316,3 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 	}
 	return res, nil
 }
-
-// ReplaceBody swaps a concept's markdown body, leaving every byte of the
-// frontmatter block — including its line endings — exactly as it was.
-//
-// The body offset is computed rather than rebuilt from the parsed pieces:
-// reassembling "---\n" + yaml + "---\n" would normalise a CRLF file's delimiters
-// to LF, rewriting lines the caller never asked to touch.
-func ReplaceBody(content []byte, newBody string) ([]byte, error) {
-	_, _, rest, err := splitFrontmatter(content)
-	if err != nil {
-		return nil, err
-	}
-	// rest starts at the closing delimiter's line ending; the body follows it,
-	// matching where config.ExtractBody considers the body to begin.
-	bodyStart := len(content) - len(rest)
-	switch {
-	case strings.HasPrefix(string(rest), "\r\n"):
-		bodyStart += 2
-	case strings.HasPrefix(string(rest), "\n"):
-		bodyStart++
-	}
-	out := make([]byte, 0, bodyStart+len(newBody))
-	out = append(out, content[:bodyStart]...)
-	out = append(out, newBody...)
-	return out, nil
-}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -226,6 +227,45 @@ func TestMCPBodyWriting(t *testing.T) {
 	// the rewritten note must still validate
 	if !strings.Contains(text, `type: "note"`) {
 		t.Errorf("frontmatter lost after set_body:\n%s", text)
+	}
+}
+
+// TestMCPUpdateKeepsACRLFConceptCRLF: every update action writes into a file
+// saved on Windows; each used to write its own lines as LF.
+func TestMCPUpdateKeepsACRLFConceptCRLF(t *testing.T) {
+	s, project := mcpTestServer(t)
+	text, isErr := callTool(t, s, "create", `{"title":"Windows Note","body":"Saved on Windows."}`)
+	if isErr {
+		t.Fatalf("create failed: %s", text)
+	}
+	var created struct{ Path string }
+	_ = json.Unmarshal([]byte(text), &created)
+	path := filepath.Join(project, ".okfw", created.Path)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, bytes.ReplaceAll(content, []byte("\n"), []byte("\r\n")), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, upd := range []string{
+		`"action":"append","value":"Appended.\nTwo lines."`,
+		`"action":"set_lifecycle","value":"draft"`,
+		`"action":"add_tags","value":"windows"`,
+		`"action":"set_body","value":"Rewritten.\n\nNew paragraph."`,
+		`"action":"verify","value":"human:tester"`,
+	} {
+		if text, isErr := callTool(t, s, "update", fmt.Sprintf(`{"ref":%q,%s}`, created.Path, upd)); isErr {
+			t.Fatalf("update {%s} failed: %s", upd, text)
+		}
+		got, _ := os.ReadFile(path)
+		if bytes.Count(got, []byte("\n")) != bytes.Count(got, []byte("\r\n")) {
+			t.Fatalf("update {%s} mixed line endings into a CRLF concept:\n%q", upd, got)
+		}
+		if _, err := config.ParseAndValidate(got); err != nil {
+			t.Fatalf("update {%s} left an invalid concept: %v\n%q", upd, err, got)
+		}
 	}
 }
 

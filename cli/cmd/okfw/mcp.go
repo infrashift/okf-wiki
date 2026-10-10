@@ -583,15 +583,12 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
 	case "append":
-		appended := append([]byte(strings.TrimRight(string(content), "\n")), []byte("\n\n"+strings.TrimRight(a.Value, "\n")+"\n")...)
-		newContent, err = bundle.UpdateFrontmatter(appended, nil) // bump timestamp
+		newContent, err = bundle.UpdateFrontmatter(bundle.AppendBody(content, a.Value), nil) // bump timestamp
 	case "set_body":
-		fm, ferr := config.ExtractFrontmatter(content)
-		if ferr != nil {
-			return errResult(ferr)
+		newContent, err = bundle.SetBody(content, a.Value)
+		if err == nil {
+			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
-		rebuilt := "---\n" + string(fm) + "\n---\n\n" + strings.TrimRight(a.Value, "\n") + "\n"
-		newContent, err = bundle.UpdateFrontmatter([]byte(rebuilt), nil) // bump timestamp
 
 	// The OKF trust and provenance families. These share their mutators with
 	// the CLI writers rather than reimplementing them, so `update` cannot drift

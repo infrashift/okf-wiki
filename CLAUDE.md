@@ -155,6 +155,10 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   The line-oriented editor it replaced could only see top-level keys and scanned
   with a `bufio.Scanner` whose unchecked 64KB line cap silently truncated
   frontmatter and wrote the truncated version back.
+- A concept keeps the line ending it was written with, judged by its opening
+  `---` line (`bundle.lineEnding`). Every writer that adds lines — `Edit`,
+  `AppendBody`, `SetBody` — writes them in that ending; `ReplaceBody` is
+  byte-faithful. yaml.v3 encodes LF, so a CRLF concept came back mixed.
 - `okfw delete` and `okfw move` (`bundle.DeleteConcept` / `bundle.MoveConcept`)
   own what a plain `rm`/`mv` would desynchronize: the links and the `index.md`
   listings. `move` preserves the

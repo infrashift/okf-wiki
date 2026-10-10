@@ -29,7 +29,8 @@ const docIndent = 2
 
 // splitFrontmatter divides markdown into the raw YAML block, the exact bytes of
 // the closing delimiter line, and everything after it. Reassembly is
-// "---\n" + yaml + closing + rest, which keeps CRLF files byte-faithful.
+// opening + yaml + closing + rest, with the opening delimiter and the YAML
+// written in the file's own line ending (see lineEnding).
 //
 // Unlike config.ExtractFrontmatter, the closing delimiter must be a line that is
 // exactly "---": a value whose text happens to contain "\n---" no longer ends
@@ -106,9 +107,12 @@ func Edit(content []byte, fn func(m *yaml.Node) error) ([]byte, error) {
 		return nil, fmt.Errorf("failed to encode frontmatter: %w", err)
 	}
 
+	// The encoder emits LF; a CRLF file gets its own line ending back, or one
+	// edit would leave the block LF between CRLF delimiters and body.
+	eol := lineEnding(content)
 	var out bytes.Buffer
-	out.WriteString("---\n")
-	out.Write(buf.Bytes())
+	out.WriteString("---" + eol)
+	out.Write(withLineEnding(buf.Bytes(), eol))
 	out.Write(closing)
 	out.Write(rest)
 	return out.Bytes(), nil
