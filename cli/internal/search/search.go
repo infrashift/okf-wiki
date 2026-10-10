@@ -28,6 +28,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"okfw/cli/internal/bundle"
 	"okfw/cli/internal/config"
@@ -272,18 +274,20 @@ func scoreConcept(r Result, body string, terms []string) (float64, string) {
 // `&amp;` and `&lt;`. That was corruption, not markup.
 func snippetFor(body string, terms []string, fallback string) string {
 	const window = 160
-	low := strings.ToLower(body)
-	idx := -1
-	for _, t := range terms {
-		if i := strings.Index(low, t); i >= 0 && (idx < 0 || i < idx) {
-			idx = i
-		}
-	}
-	if idx < 0 {
+	at := matchOffset(body, terms)
+	if at < 0 {
 		return firstLine(fallback)
 	}
-	start := max(idx-window/2, 0)
+	// Cut on rune boundaries: a byte window through a multi-byte character put
+	// invalid UTF-8 in the snippet, which JSON encoding turned into U+FFFD.
+	start := max(at-window/2, 0)
+	for start > 0 && !utf8.RuneStart(body[start]) {
+		start--
+	}
 	end := min(start+window, len(body))
+	for end < len(body) && !utf8.RuneStart(body[end]) {
+		end--
+	}
 	s := strings.TrimSpace(strings.ReplaceAll(body[start:end], "\n", " "))
 	if start > 0 {
 		s = "..." + s
@@ -292,6 +296,37 @@ func snippetFor(body string, terms []string, fallback string) string {
 		s += "..."
 	}
 	return s
+}
+
+// matchOffset returns the byte offset in body of the earliest term, matched
+// case-insensitively, or -1.
+//
+// The match is found in strings.ToLower(body), but that offset cannot slice
+// body: lowering changes the byte length of some runes — Ⱥ grows from two bytes
+// to three, İ and the Kelvin sign shrink to one, an invalid byte becomes a
+// three-byte U+FFFD — so it pointed elsewhere in the original, and past its end
+// in a body dense with growing runes, which panicked the whole search. The
+// offset is translated back by re-walking body and summing each rune's lowered
+// width, the same per-rune mapping strings.ToLower applies.
+func matchOffset(body string, terms []string) int {
+	low := strings.ToLower(body)
+	idx := -1
+	for _, t := range terms {
+		if i := strings.Index(low, t); i >= 0 && (idx < 0 || i < idx) {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		return -1
+	}
+	n := 0
+	for i, r := range body {
+		if n >= idx {
+			return i
+		}
+		n += utf8.RuneLen(unicode.ToLower(r))
+	}
+	return len(body)
 }
 
 func firstLine(s string) string {
@@ -347,7 +382,8 @@ func FormatResultsFrom(results []Result, total, offset int) string {
 		}
 		fmt.Fprintf(&b, "   File: %s\n", r.FilePath)
 		if r.Snippet != "" {
-			fmt.Fprintf(&b, "   ...%s...\n", r.Snippet)
+			// snippetFor marks its own cuts with "...", so none are added here.
+			fmt.Fprintf(&b, "   %s\n", r.Snippet)
 		}
 		b.WriteString("\n")
 	}
