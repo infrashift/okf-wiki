@@ -957,14 +957,24 @@ Examples:
 			if g.GetNode(key) == nil {
 				return fmt.Errorf("node %q not found", args[0])
 			}
-			nodes := g.FindConnected(key, graphQueryLimitFlag, graphQueryDepthFlag)
+			// Walk all of the cluster, then cap, so the output can say what the
+			// limit withheld (see the MCP cluster action).
+			nodes := g.FindConnected(key, g.NodeCount(), graphQueryDepthFlag)
+			total := len(nodes)
+			limit := graphQueryLimitFlag
+			if limit <= 0 {
+				limit = 10
+			}
+			nodes = nodes[:min(total, limit)]
 			edges := g.GetEdges(nodes)
 
 			if graphQueryJSONFlag {
 				result := struct {
-					Nodes []*graph.Node `json:"nodes"`
-					Edges []graph.Edge  `json:"edges"`
-				}{Nodes: nodes, Edges: edges}
+					Nodes     []*graph.Node `json:"nodes"`
+					Edges     []graph.Edge  `json:"edges"`
+					Total     int           `json:"total"`
+					Truncated bool          `json:"truncated,omitempty"`
+				}{Nodes: nodes, Edges: edges, Total: total, Truncated: total > len(nodes)}
 				data, _ := json.Marshal(result)
 				fmt.Println(string(data))
 			} else {
@@ -972,6 +982,9 @@ Examples:
 					fmt.Printf("  %s: %s\n", n.ID, n.Title)
 				}
 				fmt.Printf("\n%d nodes, %d edges\n", len(nodes), len(edges))
+				if total > len(nodes) {
+					fmt.Printf("… %d more in reach — raise --limit\n", total-len(nodes))
+				}
 			}
 			return nil
 		},

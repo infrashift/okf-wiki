@@ -142,7 +142,7 @@ func mcpTools() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"ref":     str("concept id or path"),
 				"section": str("read only this markdown section, by heading text"),
-				"offset":  num("first line to read (1-based)"),
+				"offset":  num("first line to read (1-based; within the section if one is given)"),
 				"limit":   num("maximum lines to read"),
 			}, "ref"),
 		},
@@ -438,24 +438,23 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 	// A generated entity card is small, but a hand-written concept is not, and
 	// an agent following links through a bundle pays for every one it opens.
 	// Section and line windows let it read the part it came for.
+	//
+	// A read that asked for no window used to return the whole file, uncapped
+	// and unmarked — the one path through this handler with no bound, in the
+	// tool an agent calls most. A section read was the same: one heading over
+	// a long body returned all of it.
+	limit := a.Limit
+	if limit <= 0 {
+		limit = defaultReadLines
+	}
 	if a.Section != "" {
 		body, ok := markdownSection(string(content), a.Section)
 		if !ok {
 			return errResult(fmt.Errorf("no section %q in %s", a.Section, a.Ref))
 		}
-		return textResult(body)
+		return textResult(readWindow(body, a.Offset, limit, a.Section))
 	}
-	if a.Offset > 0 || a.Limit > 0 {
-		limit := a.Limit
-		if limit <= 0 {
-			limit = defaultReadLines
-		}
-		return textResult(readWindow(string(content), a.Offset, limit))
-	}
-	// A read that asked for no window used to return the whole file, uncapped
-	// and unmarked — the one path through this handler with no bound, in the
-	// tool an agent calls most.
-	return textResult(readWindow(string(content), 1, defaultReadLines))
+	return textResult(readWindow(string(content), a.Offset, limit, ""))
 }
 
 // defaultReadLines bounds a read that asked for no window.
@@ -467,27 +466,24 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 const defaultReadLines = 200
 
 // markdownSection extracts one heading's content, matched case-insensitively,
-// through to the next heading of the same or a shallower level.
+// through to the next heading of the same or a shallower level. Only the body
+// is searched, and only real headings count: a "# " line in the frontmatter
+// is a YAML comment, and one in a fenced block is code — a shell comment in a
+// ```bash block used to end the section it sat in.
 func markdownSection(content, want string) (string, bool) {
-	lines := strings.Split(content, "\n")
+	body := config.ExtractBody([]byte(content))
+	lines := strings.Split(body, "\n")
 	want = strings.ToLower(strings.TrimSpace(want))
 	start, level := -1, 0
-	for i, line := range lines {
-		n := 0
-		for n < len(line) && line[n] == '#' {
-			n++
-		}
-		if n == 0 || n >= len(line) || line[n] != ' ' {
-			continue
-		}
+	for _, h := range graph.Headings(body) {
 		if start < 0 {
-			if strings.ToLower(strings.TrimSpace(line[n+1:])) == want {
-				start, level = i, n
+			if strings.ToLower(h.Text) == want {
+				start, level = h.Line, h.Level
 			}
 			continue
 		}
-		if n <= level {
-			return strings.Join(lines[start:i], "\n"), true
+		if h.Level <= level {
+			return strings.Join(lines[start:h.Line], "\n"), true
 		}
 	}
 	if start < 0 {
@@ -514,14 +510,20 @@ func lineWindow(content string, offset, limit int) (string, int) {
 	return strings.Join(lines, "\n"), more
 }
 
-// readWindow renders a line window with its continuation marker.
-func readWindow(content string, offset, limit int) string {
+// readWindow renders a line window with its continuation marker. Within a
+// section, offset counts from the heading line and the marker keeps the
+// section, so following it reads on through the same section.
+func readWindow(content string, offset, limit int, section string) string {
 	if offset < 1 {
 		offset = 1
 	}
 	text, more := lineWindow(content, offset, limit)
 	if more == 0 {
 		return text
+	}
+	if section != "" {
+		return fmt.Sprintf("%s\n\n… %d more lines in this section — continue with section:%q, offset:%d",
+			text, more, section, offset+limit)
 	}
 	return fmt.Sprintf("%s\n\n… %d more lines — continue with offset:%d, or pass section:\"<heading>\"",
 		text, more, offset+limit)
@@ -733,9 +735,14 @@ func (s *mcpServer) toolGraph(cfg *config.Config, args json.RawMessage) *toolRes
 		if g.GetNode(id) == nil {
 			return errResult(fmt.Errorf("node %q not found", id))
 		}
-		records := g.FindConnected(id, a.Limit, a.Depth)
-		edges := g.GetEdges(records)
+		// Walk everything in reach rather than stopping at the limit, or the
+		// envelope cannot know what it withheld: it reported the capped count
+		// as the total and never said truncated. The walk is linear and cheap
+		// beside loading the graph; BFS order makes its first `limit` nodes the
+		// ones a capped walk would have returned.
+		records := g.FindConnected(id, g.NodeCount(), a.Depth)
 		out := nodeEnvelope(records)
+		edges := g.GetEdges(records[:min(len(records), a.Limit)])
 		es := make([]edge, 0, len(edges))
 		for _, e := range edges {
 			es = append(es, edge{From: e.From, To: e.To})

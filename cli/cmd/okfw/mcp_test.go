@@ -366,6 +366,70 @@ timestamp: "2026-02-13T11:00:00Z"
 	}
 }
 
+// TestMCPReadSectionIsCappedAndFindsRealHeadings: a section read returned the
+// whole section, however long, and took any "# " line for a heading — so a
+// shell comment in a code block ended the section, and a YAML comment in the
+// frontmatter could be "found" as one.
+func TestMCPReadSectionIsCappedAndFindsRealHeadings(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var long strings.Builder
+	for i := 0; i < 500; i++ {
+		fmt.Fprintf(&long, "row %d\n", i)
+	}
+	writeConceptFile(t, cfg.RootPath, "sections--0001.md", `---
+id: "019680f0-7e00-7abc-8def-100000000001"
+title: "Sections"
+# Setup
+type: "note"
+tags: []
+created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T11:00:00Z"
+---
+
+# Sections
+
+## Setup ##
+
+`+"```bash\n# install the tools\nmake install\n```"+`
+
+After the code block.
+
+## Data
+
+`+long.String()+`
+## Tail
+
+The end.
+`)
+
+	out, isErr := callTool(t, s, "read", `{"ref":"sections--0001.md","section":"setup"}`)
+	if isErr {
+		t.Fatalf("section read errored: %s", out)
+	}
+	if !strings.HasPrefix(out, "## Setup ##") {
+		t.Errorf("matched the frontmatter comment, or missed the closing-#s heading:\n%s", out)
+	}
+	if !strings.Contains(out, "After the code block.") || strings.Contains(out, "## Data") {
+		t.Errorf("section should run past the code comment and stop at ## Data:\n%s", out)
+	}
+
+	out, _ = callTool(t, s, "read", `{"ref":"sections--0001.md","section":"Data"}`)
+	if strings.Contains(out, "row 300") {
+		t.Error("section read returned the whole section uncapped")
+	}
+	if !strings.Contains(out, `continue with section:"Data", offset:201`) {
+		t.Errorf("section read did not say how to continue:\n%s", out[max(0, len(out)-200):])
+	}
+	out, _ = callTool(t, s, "read", `{"ref":"sections--0001.md","section":"Data","offset":201,"limit":400}`)
+	if !strings.HasPrefix(out, "row 198\n") || !strings.Contains(out, "row 499") || strings.Contains(out, "## Tail") {
+		t.Errorf("continuing a section read should page within it:\n%.200s", out)
+	}
+}
+
 // TestMCPGraphHonoursLimitOnEveryAction: limit was defaulted for all four
 // actions and passed to exactly one, so three were unbounded while the schema
 // advertised a default of 10.
@@ -429,8 +493,19 @@ Points at [Target](/target--00ff.md) and at [Nowhere](/gone-`+fmt.Sprint(i)+`.md
 			if len(rows) > 5 {
 				t.Errorf("%s returned %d rows for limit 5", tc.name, len(rows))
 			}
-			if _, ok := got["total"]; !ok {
-				t.Errorf("%s does not report a total: %s", tc.name, out)
+			// cluster capped inside the walk, so it reported the capped count
+			// as its total and never said truncated. dangling is exempt: a
+			// link to a missing file never becomes a graph edge, so it has
+			// no rows here to withhold.
+			if tc.name == "dangling" {
+				return
+			}
+			var total int
+			if err := json.Unmarshal(got["total"], &total); err != nil || total < 15 {
+				t.Errorf("%s total = %s, want the uncapped count (15+)", tc.name, got["total"])
+			}
+			if string(got["truncated"]) != "true" {
+				t.Errorf("%s withheld rows without saying truncated: %s", tc.name, out)
 			}
 		})
 	}
@@ -608,5 +683,46 @@ func TestMCPSearchSurvivesBadPaging(t *testing.T) {
 	}
 	if resp := s.handleLine(`{"jsonrpc":"2.0","id":9,"method":"ping"}`); resp == nil || resp.Error != nil {
 		t.Errorf("server unresponsive after bad paging: %+v", resp)
+	}
+}
+
+// TestGraphQueryClusterSaysWhatItsLimitWithheld: the CLI's cluster stopped its
+// walk at --limit, so like the MCP action it could not report what it left out.
+func TestGraphQueryClusterSaysWhatItsLimitWithheld(t *testing.T) {
+	cfg := bundleAt(t)
+	writeConceptFile(t, cfg.RootPath, "hub--0000.md",
+		conceptContent("019680f0-7e00-7abc-8def-400000000000", "Hub", "note", "# Hub"))
+	for i := 1; i <= 12; i++ {
+		writeConceptFile(t, cfg.RootPath, fmt.Sprintf("spoke--%04d.md", i),
+			conceptContent(fmt.Sprintf("019680f0-7e00-7abc-8def-4000000000%02d", i), "Spoke", "note",
+				"# Spoke\n\n[Hub](/hub--0000.md)"))
+	}
+
+	out, err := captureStdout(t, func() error {
+		_, err := runCmd(t, rootCmd(), "graph-query", "cluster", "hub--0000", "--limit", "5", "--json")
+		return err
+	})
+	if err != nil {
+		t.Fatalf("cluster: %v", err)
+	}
+	var got struct {
+		Nodes     []json.RawMessage `json:"nodes"`
+		Total     int               `json:"total"`
+		Truncated bool              `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	if len(got.Nodes) != 5 || got.Total != 13 || !got.Truncated {
+		t.Errorf("cluster --limit 5 = %d nodes, total %d, truncated %v; want 5, 13, true",
+			len(got.Nodes), got.Total, got.Truncated)
+	}
+
+	out, _ = captureStdout(t, func() error {
+		_, err := runCmd(t, rootCmd(), "graph-query", "cluster", "hub--0000", "--limit", "5", "--json=false")
+		return err
+	})
+	if !strings.Contains(out, "… 8 more in reach — raise --limit") {
+		t.Errorf("text output did not say what it withheld:\n%s", out)
 	}
 }

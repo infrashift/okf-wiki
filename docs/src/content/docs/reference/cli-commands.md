@@ -458,8 +458,10 @@ okfw graph-query dangling --json
 
 `--json` emits the graph's node records with Go field names (`ID`, `Title`,
 `FilePath`, `Project`, `Parent`, `Children`, `Links`, `Tags`); `cluster` wraps
-them as `{"nodes":[...],"edges":[{"From","To","Label"}]}`. An empty result is
-`null`.
+them as `{"nodes":[...],"edges":[{"From","To","Label"}],"total":N}`, adding
+`"truncated":true` when `--limit` withheld some of the `total` concepts in
+reach (the text output ends `… N more in reach — raise --limit`). An empty
+result is `null`.
 
 ---
 
