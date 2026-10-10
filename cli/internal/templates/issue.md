@@ -49,5 +49,5 @@
 
 ## Related
 
-<!-- Links to related issues, PRs, or zettels -->
+<!-- Links to related issues, PRs, or concepts -->
 -

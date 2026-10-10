@@ -1,5 +1,5 @@
 # --------------------------------------------------------------------------
-# Stage 1: Build the Go binary
+# Stage 1: Build okfw
 # --------------------------------------------------------------------------
 FROM docker.io/library/golang:1.24 AS builder
 
@@ -9,7 +9,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 go build -o zk ./cli/cmd/zk
+
+# okfw stays pure Go — CGO_ENABLED=0 is the guarantee, not an optimization.
+RUN CGO_ENABLED=0 go build -o okfw ./cli/cmd/okfw
 
 # --------------------------------------------------------------------------
 # Stage 2: Final image — headless devcontainer
@@ -65,13 +67,13 @@ RUN chmod +x /home/user/.local/bin/ssh-login.sh
 COPY --chown=user:0 Containerfiles/config/nvim/init.lua           /home/user/.config/nvim/init.lua
 COPY --chown=user:0 Containerfiles/config/nvim/lua/config/lazy.lua    /home/user/.config/nvim/lua/config/lazy.lua
 COPY --chown=user:0 Containerfiles/config/nvim/lua/config/options.lua /home/user/.config/nvim/lua/config/options.lua
-COPY --chown=user:0 Containerfiles/config/nvim/lua/plugins/zk.lua    /home/user/.config/nvim/lua/plugins/zk.lua
+COPY --chown=user:0 Containerfiles/config/nvim/lua/plugins/okfw.lua    /home/user/.config/nvim/lua/plugins/okfw.lua
 
-# ── 11. Copy zk NeoVim plugin files ──────────────────────────────────────
-COPY --chown=user:0 lua/zk/init.lua      /home/user/zk-plugin/lua/zk/init.lua
-COPY --chown=user:0 lua/zk/picker.lua     /home/user/zk-plugin/lua/zk/picker.lua
-COPY --chown=user:0 plugin/zk.lua         /home/user/zk-plugin/plugin/zk.lua
-COPY --chown=user:0 after/ftplugin/markdown.lua /home/user/zk-plugin/after/ftplugin/markdown.lua
+# ── 11. Copy okfw NeoVim plugin files ─────────────────────────────────────
+COPY --chown=user:0 lua/okfw/init.lua      /home/user/okfw-plugin/lua/okfw/init.lua
+COPY --chown=user:0 lua/okfw/picker.lua     /home/user/okfw-plugin/lua/okfw/picker.lua
+COPY --chown=user:0 plugin/okfw.lua         /home/user/okfw-plugin/plugin/okfw.lua
+COPY --chown=user:0 after/ftplugin/markdown.lua /home/user/okfw-plugin/after/ftplugin/markdown.lua
 
 # ── 12. Install mason tools before Lazy sync (tree-sitter must exist first)
 RUN MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
@@ -92,8 +94,12 @@ RUN MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
 # ── 13. Pre-install LazyVim plugins (mason tools already in PATH) ──────
 RUN nvim --headless "+Lazy! sync" +qa 2>&1 || true
 
-# ── 14. Copy zk binary from builder ─────────────────────────────────────
-COPY --from=builder --chown=user:0 /src/zk /home/user/.local/bin/zk
+# ── 14. Copy the binary from builder ─────────────────────────────────────
+COPY --from=builder --chown=user:0 /src/okfw /home/user/.local/bin/okfw
+RUN okfw --help >/dev/null
+
+# `okfw install` registers the skill and CLAUDE.md block *per project*, so it
+# is deliberately not run here — it belongs in whichever repository you open.
 
 # ── 15. Environment ─────────────────────────────────────────────────────
 ENV TERM=xterm-256color

@@ -10,7 +10,7 @@ Why is this feature needed?
 
 ## User Stories
 
-- [[]]
+<!-- - [Related concept](/path/to/concept.md) -->
 
 ## Requirements
 
@@ -68,4 +68,8 @@ Why is this feature needed?
 
 ## Related Notes
 
-- [[]]
+<!-- - [Related concept](/path/to/concept.md) -->
+
+## Citations
+
+<!-- [1] [Source title](https://example.com) -->

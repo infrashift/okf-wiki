@@ -1,22 +1,24 @@
 ---
 title: Daily Notes Workflow
-description: A comprehensive guide to managing daily notes with zk directly from NeoVim.
+description: A comprehensive guide to managing daily notes with okfw directly from NeoVim.
 ---
 
-A comprehensive guide to managing daily notes with `zk` directly from your editor. This document covers the daily, weekly, and monthly review workflows with NeoVim-specific commands and keybindings.
+A comprehensive guide to managing daily notes with `okfw` directly from your editor. This document covers the daily, weekly, and monthly review workflows with NeoVim-specific commands and keybindings.
+
+Your project needs an initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at the project root to create the `.okfw/` directory. The plugin discovers the wiki via `okfw root` from NeoVim's current working directory, so everything below works from any subdirectory of the project.
 
 ---
 
 ## What Are Daily Notes?
 
-A daily note is a dated entry that serves as your primary capture point for a given day. Rather than deciding "what type of note is this?" every time you have a thought, you write in today's daily note first. Later, you review and extract tethered insights.
+A daily note is a dated entry that serves as your primary capture point for a given day. Rather than deciding "what type of note is this?" every time you have a thought, you write in today's daily note first. Later, you review and extract refined insights.
 
 **Key characteristics:**
 - **One per day** - Each date has exactly one daily note
-- **Idempotent** - Running `:ZkDaily` twice returns the same file
+- **Idempotent** - Running `:OkfwDaily` twice returns the same file
 - **Temporal anchor** - Creates a timeline of your thinking
 - **Low friction** - No categorization decisions needed during capture
-- **Type: daily-note** - A distinct zettel type for daily captures
+- **Kind: daily-note** - A distinct structured kind for daily captures (`kind: "daily-note"`)
 
 ---
 
@@ -25,7 +27,7 @@ A daily note is a dated entry that serves as your primary capture point for a gi
 ### 1. Reduces Cognitive Overhead
 
 When an idea strikes, you don't want to spend mental energy deciding:
-- Is this untethered or tethered?
+- Is this worth a standalone note?
 - What project does this belong to?
 - What should I title this?
 
@@ -42,7 +44,7 @@ Daily notes become a searchable history of your work and thoughts:
 
 The daily review practice naturally resurfaces ideas:
 - Morning: Review yesterday's note
-- Extract anything valuable into tethered notes
+- Extract anything valuable into standalone notes
 - Unprocessed ideas get a second chance
 
 ### 4. Supports GTD-Style Workflows
@@ -50,27 +52,28 @@ The daily review practice naturally resurfaces ideas:
 Daily notes function as an "inbox" in Getting Things Done methodology:
 - Capture everything during the day
 - Process and organize during review
-- Tether valuable insights to permanent storage
+- Refine valuable insights into permanent notes
 
-### 5. Integrates with Todos
+### 5. Feeds Durable Concepts
 
-Daily notes can be linked to todos, creating a natural connection between your daily capture and actionable tasks.
+Daily notes are a staging area: refine what proves durable into its own concept and link back, so the day's capture becomes part of the graph.
 
 ---
 
 ## The Daily Note Structure
 
-`zk` creates daily notes with this template:
+`okfw` creates daily notes with this template:
 
 ```markdown
 ---
-id: "202602130000"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "2026-02-13 Friday"
 type: "daily-note"
-category: "untethered"
+kind: "daily-note"
 tags:
   - "daily"
 created: "2026-02-13T00:00:00Z"
+timestamp: "2026-02-13T00:00:00Z"
 ---
 
 # 2026-02-13 Friday
@@ -104,7 +107,7 @@ created: "2026-02-13T00:00:00Z"
 | **Tasks** | Today's action items (can sync with task manager) |
 | **Notes** | Free-form capture throughout the day |
 | **End of Day** | Reflection, wins, blockers, tomorrow's focus |
-| **Links Created** | Track zettels created today for review |
+| **Links Created** | Track concepts created today for review |
 
 ---
 
@@ -114,48 +117,48 @@ created: "2026-02-13T00:00:00Z"
 
 ```vim
 " Today's daily note
-:ZkDaily
+:OkfwDaily
 
 " Yesterday's note (for morning review)
-:ZkDaily yesterday
+:OkfwDaily yesterday
 
 " Specific date
-:ZkDaily 2026-02-10
+:OkfwDaily 2026-02-10
 ```
 
 ### Browse Daily Notes
 
 ```vim
 " Browse recent daily notes with picker
-:ZkDailyList
+:OkfwDailyList
 
 " Browse this week's notes only
-:ZkDailyList!
+:OkfwDailyList!
 ```
 
 ### Lua API
 
 ```lua
 -- Open today's daily note
-require("zk").daily()
+require("okfw").daily()
 
 -- Open yesterday's note
-require("zk").daily({ date = "yesterday" })
+require("okfw").daily({ date = "yesterday" })
 
 -- Open specific date
-require("zk").daily({ date = "2026-02-10" })
+require("okfw").daily({ date = "2026-02-10" })
 
 -- Browse daily notes with picker
-require("zk").daily_picker()
+require("okfw").daily_picker()
 
 -- List daily notes this week
-require("zk").daily_picker({ week = true })
+require("okfw").daily_picker({ week = true })
 
 -- List daily notes this month
-require("zk").daily_picker({ month = true })
+require("okfw").daily_picker({ month = true })
 
 -- Get daily notes synchronously (for scripting)
-local notes = require("zk").list_daily_sync({ week = true })
+local notes = require("okfw").list_daily_sync({ week = true })
 ```
 
 ---
@@ -166,21 +169,21 @@ local notes = require("zk").list_daily_sync({ week = true })
 
 1. **Open today's note:**
    ```vim
-   :ZkDaily
+   :OkfwDaily
    ```
 
 2. **Review yesterday (in a split):**
    ```vim
-   :ZkDaily yesterday
+   :OkfwDaily yesterday
    ```
    Or use the picker to see this week:
    ```vim
-   :ZkDailyList!
+   :OkfwDailyList!
    ```
 
 3. **Extract insights from yesterday:**
-   - Identify anything worth keeping as a tethered note
-   - Create new notes with `:ZkNote` or `:ZkTemplate`
+   - Identify anything worth keeping as a standalone note
+   - Create new notes with `:OkfwNote` or `:OkfwTemplate`
    - Link back to the daily note if relevant
 
 4. **Set today's intentions:**
@@ -192,7 +195,7 @@ local notes = require("zk").list_daily_sync({ week = true })
 Capture everything in your daily note. Press your keymap to jump there instantly:
 
 ```lua
-vim.keymap.set("n", "<leader>zd", "<cmd>ZkDaily<cr>", { desc = "Today's daily" })
+vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily" })
 ```
 
 ### End of Day (5 minutes)
@@ -204,28 +207,24 @@ vim.keymap.set("n", "<leader>zd", "<cmd>ZkDaily<cr>", { desc = "Today's daily" }
 
 ---
 
-## Linking Todos to Daily Notes
+## Refining Daily Captures into Concepts
 
-One of the most powerful features is linking todos to daily notes. This creates a connection between your actionable items and the day you captured them.
-
-### Create a Todo from the Daily Note
-
-```vim
-:ZkTodo Fix the authentication bug
-```
-
-### Create Todo with Full Options
+A daily note is where a thought lands first; it is not where it should stay. When
+something in today's note turns out to matter, promote it:
 
 ```vim
-:ZkTodo Fix auth bug --priority high --due 2026-02-15
+:OkfwNote Authentication token lifetime
 ```
 
-### From the Daily Note
+Then link the two directions — the concept back to the daily note it came from,
+and the daily note out to the concept — so the origin of an idea stays
+recoverable.
 
-When reviewing your daily note, you can:
-1. Identify actionable items in the Notes section
-2. Create todos: `:ZkTodo`
-3. The todo can link back to the daily where the idea originated
+### Suggested rhythm
+
+1. Capture in the daily note: `:OkfwDaily`
+2. Promote durable ideas: `:OkfwNote`
+
 
 ---
 
@@ -236,19 +235,19 @@ Weekly reviews help you step back and see patterns.
 ### List This Week's Notes
 
 ```vim
-:ZkDailyList!
+:OkfwDailyList!
 ```
 
 Or via CLI:
 ```bash
-zk daily --list --week
+okfw daily --list --week
 ```
 
 ### Weekly Review in NeoVim
 
 1. **Open the daily picker for this week:**
    ```vim
-   :ZkDailyList!
+   :OkfwDailyList!
    ```
 
 2. **Scan each day's notes:**
@@ -257,7 +256,7 @@ zk daily --list --week
 
 3. **Create synthesis notes:**
    ```vim
-   :ZkTemplate meeting
+   :OkfwTemplate meeting
    ```
    Use the meeting template for weekly summaries.
 
@@ -270,8 +269,8 @@ zk daily --list --week
    - What projects progressed? Stalled?
 3. **Create synthesis notes:**
    - Weekly summary note
-   - Tethered notes for recurring themes
-4. **Review todos** via `:ZkTodoList`
+   - Standalone notes for recurring themes
+4. **Review drafts and stale concepts** via `:OkfwSearch --status draft` and `:OkfwSearch --stale`
 
 ---
 
@@ -282,12 +281,12 @@ Monthly reviews are for strategic thinking.
 ### List This Month's Notes
 
 ```lua
-require("zk").daily_picker({ month = true })
+require("okfw").daily_picker({ month = true })
 ```
 
 Or via CLI:
 ```bash
-zk daily --list --month
+okfw daily --list --month
 ```
 
 ### Monthly Review Checklist
@@ -298,7 +297,7 @@ zk daily --list --month
    - What shipped?
    - What's blocked?
    - What should be abandoned?
-4. **Review completed todos** via `:ZkTodoList`
+4. **Review what you deprecated** via `:OkfwSearch --status deprecated`
 5. **Set next month's themes**
 
 ---
@@ -309,49 +308,51 @@ Add these to your NeoVim configuration:
 
 ```lua
 -- Daily notes
-vim.keymap.set("n", "<leader>zd", "<cmd>ZkDaily<cr>", { desc = "Today's daily" })
-vim.keymap.set("n", "<leader>zD", "<cmd>ZkDaily yesterday<cr>", { desc = "Yesterday's daily" })
-vim.keymap.set("n", "<leader>zw", "<cmd>ZkDailyList!<cr>", { desc = "This week's dailies" })
+vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily" })
+vim.keymap.set("n", "<leader>zD", "<cmd>OkfwDaily yesterday<cr>", { desc = "Yesterday's daily" })
+vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList!<cr>", { desc = "This week's dailies" })
 ```
 
 ---
 
 ## File Organization
 
-Daily notes are stored in a structured hierarchy:
+Daily notes are stored inside the project's wiki (the `.okfw/` directory
+created by `okfw init` and discovered automatically from any subdirectory) in
+a structured hierarchy:
 
 ```
-~/zk_vault/
-└── untethered/
-    └── daily/
-        └── 2026/
-            ├── 01/
-            │   ├── 2026-01-01.md
-            │   ├── 2026-01-02.md
-            │   └── ...
-            └── 02/
-                ├── 2026-02-01.md
-                └── ...
+.okfw/
+└── daily/
+    └── 2026/
+        ├── 01/
+        │   ├── 2026-01-01-thursday--019f049400a8.md
+        │   ├── 2026-01-02-friday--019f04a10000.md
+        │   └── ...
+        └── 02/
+            ├── 2026-02-01-sunday--019f04b80000.md
+            └── ...
 ```
 
 This structure:
+- Lives at the wiki root, separate from project folders
 - Groups notes by year and month
-- Uses human-readable filenames (YYYY-MM-DD.md)
+- Uses human-readable filenames (`YYYY-MM-DD-<weekday>--<shortid>.md`)
 - Makes manual browsing easy
 - Supports standard file system tools
 
 ---
 
-## Integration with Zettelkasten
+## Integration with OKF Wiki
 
-Daily notes complement the Zettelkasten method:
+Daily notes complement the wider knowledge base:
 
-| Zettelkasten Concept | Daily Notes Role |
-|---------------------|------------------|
-| **Untethered notes** | Daily note = primary untethered inbox |
-| **Tethered notes** | Extract from daily during review |
+| Knowledge Base Concept | Daily Notes Role |
+|-----------------------|------------------|
+| **Capture** | Daily note = primary inbox |
+| **Refined notes** | Extract from daily during review |
 | **Links** | Track in "Links Created" section |
-| **Todos** | Create todos from daily captures |
+| **Promotion** | Refine daily captures into standalone concepts |
 | **Projects** | Daily notes capture project-related thoughts |
 
 ### The Flow
@@ -361,7 +362,7 @@ Daily Note (capture)
     |
 Morning Review (extract)
     |
-Tethered Note (refine)    <->    Todo (actionable)
+Standalone Note (refine)  <->    Linked concepts (the graph)
     |                              |
 Graph (connect)             Done (complete)
 ```
@@ -372,12 +373,12 @@ Graph (connect)             Done (complete)
 
 | Action | Command | Keymap Suggestion |
 |--------|---------|-------------------|
-| Today's daily | `:ZkDaily` | `<leader>zd` |
-| Yesterday's daily | `:ZkDaily yesterday` | `<leader>zD` |
-| Browse dailies | `:ZkDailyList` | |
-| This week's dailies | `:ZkDailyList!` | `<leader>zw` |
-| Add tags | `\a` (buffer-local) | Auto-mapped on all zettels |
-| Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all zettels |
+| Today's daily | `:OkfwDaily` | `<leader>zd` |
+| Yesterday's daily | `:OkfwDaily yesterday` | `<leader>zD` |
+| Browse dailies | `:OkfwDailyList` | |
+| This week's dailies | `:OkfwDailyList!` | `<leader>zw` |
+| Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
+| Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 
 ---
 
@@ -393,6 +394,5 @@ Graph (connect)             Done (complete)
 
 ## Related Documentation
 
-- [Notes Workflow](/zettelkasten/neovim/notes-workflow/) - General note-taking workflow
-- [Todo Workflow](/zettelkasten/neovim/todo-workflow/) - Todo management workflow
-- [CLI Commands](/zettelkasten/reference/cli-commands/) - Complete CLI reference
+- [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - General note-taking workflow
+- [CLI Commands](/okf-wiki/reference/cli-commands/) - Complete CLI reference

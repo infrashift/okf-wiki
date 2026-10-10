@@ -1,30 +1,76 @@
 ---
 title: CLI Commands
-description: Quick reference for all zk CLI commands, flags, and workflows.
+description: Quick reference for all okfw CLI commands, flags, and workflows.
 ---
 
-Quick reference for all `zk` commands.
+Quick reference for all `okfw` commands.
+
+Every command discovers the wiki (a `.okfw/` directory) by searching upward
+from the current working directory, so commands work from any subdirectory of
+your project. When no wiki is found, commands exit non-zero with:
+
+```
+no OKF wiki found (searched upward from <dir>); run 'okfw init' at your project root to create one
+```
+
+---
+
+## Wiki Setup
+
+### Initialize a wiki
+```bash
+okfw init
+```
+
+Creates a `.okfw/` directory at the git repository root (or the current
+directory outside git), writes a `.okfw/.gitignore` covering the only
+generated directory (`ephemeral/`), and generates the
+OKF root `index.md` (with the `okf_version` declaration). Running `okfw init`
+again is a no-op that prints `OKF wiki already initialized at <path>`.
+
+### Verify the wiki connection
+```bash
+okfw connect
+```
+
+Verifies the discovered wiki: prints `Connected: <path>` plus a `concepts: N`
+line. Exits non-zero with
+the `okfw init` advice when no wiki is found.
 
 ---
 
 ## Note Creation
 
-### Create an untethered note (no project required)
+### Create a note (no project required)
 ```bash
-zk create "Quick idea about X" --category untethered
-zk create "My note title"  # Default is untethered
+okfw create "Quick idea about X"
+okfw create "My note title"
 ```
 
-### Create an untethered note with project
+### Create a note with a project
 ```bash
-zk create "Project idea" --category untethered --project my-project
-zk create "Project idea" --category untethered -p my-project
+okfw create "Project idea" --project my-project
+okfw create "Project idea" -p my-project
 ```
 
-### Create a tethered note (project required)
+### Create a note with a description
 ```bash
-zk create "Refined concept" --category tethered --project my-project
+okfw create "OAuth notes" --description "How our OAuth flow works"
+okfw create "OAuth notes" -d "How our OAuth flow works"
 ```
+
+The `-d/--description` value is written to the optional OKF `description`
+frontmatter field (a one-sentence summary of the concept).
+
+### Place a note in a specific wiki subdirectory
+```bash
+okfw create "Spec draft" --path projects/okf
+```
+
+`--path <subdir>` places the new concept at an arbitrary path under the wiki
+root (here, `.okfw/projects/okf/`). It is sanitized to stay inside the wiki.
+With no `--path`, placement falls back to a top-level folder named after the
+project, or the wiki root when no project is set.
 
 ---
 
@@ -32,62 +78,221 @@ zk create "Refined concept" --category tethered --project my-project
 
 ### Set project on a note
 ```bash
-zk set-project path/to/note.md my-project
+okfw set-project path/to/note.md my-project
 ```
 
-### Tether an untethered note (promote to tethered)
+### Delete a concept
 ```bash
-# With explicit project
-zk tether path/to/note.md --project my-project
-zk tether path/to/note.md -p my-project
-
-# Auto-detect from git (if in a repo)
-zk tether path/to/note.md
+okfw delete ./notes/scratch--019f0494.md
+okfw delete 019f0494 --force        # skip the confirmation
+okfw rm 019f0494 -f                 # alias
+okfw delete 019f0494 -f --json      # {"id","path","inbound":[...]}
 ```
 
-### Untether a tethered note (demote to untethered)
+Removes the concept's file and its line in the `index.md` listings.
+There is no search index or graph database to update: both are computed from
+the files on every call. Asks for confirmation unless `--force` is given, and
+refuses to prompt when stdin is not a terminal — a script that forgot `--force`
+stops rather than deleting.
+
+Concepts that still link to the deleted one, from their body or a path-valued
+frontmatter field, are **reported, not repaired**. OKF
+requires consumers to tolerate a link whose target does not exist, so a dangling
+link is not malformed; rewriting someone's prose to tidy one would destroy
+authored content. `okfw graph-query dangling` finds them later.
+
+### Move or rename a concept
 ```bash
-# Reverts a tethered note back to untethered
-zk untether path/to/note.md
+okfw move 019f0494 archive/                        # into a directory
+okfw move ./scratch--019f0494.md notes/design.md   # new path and name
+okfw rename 019f0494 notes/better-name.md          # alias
+okfw move 019f0494 archive/ --json                 # {"from","to","rewrote":[...]}
 ```
+
+The destination works like `mv`: a path ending in `.md` is the concept's new full
+path, anything else is a directory to move into under the current filename. Both
+are bundle-relative and cannot escape the bundle or name one of its internal
+dot-directories.
+
+The concept's `id` does not change, so hierarchies built with `parent` survive.
+Links are repaired at **both** ends, because a move breaks two different sets.
+A link here means a body link or a path-valued frontmatter field naming a
+concept (`resource`, `sources[].resource`, `computation`, `executor.resource`,
+`attester.resource`); frontmatter is rewritten in place, keeping comments and
+quoting.
+
+- Other concepts pointing at the old path are retargeted, keeping whichever form
+  they used — a bundle-absolute link stays absolute, a relative one stays relative.
+- The moved concept's own *relative* links are rewritten so they still resolve
+  from the new directory. Bundle-absolute links need no fixing, which is exactly
+  why OKF recommends them.
+
+The moved concept's `timestamp` is bumped, since a concept's OKF identity is its
+path within the bundle. Concepts whose links were merely retargeted are not
+stamped: their knowledge did not change, only the spelling of a pointer.
 
 ---
 
 ## Tags
 
-### Add tags to a zettel
+### Add tags to a concept
 ```bash
-zk add-tags path/to/note.md golang
-zk add-tags path/to/note.md golang api security
+okfw add-tags path/to/note.md golang
+okfw add-tags path/to/note.md golang api security
 ```
 
-Tags are appended to the existing `tags:` list in the zettel's YAML frontmatter. Duplicate tags are ignored.
+Tags are appended to the existing `tags:` list in the concept's YAML frontmatter. Duplicate tags are ignored.
 
 ---
 
 ## Validation
 
-### Validate a zettel's frontmatter
+There are two different checks, because okfw's schema is deliberately stricter
+than OKF requires (see [Note Format](/okf-wiki/getting-started/note-format/#okf-conformance-and-divergences)).
+
+### Validate a concept against okfw's schema
 ```bash
-zk validate path/to/note.md
+okfw validate path/to/note.md
+okfw validate 019f0494                 # by id
 ```
 
-Validates the zettel's YAML frontmatter against the CUE schema. Reports any missing or invalid fields.
+Applies the full CUE `#Concept` schema: the six required fields, the declared
+value formats, and no undeclared top-level keys. It also checks citations: no
+two `sources` entries may share an `id` (compared case-insensitively, as
+markdown compares footnote labels), and every `[^label]` footnote reference in
+the body must match a `sources[].id` or a `[^label]:` definition. A reference
+with a definition but no source is an ordinary footnote and passes. Footnote
+syntax inside code is ignored, so `` `[^a-z]` `` is not a citation; write a
+regex character class in prose as code.
+
+### Validate every concept in the wiki
+```bash
+okfw validate --all                 # strict check of the discovered wiki
+okfw validate --all path/to/.okfw/  # ...or an explicit path
+```
+
+The same strict check over the whole bundle, reporting each failure. It also
+reports any `id` declared by more than one concept — a concept copied as a
+template keeps its `id` — naming every file that declares it. Exits non-zero if
+any concept is invalid or any `id` is duplicated.
+
+### Validate OKF conformance
+```bash
+okfw validate --okf                 # Validate the discovered wiki
+okfw validate --okf path/to/.okfw/  # Validate an explicit wiki path
+```
+
+Checks Open Knowledge Format conformance (spec §11) and nothing more: every
+non-reserved `.md` file has parseable frontmatter with a non-empty `type`, and
+the reserved `index.md` and `log.md` files follow §8 and §9. Permissive by
+design, so a bundle okfw did not author can still pass. Broken links are
+reported as warnings — OKF requires consumers to tolerate them.
+
+### Migrate concepts from an older okfw
+```bash
+okfw migrate --dry-run   # report what would change
+okfw migrate             # apply
+```
+
+Rewrites concepts so they satisfy the current schema. okfw removed its
+task-tracking fields, because OKF v0.2 spec'd `status` as the lifecycle field
+and okfw was using it for todo progress. This drops `due`, `completed`,
+`priority` and `kind: todo`, and rewrites a legacy `status`:
+
+| Before | After |
+|---|---|
+| `status: closed` | `status: deprecated` |
+| `status: open` or `status: in_progress` | removed (absent means `stable`) |
+
+It also upgrades bare dates in `stale_after`, `sources[].last_modified` and
+`usage_window` to ISO 8601 datetimes (`2026-12-31` becomes
+`2026-12-31T00:00:00Z`, the reading okfw already gave it), and reports any
+timestamp it cannot safely upgrade for you to fix by hand.
+
+Safe to re-run; a second pass reports nothing to do. The free-form `type` is left
+alone, since OKF does not register type values.
 
 ---
 
-## Indexing
+## OKF Wiki
 
-### Index a single file
+Commands for keeping a wiki conformant with the Open Knowledge Format (OKF).
+
+### Print the wiki root
 ```bash
-zk index path/to/note.md
+okfw root
 ```
 
-### Index all notes in a directory
+Prints the discovered `.okfw` path (found by searching upward from the current
+directory). Script-friendly; used by the Neovim plugin. Errors when no wiki
+exists.
+
+### Serve the wiki to AI agents (MCP)
 ```bash
-zk index ~/zk_vault/
-zk index .
+okfw mcp                         # MCP stdio server (run from the project)
 ```
+
+Runs a Model Context Protocol server on stdin/stdout, exposing the wiki
+through five consolidated tools — advertised as `okfw_search`, `okfw_create`,
+`okfw_read`, `okfw_update`, `okfw_graph` (the bare names still dispatch) —
+instead of one tool per CLI command. Concept bodies are writable
+through the tools (`create` takes `body`; `update` supports `append` and
+`set_body`), so filesystem-less MCP clients get full read/write access. Tool responses are compact
+JSON with wiki-relative paths, keeping agent token usage low (the full `tools/list`
+payload is about 3.9 KB). The wiki is discovered from the server's
+working directory, so launch it from inside the project.
+
+Client registration (Claude Code):
+
+```bash
+claude mcp add okfw -- okfw mcp
+```
+
+### Install the agent skill
+```bash
+okfw install                     # Claude Code: skill + CLAUDE.md block
+okfw install --platform gemini   # GEMINI.md block
+okfw install --platform codex    # AGENTS.md block
+okfw install --force             # overwrite an existing skill file
+```
+
+Registers okfw with an AI coding assistant so it captures and links project
+knowledge in the wiki. The managed marker block keeps re-installs idempotent and
+is namespaced, so it leaves the rest of the file (and blocks other tools
+maintain) alone. Run from anywhere inside the project.
+
+### Generate `index.md` directory listings
+```bash
+okfw index-md                    # Discovered wiki
+okfw index-md path/to/.okfw/     # Explicit path
+okfw index-md --no-adopt         # Refresh only listings okfw already maintains
+```
+
+Generates OKF `index.md` files (directory listings for progressive disclosure)
+in each directory of the wiki. The root `index.md` carries the wiki's
+`okf_version: "0.2"`; all other index files have no frontmatter, and entries
+include each concept's description.
+
+You rarely need to run this by hand: creating or updating a note keeps every
+`index.md` fresh automatically — including a new `index.md` for any
+subdirectory a `--path`/`--project` note just created. okfw marks the listings
+it generates with an `<!-- okfw:generated ... -->` comment and maintains only
+those; hand edits to a marked listing will not survive. `okfw index-md` also
+adopts an unmarked `index.md` in a directory holding okfw concepts (that is how
+listings from before the marker come back under maintenance), but never deletes
+one. `--no-adopt` skips the adoption and refreshes only marked listings, which is
+what every okfw write does.
+
+### Generate `log.md` from git history
+```bash
+okfw log                         # Discovered wiki
+okfw log path/to/.okfw/          # Explicit path
+```
+
+Generates an OKF `log.md` update history from the project's git log, grouped by
+date (newest first), with Creation / Update / Move / Removal entries using each
+commit's subject. Pass a directory inside the bundle to give it its own
+`log.md`.
 
 ---
 
@@ -95,68 +300,98 @@ zk index .
 
 ### Full-text search
 ```bash
-zk search "authentication patterns"
-zk search "golang error handling"
+okfw search "authentication patterns"
+okfw search "golang error handling"
 ```
 
 ### Filter by project
 ```bash
-zk search --project my-project
-zk search -p my-project
-zk search "query" --project my-project  # Combined
-```
-
-### Filter by category
-```bash
-zk search --category untethered
-zk search --category tethered
-zk search -c tethered
+okfw search --project my-project
+okfw search -p my-project
+okfw search "query" --project my-project  # Combined
 ```
 
 ### Filter by tags
 ```bash
-zk search --tag golang
-zk search --tag golang --tag api  # AND (must have both)
-zk search -T golang -T testing
+okfw search --tag golang
+okfw search --tag golang --tag api  # AND (must have both)
+okfw search -T golang -T testing
 ```
 
-### Filter by type
+### Filter by structured kind
 ```bash
-zk search --type todo
-zk search --type daily-note
-zk search -t issue
+okfw search --kind daily-note
+okfw search --kind issue
 ```
 
-### Filter by status and priority
+`--kind` filters the structured `kind` field (`note`/`daily-note`/`issue`)
+that drives daily-note and issue behavior.
+
+### Filter by OKF type
 ```bash
-zk search --status open
-zk search --priority high
-zk search --type todo --status open --priority high
+okfw search --type note
+okfw search -t book
 ```
 
-### Filter by due date
+`--type` filters the free-form OKF `type` field. (Previously `--type` filtered
+note/daily-note/issue — that behavior is now `--kind`.)
+
+### Filter by lifecycle status
 ```bash
-zk search --due-before 2026-03-01
-zk search --due-after 2026-02-01
-zk search --due-after 2026-02-01 --due-before 2026-02-28  # Date range
+okfw search --status draft        # not yet reviewed
+okfw search --status deprecated   # superseded, kept for links and history
 ```
 
-### Limit results
+Concepts with no `status` are `stable`, and are returned by `--status stable`.
+
+### Find stale concepts
 ```bash
-zk search --limit 10
-zk search -l 50
+okfw search --stale
 ```
+
+Returns concepts whose `stale_after` instant has been reached (now on or after
+it). Set it with `okfw set-stale-after`.
+
+### Limit and page results
+```bash
+okfw search --limit 10
+okfw search -l 50
+okfw search "auth" --limit 10 --offset 10   # second page
+```
+
+Results are ranked (title over tags over description over body). Search scans
+the files on every call, so there is no index to build or keep in sync.
+
+### How far to trust a hit
+Every hit says how far to trust it, so a stale or never-reviewed concept no
+longer looks like the reviewed, current answer:
+
+```
+1. Ledger reconciliation
+   ID: 019f0494-... | Project: finance
+   Trust: human-reviewed | draft | stale since 2026-06-30T00:00:00Z
+```
+
+`Trust` is the OKF trust tier (`unverified`, `machine-confirmed` or
+`human-reviewed`, from `verified`). The lifecycle status follows only when it is
+`draft` or `deprecated`, and `stale since` only once `stale_after` has passed.
 
 ### JSON output (for scripting/tooling)
 ```bash
-zk search --json
-zk search "query" --json | jq '.[] | .title'
+okfw search --json
+okfw search "query" --json | jq '.[] | .title'
+okfw search --json | jq '.[] | select(.trust == "human-reviewed" and (.stale | not)) | .title'
 ```
+
+Each result carries `trust` and `stale` (a boolean) alongside the raw `status`
+and `stale_after`. The MCP `okfw_search` tool returns the same `trust` on every
+hit, and `status` and `stale` only when they are the exception: `draft` or
+`deprecated`, and `true`.
 
 ### Combined filters
 ```bash
-zk search "authentication" --project my-project --category tethered --tag security
-zk search --type todo --status open --project my-project --priority high
+okfw search "authentication" --project my-project --tag security
+okfw search --kind issue --status draft --project my-project
 ```
 
 ---
@@ -165,72 +400,114 @@ zk search --type todo --status open --project my-project --priority high
 
 ### Generate a graph from a directory
 ```bash
-zk graph ~/zk_vault/
-zk graph .
+okfw graph .okfw/
+okfw graph .
 ```
 
 ### Limit the number of nodes
 ```bash
-zk graph . --limit 20
-zk graph . -l 5
+okfw graph . --limit 20
+okfw graph . -l 5
 ```
 
 ### Start from a specific note
 ```bash
-zk graph . --start 20260219143000-a1b2c3d4
+okfw graph . --start 019f0494                           # id prefix
+okfw graph . --start infra/my-first-idea--019f049400a8  # or OKF concept ID
 ```
 
-### Control tree depth
+### Control traversal depth
 ```bash
-zk graph . --depth 3
+okfw graph . --depth 3
 ```
 
-### Sync graph database before querying
+### Render a plain-text tree
 ```bash
-zk graph --sync
+okfw graph --ascii
 ```
 
-The graph command outputs Mermaid flowchart syntax to stdout. When a graph database (`.zk_graph.db`) exists, it uses indexed data for faster queries. Use `--sync` to force a fresh sync before querying.
+`okfw graph` writes **Mermaid flowchart syntax** to stdout by default, suitable
+for pasting into markdown; `--ascii` renders a plain-text tree that reads
+directly in a terminal. A summary line (`N nodes, M edges`) goes to stderr, so
+piped output stays clean. The graph is built from the concepts on disk each
+time, so it always matches them.
 
 ---
 
-## Graph Database
+## Export
 
-The graph database (`.zk_graph.db`) enables O(1) indexed backlink lookups and fast traversals. It is optional — all commands fall back to filesystem scanning when the database doesn't exist.
-
-### Sync the graph database
+### Export a portable subset of the wiki
 ```bash
-zk graph-sync                    # Sync from configured root
-zk graph-sync ~/zk_vault/        # Sync from explicit path
-zk graph-sync --validate         # Sync + validate edge integrity
+okfw export                              # Export from the wiki root
+okfw export path/to/dir                  # Export a specific directory
+okfw export --start 019f0494 --depth 2   # Export a neighbourhood
+okfw export --limit 50
 ```
 
-Output shows added, updated, deleted counts. With `--validate`, reports dangling edges (links to non-existent notes) and structurally invalid edges.
+Writes a self-contained copy of a connected subset of concepts into
+`.okfw/ephemeral/`, one file per concept named `<id>.md`, with links rewritten to
+match (an in-bundle link becomes `<id>.md`). Useful for handing a slice of the wiki to something that has no access to
+the bundle. `ephemeral/` is gitignored and safe to delete.
 
-### Query backlinks (indexed)
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--start` | - | most connected | Concept id to start from |
+| `--depth` | - | unlimited | Maximum hops from `--start` |
+| `--limit` | `-l` | `10` | Maximum number of concepts |
+| `--help` | `-h` | - | Show help |
+
+---
+
+## Graph Queries
+
+`okfw graph-query` answers structural questions about the link graph. Like
+`okfw graph`, it builds the graph from the files on every call — there is no
+graph database to sync.
+
+An edge is a body link to another concept, or a path-valued frontmatter field
+that names one: `resource`, `sources[].resource`, `computation`,
+`executor.resource` and `attester.resource` (OKF §6.2). A path starting with `/`
+resolves from the wiki root and any other from the concept's own directory, as
+body links do. A URL, a scope descriptor (`all queries in project X`) or a file
+that is not markdown (an attester's `.py`) is not an edge.
+
+### Query backlinks
 ```bash
-zk graph-query backlinks <id>
-zk graph-query backlinks <id> --json
+okfw graph-query backlinks <id>
+okfw graph-query backlinks <id> --json
 ```
 
 ### Query connected cluster (N-depth BFS)
 ```bash
-zk graph-query cluster <id>
-zk graph-query cluster <id> --depth 2 --limit 20
-zk graph-query cluster <id> --json
+okfw graph-query cluster <id>
+okfw graph-query cluster <id> --depth 2 --limit 20
+okfw graph-query cluster <id> --json
 ```
 
 ### Query by tag
 ```bash
-zk graph-query tag golang
-zk graph-query tag golang --json
+okfw graph-query tag golang
+okfw graph-query tag golang --json
 ```
 
 ### Find dangling edges
 ```bash
-zk graph-query dangling
-zk graph-query dangling --json
+okfw graph-query dangling
+okfw graph-query dangling --json
 ```
+
+Reports links to `.md` files that do not exist — typically left behind by
+`okfw delete` — and `parent` references to ids no concept declares. A missing
+link target is named by its OKF concept ID (its path minus `.md`), and
+`okfw graph-query backlinks <that path>` lists everything still pointing at it.
+A link to a file that exists but is not a concept is not dangling.
+
+`--json` emits the graph's node records with Go field names (`ID`, `Title`,
+`FilePath`, `Project`, `Parent`, `Children`, `Links`, `Tags`); `cluster` wraps
+them as `{"nodes":[...],"edges":[{"From","To","Label"}],"total":N}`, adding
+`"truncated":true` when `--limit` withheld some of the `total` concepts in
+reach (the text output ends `… N more in reach — raise --limit`). An empty
+result is `null`.
 
 ---
 
@@ -240,17 +517,17 @@ List and use note templates for structured content.
 
 ### List available templates
 ```bash
-zk templates
+okfw templates
 ```
 
 ### Create a note from a template
 ```bash
-zk create "Sprint Planning Q1" --template meeting
-zk create "Clean Code Review" --template book-review
-zk create "OAuth Implementation" --template feature
-zk create "Add Login Flow" --template user-story
-zk create "CLI Tool Idea" --template project-idea
-zk create "Go Error Handling" --template snippet
+okfw create "Sprint Planning Q1" --template meeting
+okfw create "Clean Code Review" --template book-review
+okfw create "OAuth Implementation" --template feature
+okfw create "Add Login Flow" --template user-story
+okfw create "CLI Tool Idea" --template project-idea
+okfw create "Go Error Handling" --template snippet
 ```
 
 Available templates:
@@ -261,29 +538,37 @@ Available templates:
 - `user-story` - User story in standard format with acceptance criteria
 - `feature` - Feature specification with requirements and design notes
 - `daily` - Daily note for thoughts, tasks, and reflections
-- `todo` - Actionable task with status tracking
 - `issue` - Issue tracking like GitHub (bug, enhancement, question)
 
 ---
 
 ## Backlinks
 
-Find all notes that link to a specific zettel.
+Find all notes that link to a specific concept.
 
 ### Find backlinks by ID
 ```bash
-zk backlinks 202602131045
+okfw backlinks 202602131045
 ```
+
+When given an id, `okfw backlinks` (like every command that takes a concept)
+searches the whole wiki, so a concept is found regardless of which folder it
+lives in. A concept can be named by its full `id`, a unique id prefix of at
+least 8 hex digits (`019f0494`), its OKF concept ID
+(`infra/my-note--019f049400a8`, optionally with `.md` or a leading `/`), or a
+file path. An `id` that more than one concept declares is refused, with the
+paths of every copy, rather than resolved to whichever is found first: give
+the path of the one you mean, and see `okfw validate --all`.
 
 ### Find backlinks by file path
 ```bash
-zk backlinks ./notes/202602131045.md
+okfw backlinks ./notes/202602131045.md
 ```
 
 ### JSON output
 ```bash
-zk backlinks 202602131045 --json
-zk backlinks 202602131045 --json | jq '.[].title'
+okfw backlinks 202602131045 --json
+okfw backlinks 202602131045 --json | jq '.[].title'
 ```
 
 ---
@@ -294,118 +579,103 @@ Create and manage daily notes for capturing thoughts, tasks, and reflections.
 
 ### Create or open today's daily note
 ```bash
-zk daily
+okfw daily
 ```
 
 ### Open yesterday's daily note
 ```bash
-zk daily --yesterday
+okfw daily --yesterday
 ```
 
 ### Open a specific date's daily note
 ```bash
-zk daily --date 2026-02-10
+okfw daily --date 2026-02-10
 ```
 
 ### List recent daily notes
 ```bash
-zk daily --list              # Last 14 days
-zk daily --list --week       # This week
-zk daily --list --month      # This month
-zk daily --list --json       # JSON output
+okfw daily --list              # Last 14 days
+okfw daily --list --week       # This week
+okfw daily --list --month      # This month
+okfw daily --list --json       # JSON output
 ```
 
-Daily notes are stored in `untethered/daily/YYYY/MM/YYYY-MM-DD.md`.
+Daily notes are stored inside the wiki at `.okfw/daily/YYYY/MM/YYYY-MM-DD-<weekday>--<shortid>.md`
+(e.g. `daily/2026/06/2026-06-26-friday--019f04a10000.md`).
 
-See [Daily Notes Workflow](/zettelkasten/neovim/daily-notes-workflow/) for a comprehensive guide to daily note workflows.
+See [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a comprehensive guide to daily note workflows.
 
 ---
 
-## Todo Management
+## OKF Metadata
 
-### Create a todo
+okfw implements OKF v0.2's lifecycle, trust, and provenance families. Each has a
+writer, so no field is set-able only by hand-editing YAML.
+
+### Lifecycle
 ```bash
-zk todo "Fix login bug"
-zk todo "Update docs" --project my-project
+okfw set-lifecycle 019f0494 deprecated   # draft | stable | deprecated
+okfw set-stale-after 019f0494 2026-12-31T00:00:00Z
+okfw set-stale-after 019f0494 2026-12-31          # stored as 2026-12-31T00:00:00Z
+okfw set-stale-after 019f0494 --clear
 ```
 
-### Create with due date and priority
+An absent `status` means `stable`. A concept is stale once now is on or after
+`stale_after` — an absolute instant, not a TTL. OKF requires an ISO 8601
+datetime with a UTC offset; a bare date is accepted and stored as midnight UTC.
+
+### Trust
 ```bash
-zk todo "Critical fix" --due 2026-02-20 --priority high
-zk todo "Nice to have" --priority low
+okfw verify 019f0494                              # defaults to human:<your login>
+okfw verify 019f0494 --by process:nightly-audit
+okfw verify 019f0494 --by human:ryan --at 2026-07-20T10:00:00Z
+okfw set-generated 019f0494 --by process:finance-nightly
 ```
 
-### List todos
+`verify` appends to the concept's `verified` list. Consumers derive a trust tier
+from it: no entries means `unverified`, non-human actors mean
+`machine-confirmed`, and any `human:` actor means `human-reviewed`. Running
+`verify` by hand is a human confirmation, hence the default actor.
+
+`--by` on both commands must be `human:<id>`, `process:<id>` or
+`<producer>/<version>`, with the prefix in lowercase; anything else is refused,
+because the tier keys on the exact prefix `human:` and a misspelt one would
+silently record a human review as machine-confirmed.
+
+`generated.at` is not set directly — it mirrors `timestamp`, and okfw keeps the
+two equal.
+
+### Provenance
 ```bash
-zk todos                        # List open todos
-zk todos --project my-project   # Filter by project
-zk todos --overdue              # Overdue todos
-zk todos --today                # Due today
-zk todos --this-week            # Due this week
-zk todos --closed               # Show closed todos
-zk todos --json                 # JSON output
+okfw add-source 019f0494 --resource https://example.com/schema --id ga4-schema
+okfw add-source 019f0494 --resource "all queries in project X" \
+    --usage-count 412 --usage-window 2026-01-01T00:00:00Z..2026-06-30T00:00:00Z
 ```
 
-### Manage todo status
+`--resource` is required, and names either something a consumer can follow or a
+scope descriptor it cannot. `--id` is the join key for `[^id]` body footnotes,
+so a specific claim can cite a specific source. An `--id` the concept's
+`sources` already uses is refused, in any letter case. Add the source before
+the claim that cites it: an edit that leaves a `[^id]` matching nothing is
+refused.
+
+### The described asset
 ```bash
-zk set-status 202602131045 closed       # Mark as closed
-zk set-status 202602131045 in_progress  # Set to in progress
-zk set-status 202602131045 open         # Reopen a closed todo
+okfw set-resource 019f0494 bigquery://project.dataset.orders
 ```
 
-### Generate todo list markdown
-```bash
-zk todo-list                    # Generate todo list
-zk todo-list --project my-project
-zk todo-list --output my-todos.md
-```
+Sets OKF's `resource` field: a URI identifying the underlying asset this concept
+describes. Absent for concepts about abstract ideas.
 
-See [Todo Workflow](/zettelkasten/neovim/todo-workflow/) for a comprehensive guide to todo workflows.
+See [Note Format](/okf-wiki/getting-started/note-format/) for the full field
+reference.
 
----
-
-## Git Workflow
-
-Manage your zettelkasten git repository with dated branches.
-
-### Start your day (hello)
-```bash
-zk hello
-```
-
-This command:
-- Checks out the `main` branch
-- Pulls latest changes
-- Creates a new branch named with today's date (`YYYYMMDD` format, e.g., `20260213`)
-- Warns if the branch already exists (does nothing)
-- Warns if there are uncommitted changes (does nothing)
-
-### End your day (goodbye)
-```bash
-zk goodbye
-```
-
-This command:
-- Commits all changes with a timestamped message
-- Checks out `main`
-- Merges the dated branch into `main`
-- Deletes the dated branch after merge
-- Warns if not on a date branch (does nothing)
-- Warns if there are no changes to commit (still merges)
-
-### Typical daily workflow
-```bash
-# Morning
-zk hello                    # Create today's branch
-
-# Throughout the day
-zk create "Meeting notes" --template meeting
-zk todo "Follow up on action item"
-zk daily                    # Add to daily note
-
-# End of day
-zk goodbye                  # Commit and merge to main
-```
+:::note
+okfw has **no task tracking**. `okfw todo`, `todos`, `todo-list`, and `set-status`
+were removed along with the `todo` kind: OKF v0.2 spec'd `status` as the
+lifecycle field, and okfw is a knowledge format rather than a task tracker. Run
+`okfw migrate` to clean up concepts written before the removal.
+:::
 
 ---
 
@@ -413,110 +683,151 @@ zk goodbye                  # Commit and merge to main
 
 ### General help
 ```bash
-zk --help
-zk -h
+okfw --help
+okfw -h
 ```
 
 ### Command-specific help
 ```bash
-zk create --help
-zk index --help
+okfw create --help
+okfw search --help
 ```
 
 ---
 
 ## Flags Reference
 
-### `zk create`
+All commands (other than `okfw init`) require a discovered wiki; they exit
+non-zero with the `okfw init` advice when none is found.
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--category` | `-c` | `untethered` | Note category (`untethered` or `tethered`) |
-| `--project` | `-p` | (auto-detect) | Project context |
-| `--template` | - | - | Use a note template (e.g., `meeting`, `user-story`) |
-| `--help` | `-h` | - | Show help |
+### `okfw init`
 
-### `zk templates`
+Usage: `okfw init`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk tether`
+### `okfw connect`
 
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--project` | `-p` | (auto-detect) | Project context for tethered note |
-| `--help` | `-h` | - | Show help |
-
-### `zk untether`
+Usage: `okfw connect`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk set-project`
+### `okfw create`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--body` | - | - | Markdown body content for the note |
+| `--json` | - | `false` | Print `{"id","path"}` as JSON instead of prose |
+| `--project` | `-p` | - | Optional project metadata (also used as the note's folder) |
+| `--description` | `-d` | - | One-sentence OKF description (written to frontmatter) |
+| `--path` | - | - | Place the concept in an arbitrary wiki subdirectory (e.g. `projects/okf`) |
+| `--tags` | - | - | Additional tags (comma-separated) |
+| `--template` | `-T` | - | Use a note template (e.g., `meeting`, `user-story`) |
+| `--help` | `-h` | - | Show help |
+
+### `okfw templates`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk add-tags`
-
-Usage: `zk add-tags <file> <tag1> [tag2...]`
+### `okfw set-project`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk validate`
+### `okfw add-tags`
 
-Usage: `zk validate <file>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `zk index`
+Usage: `okfw add-tags <id_or_file> <tag1> [tag2...]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk search`
+### `okfw validate`
+
+Usage: `okfw validate <id_or_file>`, `okfw validate --all [path]`, or `okfw validate --okf [path]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--all` | - | `false` | Apply the strict okfw schema to every concept in the bundle |
+| `--okf` | - | `false` | Validate the whole wiki for OKF §11 conformance: every concept has parseable frontmatter with a non-empty `type`, every `index.md` follows §8 (no frontmatter except `okf_version` at the root) and every `log.md` follows §9 (`## YYYY-MM-DD` headings, newest first). Broken links, listing entries that are not links, and a declared `okf_version` other than okfw's are reported as warnings |
+| `--help` | `-h` | - | Show help |
+
+### `okfw mcp`
+
+Usage: `okfw mcp`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--help` | `-h` | - | Show help |
+
+### `okfw install`
+
+Usage: `okfw install [--platform claude|gemini|codex]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--platform` | - | `claude` | Agent platform: `claude`, `gemini`, or `codex` |
+| `--force` | - | `false` | Overwrite an existing skill file |
+| `--help` | `-h` | - | Show help |
+
+### `okfw index-md`
+
+Usage: `okfw index-md [path]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--no-adopt` | - | `false` | Refresh only listings okfw already maintains; never take over an unmarked `index.md` |
+| `--help` | `-h` | - | Show help |
+
+### `okfw log`
+
+Usage: `okfw log [path]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--help` | `-h` | - | Show help |
+
+### `okfw root`
+
+Usage: `okfw root`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--help` | `-h` | - | Show help |
+
+### `okfw search`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--project` | `-p` | - | Filter by project |
-| `--category` | `-c` | - | Filter by category (`untethered`/`tethered`) |
 | `--tag` | `-T` | - | Filter by tag (repeatable, AND logic) |
-| `--type` | `-t` | - | Filter by type (`note`/`todo`/`daily-note`/`issue`) |
-| `--status` | - | - | Filter by status (`open`/`in_progress`/`closed`) |
-| `--priority` | - | - | Filter by priority (`high`/`medium`/`low`) |
-| `--due-before` | - | - | Filter todos due before date (YYYY-MM-DD) |
-| `--due-after` | - | - | Filter todos due after date (YYYY-MM-DD) |
+| `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
+| `--type` | `-t` | - | Filter by the free-form OKF `type` field |
+| `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`) |
+| `--stale` | - | `false` | Only concepts whose `stale_after` instant has been reached |
 | `--limit` | `-l` | `20` | Maximum number of results |
+| `--offset` | - | `0` | Skip this many results (pagination) |
 | `--json` | - | `false` | Output as JSON |
 | `--help` | `-h` | - | Show help |
 
-### `zk graph`
+### `okfw graph`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--ascii` | - | `false` | Render a plain-text tree instead of Mermaid |
 | `--limit` | `-l` | `10` | Maximum number of nodes to display |
 | `--start` | | - | Start tree from a specific note ID |
 | `--depth` | | `0` (unlimited) | Maximum tree depth |
-| `--sync` | | `false` | Sync graph database before querying |
 | `--help` | `-h` | - | Show help |
 
-### `zk graph-sync`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--validate` | | `false` | Run CUE edge validation and report integrity issues |
-| `--help` | `-h` | - | Show help |
-
-### `zk graph-query`
+### `okfw graph-query`
 
 Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
 
@@ -527,14 +838,14 @@ Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
 | `--limit` | `-l` | `10` | Maximum number of nodes (cluster only) |
 | `--help` | `-h` | - | Show help |
 
-### `zk backlinks`
+### `okfw backlinks`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--json` | - | `false` | Output as JSON |
 | `--help` | `-h` | - | Show help |
 
-### `zk daily`
+### `okfw daily`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -546,66 +857,106 @@ Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
 | `--json` | - | `false` | Output as JSON (with --list) |
 | `--help` | `-h` | - | Show help |
 
-### `zk todo`
+### `okfw delete`
+
+Usage: `okfw delete <id_or_file>` (alias: `rm`)
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--project` | `-p` | (auto-detect) | Project context |
-| `--due` | - | - | Due date (YYYY-MM-DD format) |
-| `--priority` | - | - | Priority (`high`, `medium`, `low`) |
+| `--force` | `-f` | `false` | Delete without confirming |
+| `--json` | - | `false` | Output the result as JSON |
 | `--help` | `-h` | - | Show help |
 
-### `zk todos`
+### `okfw move`
+
+Usage: `okfw move <id_or_file> <destination>` (aliases: `rename`, `mv`)
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--project` | `-p` | - | Filter by project |
-| `--overdue` | - | `false` | Show overdue todos |
-| `--today` | - | `false` | Show todos due today |
-| `--this-week` | - | `false` | Show todos due this week |
-| `--closed` | - | `false` | Show closed todos |
-| `--json` | - | `false` | Output as JSON |
+| `--json` | - | `false` | Output the result as JSON |
 | `--help` | `-h` | - | Show help |
 
-### `zk set-status`
+### `okfw set-lifecycle`
 
-Usage: `zk set-status [id_or_file] [status]`
-
-Status must be one of: `open`, `in_progress`, `closed`.
+Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk todo-list`
+### `okfw set-stale-after`
+
+Usage: `okfw set-stale-after <id_or_file> [DATETIME]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--project` | `-p` | - | Filter by project |
-| `--output` | `-o` | `todos-TIMESTAMP.md` | Output filename |
+| `--clear` | - | `false` | Remove `stale_after` instead of setting it |
 | `--help` | `-h` | - | Show help |
 
-### `zk hello`
+### `okfw verify`
+
+Usage: `okfw verify <id_or_file>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--by` | - | `human:<login>` | Actor: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
+| `--at` | - | now | RFC 3339 datetime |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-generated`
+
+Usage: `okfw set-generated <id_or_file>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--by` | - | `human:<login>` | Actor that produced the content: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
+| `--help` | `-h` | - | Show help |
+
+### `okfw add-source`
+
+Usage: `okfw add-source <id_or_file> --resource <uri>`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--resource` | - | - | URL, bundle-relative path, or scope descriptor (**required**) |
+| `--id` | - | - | Join key for `[^id]` body footnotes |
+| `--title` | - | - | Human-readable label |
+| `--author` | - | - | Actor who produced the source |
+| `--usage-count` | - | - | How often the resource was exercised |
+| `--last-modified` | - | - | When the source itself last changed (ISO 8601 datetime; a bare date means midnight UTC) |
+| `--usage-window` | - | - | Datetime range framing `--usage-count`, as `FROM..TO` |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-resource`
+
+Usage: `okfw set-resource <id_or_file> <uri>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--help` | `-h` | - | Show help |
 
-### `zk goodbye`
+### `okfw migrate`
+
+Usage: `okfw migrate [path]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--dry-run` | - | `false` | Report what would change without writing |
 | `--help` | `-h` | - | Show help |
 
 ---
 
-## Note ID Format
+## Note ID and Filename Format
 
-Notes use a 12-digit timestamp ID: `YYYYMMDDHHMM`
+Notes use a UUIDv7 `id`, for example `019f0494-00a8-7206-b788-c5bbfa2430a8`.
+Legacy `YYYYMMDDHHmmss-UUID` IDs are still accepted.
 
-Examples:
-- `202602131045` = February 13, 2026 at 10:45
-- `202601010900` = January 1, 2026 at 09:00
+Concept files are named `slug--shortid.md` (e.g. `my-note-title--019f049400a8.md`),
+where the short id is the first 12 hex digits of the UUID (extended on a
+collision). A concept's **OKF id is its path within the wiki minus `.md`** — so
+`infra/my-note-title--019f049400a8.md` has the id
+`infra/my-note-title--019f049400a8`. Links between concepts are
+vanilla markdown links pointing at these paths.
 
 ---
 
@@ -613,40 +964,63 @@ Examples:
 
 ```yaml
 ---
-id: "YYYYMMDDHHMM"
+id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Note Title"
-project: "project-name"
-category: "untethered"  # or "tethered"
+type: "note"            # required, free-form OKF kind; defaults to the kind value
+# kind: "note"          # structured kind; omitted when it equals "note"
+description: "..."      # optional one-sentence OKF summary
+project: "project-name" # optional
 tags:
   - "tag1"
   - "tag2"
 created: "YYYY-MM-DDTHH:MM:SSZ"
-parent: "YYYYMMDDHHMM"  # optional
+timestamp: "YYYY-MM-DDTHH:MM:SSZ"   # OKF last meaningful change
+parent: "019f0312-4700-7def-9abc-ffffffffffff"  # optional; the parent's full id
 ---
 ```
+
+See [Note Format](/okf-wiki/getting-started/note-format/) for the full field
+reference, including the `type` vs `kind` distinction.
 
 ---
 
 ## Directory Structure
 
-Default layout (configurable):
+Concepts are organized by topic and project. With no `--path`, a concept is
+placed in a top-level folder named after its project (or the wiki root when no
+project is set); `--path <subdir>` overrides that.
 
 ```
-~/zk_vault/
-├── untethered/         # Quick captures, ideas
-│   └── 202602131045.md
-├── tethered/           # Refined, linked notes
-│   └── 202602131100.md
-└── tmp/                # Scratch space
+.okfw/                             # Wiki root (at the project root)
+├── index.md                       # Directory listing (reserved; okf_version)
+├── log.md                         # Update history (reserved)
+├── infra/                         # A project folder (concepts grouped by project)
+│   ├── index.md
+│   └── my-first-idea--019f049400a8.md
+├── daily/                         # Daily notes, grouped by year/month
+│   └── 2026/
+│       └── 06/
+│           └── 2026-06-26-friday--019f04a10000.md
+├── any-other-folder/              # Concepts may live in any directory you choose
+│   └── refined-concept--019f04b80000.md
+├── ephemeral/                     # Export scratch dir (gitignored)
+└── .gitignore                     # Ignores ephemeral/
 ```
+
+`index.md` and `log.md` are **reserved filenames** carrying no concept
+frontmatter.
 
 ---
 
 ## Environment
 
-`zk` automatically detects:
-- **Git project**: Uses repo name as `project` field
+`okfw` automatically detects:
+- **The wiki**: Searches upward from the current directory for `.okfw/` (like git finds `.git`)
+- **The project root**: `okfw init` places `.okfw/` at the git repository root, or the current directory outside git
 - **Working directory**: For relative paths
+
+`project` is **never** derived from git. It is optional metadata: pass
+`-p/--project` when creating a concept, or set it later with `okfw set-project`.
 
 ---
 
@@ -654,46 +1028,30 @@ Default layout (configurable):
 
 ### Capture an idea quickly (no project context)
 ```bash
-zk create "Random thought while commuting"
+okfw create "Random thought while commuting"
 ```
 
 ### Capture while working on a project
 ```bash
 cd ~/projects/my-project
-zk create "Interesting pattern in auth flow"
-# Project auto-detected from git
+okfw create "Interesting pattern in auth flow"
 ```
 
 ### Add project context later
 ```bash
-zk set-project ~/zk_vault/untethered/202602131045.md my-project
-```
-
-### Tether an untethered note
-```bash
-# Review and refine the untethered note, then tether
-zk tether ~/zk_vault/untethered/202602131045.md --project my-project
-
-# Or if in a git repo, project is auto-detected
-cd ~/projects/my-project
-zk tether ~/zk_vault/untethered/202602131045.md
-```
-
-### Untether a tethered note
-```bash
-# Revert a tethered note back to untethered
-zk untether ~/zk_vault/tethered/202602131100.md
+okfw set-project 019f0494 my-project
 ```
 
 ### Build a note chain
 ```bash
 # Create parent
-zk create "Main concept" --category tethered -p my-project
-# Note the ID (e.g., 202602131045)
+okfw create "Main concept" -p my-project --json
+# Note its full frontmatter id, e.g. 019f0494-00a8-7206-b788-c5bbfa2430a8
 
 # Create child (manually add parent field to frontmatter)
-zk create "Sub-concept" --category tethered -p my-project
-# Edit to add: parent: "202602131045"
+okfw create "Sub-concept" -p my-project
+# Edit to add: parent: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+# (parent must be the full id, not a path or prefix)
 ```
 
 ---
@@ -703,11 +1061,17 @@ zk create "Sub-concept" --category tethered -p my-project
 ```bash
 make build            # Build binary
 make test             # Run Go tests + CUE validation
-make lint             # Run go vet + staticcheck
+make test-race        # Go tests under the race detector
+make lint             # Run go vet + staticcheck + gofmt check
 make fmt              # Format Go + CUE files
 make install          # Install to $GOPATH/bin
-make clean            # Remove binary and index
+make clean            # Remove the binary
 make tidy             # Run go mod tidy
 make ui-check         # Lint Lua plugin
 make integration-test # Test NeoVim integration
+make e2e              # CLI + NeoVim suite inside a container
+make docs-dev         # Run the docs site locally
+make build-image      # Build the devcontainer image
+make run-container    # Start the devcontainer
+make stop-container   # Stop and remove the devcontainer
 ```

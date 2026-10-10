@@ -1,54 +1,61 @@
-# zk - Zettelkasten CLI
+# okfw - OKF Wiki
 
-A fast, opinionated command-line tool for managing a Zettelkasten note-taking system. Built with Go, validated with CUE schemas, and integrated with NeoVim.
+A fast, opinionated command-line tool for managing a local-first personal knowledge base. Built with Go, validated with CUE schemas, and integrated with NeoVim. Concepts are stored as plain markdown in a per-project `.okfw/` wiki that conforms to the Open Knowledge Format (OKF).
 
 ---
 
 ## Features
 
 - **CUE-validated schemas** - Frontmatter is validated against strict CUE schemas
-- **Git-aware** - Automatically detects project context from git repositories
-- **Bleve full-text search** - Fast, local search index with structured field queries
-- **Graph visualization** - ASCII tree showing note relationships
-- **Backlinks discovery** - Find all notes that link to any zettel
+- **Full-text search** - Scans and ranks the concepts; no index to build, so results always match the files
+- **Graph visualization** - Mermaid diagram (or an ASCII tree with `--ascii`) of concept relationships
+- **Backlinks discovery** - Find all concepts that link to any concept
 - **Note templates** - Built-in templates for meetings, user stories, features, and more
 - **Daily notes** - Idempotent daily capture with review workflows
-- **Todo management** - Task tracking with status, due dates, priority, and generated lists
+- **OKF metadata** - Lifecycle status, staleness, verification trail, and provenance sources
 - **NeoVim integration** - Lua plugin for seamless note creation from your editor
-- **Hierarchical notes** - Support for parent-child relationships between zettels
-- **Universal linking** - Link any zettel to any other zettel (todos, notes, daily notes)
-- **Git workflow** - Dated branch management with `hello` and `goodbye` commands
-
-To improve this section, I’ve refined the flow to distinguish between **Pre-requisites** (the reading) and the **Quick Start** (the action). I also polished the note to sound more like a seasoned engineer sharing a "pro-tip" rather than an afterthought.
+- **AI-agent ready** - `--json` output, self-documenting help, a token-lean MCP server (`okfw mcp`), and an agent skill installed with `okfw install`
+- **Hierarchical notes** - Support for parent-child relationships between concepts
+- **Universal linking** - Link any concept to any other concept (notes, daily notes, issues)
 
 ---
 
 ## Getting Started
 
-Follow these steps to transition from theory to a fully functional, containerized Zettelkasten environment.
+Follow these steps to transition from theory to a fully functional, containerized OKF Wiki environment.
 
 ### 1. Research & Methodology
 
 Before diving into the code, understand the "why" behind the workflow:
 
-* [Why Zettelkasten?](https://infrashift.github.io/zettelkasten/methodology/why-zettelkasten/) – Core philosophy and benefits.
-* [The Tutorial](https://infrashift.github.io/zettelkasten/tutorial/) – A deep dive into the specific implementation used here.
+* [Why OKF Wiki?](https://infrashift.github.io/okf-wiki/methodology/why-okf-wiki/) – Core philosophy and benefits.
+* [The Tutorial](https://infrashift.github.io/okf-wiki/tutorial/) – A deep dive into the specific implementation used here.
 
 ### 2. Quick Start
 
-Deploy the environment in three commands:
-
-1. **Clone the repository:**
+1. **Install the CLI:**
 ```bash
-git clone https://github.com/infrashift/zettelkasten.git && cd zettelkasten
-
+git clone https://github.com/infrashift/okf-wiki.git && cd okf-wiki
+make install  # Installs okfw to $GOPATH/bin
 ```
 
+2. **Initialize a wiki in your project:**
+```bash
+cd your-project
+okfw init     # Creates .okfw/ at the project root (no-op if it exists)
+```
 
-2. **Spin up the environment:**
-Build and run the OCI container. This image comes pre-configured with `tmux`, `LazyVim`, the `Zettelkasten` CLI, and the `ZK` Neovim plugin.
-3. **Execute Workflows:**
-Open Neovim within the container and follow the interactive workflows defined in the tutorial.
+3. **Create and search notes:**
+```bash
+okfw create "My first idea"
+okfw search "idea"
+```
+
+Every command discovers the `.okfw/` wiki automatically from any subdirectory
+of your project. Prefer a ready-made environment? Build and run the OCI
+container — it comes pre-configured with `tmux`, `LazyVim`, the OKF Wiki CLI,
+and the `okfw` Neovim plugin — and follow the interactive workflows in the
+tutorial.
 
 ---
 
@@ -62,43 +69,55 @@ Open Neovim within the container and follow the interactive workflows defined in
 
 ### Prerequisites
 
-- Go 1.22+
+- Go 1.24+
 - CUE (for schema validation)
 
 ### Build from source
 
 ```bash
-git clone https://github.com/infrashift/zettelkasten-cli.git
-cd zettelkasten-cli
+git clone https://github.com/infrashift/okf-wiki.git
+cd okf-wiki
 make build
 make install  # Installs to $GOPATH/bin
 ```
 
-## Configuration
+## Zero Configuration
 
-Create a config file at `~/.config/zk/config.cue`:
+There is no config file. A wiki is a `.okfw/` directory at a project's root,
+created once with `okfw init`. Every command discovers it by searching upward
+from the current working directory (like git finds `.git`), so `okfw` works
+from any subdirectory. `okfw connect` verifies the wiki; `okfw root` prints
+its path.
 
-```cue
-root_path:  "~/zettelkasten"
-index_path: ".zk_index"
-editor:     "nvim"
-folders: {
-    untethered: "untethered"
-    tethered:   "tethered"
-    tmp:        "tmp"
-}
-```
+The layout inside `.okfw/` is fixed:
 
-### Configuration Options
+| Path | Description |
+|------|-------------|
+| `*.md` (top level) | Concept markdown (subdirectories via `--path` or `--project`) |
+| `daily/YYYY/MM/` | Daily notes |
+| `ephemeral/` | Export scratch dir |
+| `.gitignore` | Ignores `ephemeral/` |
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `root_path` | `~/zettelkasten` | Root directory for all notes |
-| `index_path` | `.zk_index` | Location of Bleve search index |
-| `editor` | `nvim` | Editor for opening notes |
-| `folders.untethered` | `untethered` | Subdirectory for untethered notes |
-| `folders.tethered` | `tethered` | Subdirectory for tethered notes |
-| `folders.tmp` | `tmp` | Subdirectory for temporary notes |
+Concept markdown is meant to be committed with the project; generated
+artifacts are gitignored.
+
+---
+
+## AI Agents
+
+Two complementary integration points:
+
+- **MCP server** — `okfw mcp` serves five consolidated tools (`okfw_search`,
+  `okfw_create`, `okfw_read`, `okfw_update`, `okfw_graph`) over stdio with
+  compact JSON responses (about 3.9 KB of tool schemas). Register with
+  `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
+  unprefixed names still dispatch, for configurations that predate the prefix.
+- **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
+  skill and a managed CLAUDE.md/GEMINI.md/AGENTS.md block teaching agents the
+  wiki's conventions (linking syntax, atomic notes, capture → refine → link).
+  Re-running it is idempotent, and the block is namespaced so it leaves the
+  rest of the file alone. The skill covers the *why and when*; the MCP tools and
+  `okfw --help` cover the mechanics.
 
 ---
 
@@ -126,16 +145,20 @@ make ui-check
 ## Project Structure
 
 ```
-zettelkasten/
+okf-wiki/
 ├── cli/
-│   ├── cmd/zk/          # CLI entry point
+│   ├── cmd/okfw/        # CLI entry point (all commands, MCP server)
 │   ├── internal/
-│   │   ├── config/      # CUE schemas and config loading
-│   │   ├── graph/       # Note relationship graph
-│   │   ├── index/       # Bleve search index
-│   │   └── zettel/      # Note utilities
+│   │   ├── config/      # .okfw discovery and CUE schema validation
+│   │   ├── bundle/      # Write path: concept creation, frontmatter, index.md, link graph
+│   │   ├── graph/       # In-memory graph + rendering (Mermaid, ASCII tree)
+│   │   ├── search/      # Scan-and-rank concept search (no index)
+│   │   ├── agentskill/  # Agent-skill installer (okfw install)
+│   │   ├── okfwskills/  # okfw's SKILL.md / CLAUDE.md-block templates
+│   │   ├── templates/   # Embedded note templates
+│   │   └── gitctx/      # Git project-context helper
 │   └── testdata/        # Test fixtures
-├── lua/zk/              # NeoVim plugin
+├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload
 ├── doc/                 # NeoVim help
 ├── after/               # NeoVim ftplugin

@@ -29,9 +29,6 @@ var featureTemplate string
 //go:embed daily.md
 var dailyTemplate string
 
-//go:embed todo.md
-var todoTemplate string
-
 //go:embed issue.md
 var issueTemplate string
 
@@ -39,17 +36,9 @@ var issueTemplate string
 type Template struct {
 	Name        string
 	Description string
-	Category    string
-	Type        string   // "note" (default) or "todo"
+	Kind        string // structured kind: "note" (default), "daily-note", "issue"
 	Tags        []string
 	Body        string
-}
-
-// TodoOptions holds todo-specific frontmatter options
-type TodoOptions struct {
-	Status   string // "open", "in_progress", "closed"
-	Due      string // YYYY-MM-DD
-	Priority string // "high", "medium", "low"
 }
 
 // TemplateData holds the data for template rendering
@@ -65,66 +54,50 @@ var BuiltinTemplates = map[string]*Template{
 	"meeting": {
 		Name:        "meeting",
 		Description: "Meeting notes with attendees and action items",
-		Category:    "untethered",
 		Tags:        []string{"meeting"},
 		Body:        meetingTemplate,
 	},
 	"book-review": {
 		Name:        "book-review",
 		Description: "Book review with rating and key takeaways",
-		Category:    "tethered",
 		Tags:        []string{"book", "review"},
 		Body:        bookReviewTemplate,
 	},
 	"snippet": {
 		Name:        "snippet",
 		Description: "Code snippet with context and explanation",
-		Category:    "untethered",
 		Tags:        []string{"code", "snippet"},
 		Body:        snippetTemplate,
 	},
 	"project-idea": {
 		Name:        "project-idea",
 		Description: "Project idea with goals and next steps",
-		Category:    "untethered",
 		Tags:        []string{"idea", "project"},
 		Body:        projectIdeaTemplate,
 	},
 	"user-story": {
 		Name:        "user-story",
 		Description: "User story in standard format with acceptance criteria",
-		Category:    "untethered",
 		Tags:        []string{"user-story", "requirements"},
 		Body:        userStoryTemplate,
 	},
 	"feature": {
 		Name:        "feature",
 		Description: "Feature specification with requirements and design notes",
-		Category:    "untethered",
 		Tags:        []string{"feature", "spec"},
 		Body:        featureTemplate,
 	},
 	"daily": {
 		Name:        "daily",
 		Description: "Daily note for capturing thoughts, tasks, and reflections",
-		Category:    "untethered",
-		Type:        "daily-note",
+		Kind:        "daily-note",
 		Tags:        []string{"daily"},
 		Body:        dailyTemplate,
-	},
-	"todo": {
-		Name:        "todo",
-		Description: "Actionable task with status tracking",
-		Category:    "untethered",
-		Type:        "todo",
-		Tags:        []string{"todo"},
-		Body:        todoTemplate,
 	},
 	"issue": {
 		Name:        "issue",
 		Description: "Issue tracking like GitHub (bug, enhancement, question)",
-		Category:    "untethered",
-		Type:        "issue",
+		Kind:        "issue",
 		Tags:        []string{"issue"},
 		Body:        issueTemplate,
 	},
@@ -165,11 +138,6 @@ func (t *Template) Render(data TemplateData) (string, error) {
 
 // GenerateFrontmatter generates YAML frontmatter for a template
 func (t *Template) GenerateFrontmatter(id, title, project string, extraTags []string) string {
-	return t.GenerateFrontmatterWithOptions(id, title, project, extraTags, nil)
-}
-
-// GenerateFrontmatterWithOptions generates YAML frontmatter with optional todo-specific fields
-func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, extraTags []string, todoOpts *TodoOptions) string {
 	now := time.Now()
 
 	// Merge template tags with extra tags
@@ -189,37 +157,28 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 		}
 	}
 
+	kind := t.Kind
+	if kind == "" {
+		kind = "note"
+	}
+
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	buf.WriteString(fmt.Sprintf("id: %q\n", id))
 	buf.WriteString(fmt.Sprintf("title: %q\n", title))
 
-	// Add type if not "note" (default)
-	if t.Type != "" && t.Type != "note" {
-		buf.WriteString(fmt.Sprintf("type: %q\n", t.Type))
+	// OKF requires a non-empty `type` on every concept. Default it to the
+	// structured kind; callers may override with a descriptive value later.
+	buf.WriteString(fmt.Sprintf("type: %q\n", kind))
+
+	// Write the structured `kind` only when it differs from the default,
+	// to keep plain-note frontmatter clean.
+	if kind != "note" {
+		buf.WriteString(fmt.Sprintf("kind: %q\n", kind))
 	}
 
 	if project != "" {
 		buf.WriteString(fmt.Sprintf("project: %q\n", project))
-	}
-
-	buf.WriteString(fmt.Sprintf("category: %q\n", t.Category))
-
-	// Todo-specific fields
-	if t.Type == "todo" {
-		status := "open"
-		if todoOpts != nil && todoOpts.Status != "" {
-			status = todoOpts.Status
-		}
-		buf.WriteString(fmt.Sprintf("status: %q\n", status))
-
-		if todoOpts != nil && todoOpts.Due != "" {
-			buf.WriteString(fmt.Sprintf("due: %q\n", todoOpts.Due))
-		}
-
-		if todoOpts != nil && todoOpts.Priority != "" {
-			buf.WriteString(fmt.Sprintf("priority: %q\n", todoOpts.Priority))
-		}
 	}
 
 	buf.WriteString("tags:\n")
@@ -227,7 +186,9 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 		buf.WriteString(fmt.Sprintf("  - %q\n", tag))
 	}
 
-	buf.WriteString(fmt.Sprintf("created: %q\n", now.Format(time.RFC3339)))
+	stamp := now.Format(time.RFC3339)
+	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
+	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
 	buf.WriteString("---\n\n")
 
 	return buf.String()
@@ -235,12 +196,7 @@ func (t *Template) GenerateFrontmatterWithOptions(id, title, project string, ext
 
 // GenerateNote generates a complete note from a template
 func (t *Template) GenerateNote(id, title, project string, extraTags []string) (string, error) {
-	return t.GenerateNoteWithOptions(id, title, project, extraTags, nil)
-}
-
-// GenerateNoteWithOptions generates a complete note with optional todo-specific fields
-func (t *Template) GenerateNoteWithOptions(id, title, project string, extraTags []string, todoOpts *TodoOptions) (string, error) {
-	frontmatter := t.GenerateFrontmatterWithOptions(id, title, project, extraTags, todoOpts)
+	frontmatter := t.GenerateFrontmatter(id, title, project, extraTags)
 
 	data := TemplateData{
 		ID:      id,

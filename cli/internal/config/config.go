@@ -5,120 +5,119 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"cuelang.org/go/cue"
 	"cuelang.org/go/cue/cuecontext"
 	"gopkg.in/yaml.v3"
 )
 
-//go:embed config-schema.cue
-var configSchema string
+//go:embed concept-schema.cue
+var conceptSchema string
 
-//go:embed zettel-schema.cue
-var zettelSchema string
+// WikiDirName is the per-project wiki directory created by `okfw init` and
+// discovered by every command.
+const WikiDirName = ".okfw"
 
-// Config represents the application configuration.
+// Config carries the resolved paths of a discovered wiki.
 type Config struct {
-	RootPath  string  `json:"root_path" yaml:"root_path"`
-	IndexPath string  `json:"index_path" yaml:"index_path"`
-	GraphPath string  `json:"graph_path" yaml:"graph_path"`
-	TodosPath string  `json:"todos_path" yaml:"todos_path"`
-	Editor    string  `json:"editor" yaml:"editor"`
-	Folders   Folders `json:"folders" yaml:"folders"`
+	RootPath string // absolute path of the .okfw directory (the OKF bundle root)
 }
 
-// Folders represents the folder configuration.
-type Folders struct {
-	Untethered string `json:"untethered" yaml:"untethered"`
-	Tethered   string `json:"tethered" yaml:"tethered"`
-	Tmp        string `json:"tmp" yaml:"tmp"`
+// ErrNoWiki is returned by Discover when no .okfw directory is found.
+type ErrNoWiki struct {
+	StartDir string
 }
 
-// LoadSchema compiles and returns the #Config CUE definition.
-func LoadSchema() (cue.Value, error) {
-	ctx := cuecontext.New()
-	val := ctx.CompileString(configSchema)
-	if val.Err() != nil {
-		return cue.Value{}, fmt.Errorf("failed to compile config schema: %w", val.Err())
+func (e *ErrNoWiki) Error() string {
+	return fmt.Sprintf("no OKF wiki found (searched upward from %s); run 'okfw init' at your project root to create one", e.StartDir)
+}
+
+// ConfigFor returns the Config for a wiki rooted at the given .okfw directory.
+func ConfigFor(wikiDir string) *Config {
+	return &Config{
+		RootPath: wikiDir,
 	}
-	return val.LookupPath(cue.ParsePath("#Config")), nil
 }
 
-// LoadZettelSchema compiles and returns the #Zettel CUE definition.
-func LoadZettelSchema() (cue.Value, error) {
-	ctx := cuecontext.New()
-	val := ctx.CompileString(zettelSchema)
-	if val.Err() != nil {
-		return cue.Value{}, fmt.Errorf("failed to compile zettel schema: %w", val.Err())
+// Discover walks from startDir (or the current working directory when "")
+// upward to the nearest directory containing .okfw/ and returns the resolved
+// Config. Returns *ErrNoWiki when no wiki is found.
+func Discover(startDir string) (*Config, error) {
+	if startDir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("failed to get working directory: %w", err)
+		}
+		startDir = cwd
 	}
-	return val.LookupPath(cue.ParsePath("#Zettel")), nil
-}
-
-// Load loads the configuration from the specified path.
-// If configPath is empty, it returns the default configuration.
-func Load(configPath string) (*Config, error) {
-	schema, err := LoadSchema()
+	abs, err := filepath.Abs(startDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to resolve %q: %w", startDir, err)
 	}
 
-	ctx := schema.Context()
-
-	// Start with schema defaults
-	val := schema
-
-	// If a config file is specified, load and unify it
-	if configPath != "" {
-		data, err := os.ReadFile(configPath)
-		if err != nil {
-			if !os.IsNotExist(err) {
-				return nil, fmt.Errorf("failed to read config file: %w", err)
-			}
-			// File doesn't exist, use defaults
-		} else {
-			// Parse user config as CUE
-			userVal := ctx.CompileBytes(data)
-			if userVal.Err() != nil {
-				return nil, fmt.Errorf("failed to parse config file: %w", userVal.Err())
-			}
-
-			// Unify with schema
-			val = schema.Unify(userVal)
-			if val.Err() != nil {
-				return nil, fmt.Errorf("config validation failed: %w", val.Err())
-			}
+	dir := abs
+	for {
+		wikiDir := filepath.Join(dir, WikiDirName)
+		if fi, err := os.Stat(wikiDir); err == nil && fi.IsDir() {
+			return ConfigFor(wikiDir), nil
 		}
-	}
-
-	var cfg Config
-	if err := val.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("failed to decode config: %w", err)
-	}
-
-	// Expand ~ in root_path
-	if len(cfg.RootPath) > 0 && cfg.RootPath[0] == '~' {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("failed to get home directory: %w", err)
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return nil, &ErrNoWiki{StartDir: abs}
 		}
-		cfg.RootPath = filepath.Join(home, cfg.RootPath[1:])
+		dir = parent
 	}
-
-	return &cfg, nil
 }
 
-// ValidateZettelYAML validates YAML frontmatter against the #Zettel schema.
-func ValidateZettelYAML(frontmatter []byte) error {
-	schema, err := LoadZettelSchema()
+// The compiled schema is process-wide, so it is built once. Recompiling per
+// call made every concept pay CUE compilation — invisible for a single `okfw
+// validate`, but paid thousands of times over by validate --all.
+//
+// Sharing it is not free, though: unifying against a cue.Value writes to state
+// inside its runtime (CUE v0.7 caches compiled regexps there), so concurrent
+// validations race. schemaMu serializes every use; validating one concept takes
+// well under a millisecond, so nothing waits long.
+var (
+	schemaOnce sync.Once
+	schemaVal  cue.Value
+	schemaErr  error
+	schemaMu   sync.Mutex
+)
+
+// LoadConceptSchema returns the #Concept CUE definition, compiling it on first
+// use. The returned value is shared; callers must not mutate it.
+func LoadConceptSchema() (cue.Value, error) {
+	schemaOnce.Do(func() {
+		ctx := cuecontext.New()
+		val := ctx.CompileString(conceptSchema)
+		if val.Err() != nil {
+			schemaErr = fmt.Errorf("failed to compile concept schema: %w", val.Err())
+			return
+		}
+		schemaVal = val.LookupPath(cue.ParsePath("#Concept"))
+	})
+	return schemaVal, schemaErr
+}
+
+// ValidateConceptYAML validates YAML frontmatter against the #Concept schema.
+func ValidateConceptYAML(frontmatter []byte) error {
+	schema, err := LoadConceptSchema()
 	if err != nil {
 		return err
 	}
 
-	// Parse YAML to map
-	var data map[string]interface{}
-	if err := yaml.Unmarshal(frontmatter, &data); err != nil {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
 		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
 	}
+	data, err := frontmatterValue(&doc)
+	if err != nil {
+		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
+	}
+
+	schemaMu.Lock()
+	defer schemaMu.Unlock()
 
 	// Convert to CUE and validate
 	ctx := schema.Context()

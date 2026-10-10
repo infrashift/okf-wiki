@@ -1,31 +1,58 @@
 ---
 title: Configuration
-description: Configure the Zettelkasten CLI with a CUE config file.
+description: OKF Wiki is zero-configuration — one command per project, no config file.
 ---
 
-Create a config file at `~/.config/zk/config.cue`:
+OKF Wiki is **zero-configuration**. There is no config file, no environment
+variable, and nothing to tune. A wiki is a `.okfw/` directory at your project's
+root, and every command finds it automatically.
 
-```cue
-root_path:  "~/zk_vault"
-index_path: ".zk_index"
-graph_path: ".zk_graph.db"
-editor:     "nvim"
-folders: {
-    untethered: "untethered"
-    tethered:   "tethered"
-    tmp:        "tmp"
-}
+## Initializing a wiki
+
+Run `okfw init` once per project:
+
+```bash
+cd your-project
+okfw init
 ```
 
-## Configuration Options
+This creates `.okfw/` at the git repository root (or the current directory if
+you're not in a git repo), writes a `.okfw/.gitignore` covering the
+`ephemeral/` export directory, and generates the OKF root `index.md` (with the `okf_version`
+declaration). Running `okfw init` again is a no-op that prints
+`OKF wiki already initialized at <path>`.
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `root_path` | `~/zk_vault` | Root directory for all notes |
-| `index_path` | `.zk_index` | Location of Bleve search index (relative to root) |
-| `graph_path` | `.zk_graph.db` | Location of persistent graph database (relative to root) |
-| `todos_path` | `.zk_todos` | Directory for generated todo lists (relative to root) |
-| `editor` | `nvim` | Editor for opening notes |
-| `folders.untethered` | `untethered` | Subdirectory for untethered notes |
-| `folders.tethered` | `tethered` | Subdirectory for tethered notes |
-| `folders.tmp` | `tmp` | Subdirectory for temporary notes |
+## Automatic discovery
+
+Every command discovers the wiki by searching upward from the current working
+directory — the same way git finds `.git`. That means commands work from any
+subdirectory of your project. When no wiki is found, commands exit non-zero
+with:
+
+```
+no OKF wiki found (searched upward from <dir>); run 'okfw init' at your project root to create one
+```
+
+Two commands help you verify and script against the discovered wiki:
+
+- `okfw connect` — verifies the wiki and prints `Connected: <path>` plus a
+  `concepts: N` line.
+- `okfw root` — prints the discovered `.okfw` path (script-friendly; used by
+  the Neovim plugin).
+
+## The `.okfw/` layout
+
+The layout inside `.okfw/` is fixed:
+
+| Path | Description |
+|------|-------------|
+| `*.md` (top level) | Concept markdown files (subdirectories via `--path` or `--project`) |
+| `index.md` (every directory) | OKF directory listing, auto-maintained on every note change |
+| `daily/YYYY/MM/` | Daily notes, grouped by year and month |
+| `ephemeral/` | Export scratch directory (the only generated directory) |
+| `.gitignore` | Ignores `ephemeral/` |
+
+Concept markdown is meant to be **committed with your project**; only
+`ephemeral/` is gitignored. There is no search index or graph database to
+build or keep in sync: search and the link graph are computed from the files
+on every call.

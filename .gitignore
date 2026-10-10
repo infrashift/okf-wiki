@@ -1,5 +1,5 @@
 # Binary
-/zk
+/okfw
 
 # Go
 *.exe
@@ -22,8 +22,3 @@ Thumbs.db
 
 # Claude Code (user-specific)
 .claude/settings.local.json
-
-# Generated files (by zk)
-.zk_index/
-.zk_graphs/
-.zk_todos/

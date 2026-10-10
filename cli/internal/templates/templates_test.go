@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuiltinTemplates(t *testing.T) {
-	expectedTemplates := []string{"meeting", "book-review", "snippet", "project-idea", "user-story", "feature", "daily", "todo", "issue"}
+	expectedTemplates := []string{"meeting", "book-review", "snippet", "project-idea", "user-story", "feature", "daily", "issue"}
 
 	for _, name := range expectedTemplates {
 		tmpl, ok := BuiltinTemplates[name]
@@ -21,10 +21,6 @@ func TestBuiltinTemplates(t *testing.T) {
 
 		if tmpl.Description == "" {
 			t.Errorf("Template %q has empty description", name)
-		}
-
-		if tmpl.Category != "untethered" && tmpl.Category != "tethered" {
-			t.Errorf("Template %q has invalid category: %q", name, tmpl.Category)
 		}
 
 		if len(tmpl.Tags) == 0 {
@@ -49,7 +45,7 @@ func TestGet(t *testing.T) {
 		{"user-story", false},
 		{"feature", false},
 		{"daily", false},
-		{"todo", false},
+		{"todo", true}, // removed with the task-tracking feature
 		{"issue", false},
 		{"nonexistent", true},
 		{"", true},
@@ -77,8 +73,8 @@ func TestGet(t *testing.T) {
 func TestList(t *testing.T) {
 	names := List()
 
-	if len(names) != 9 {
-		t.Errorf("Expected 9 templates, got %d", len(names))
+	if len(names) != 8 {
+		t.Errorf("Expected 8 templates, got %d", len(names))
 	}
 
 	expected := map[string]bool{
@@ -89,7 +85,6 @@ func TestList(t *testing.T) {
 		"user-story":   true,
 		"feature":      true,
 		"daily":        true,
-		"todo":         true,
 		"issue":        true,
 	}
 
@@ -141,8 +136,8 @@ func TestGenerateFrontmatter(t *testing.T) {
 		t.Errorf("Frontmatter should contain project")
 	}
 
-	if !strings.Contains(frontmatter, `category: "untethered"`) {
-		t.Errorf("Frontmatter should contain category")
+	if strings.Contains(frontmatter, "category:") {
+		t.Errorf("Frontmatter should not contain category")
 	}
 
 	if !strings.Contains(frontmatter, `"meeting"`) {
@@ -164,34 +159,6 @@ func TestGenerateFrontmatter_NoDuplicateTags(t *testing.T) {
 	count := strings.Count(frontmatter, `"meeting"`)
 	if count != 1 {
 		t.Errorf("Tag 'meeting' should appear exactly once, but appeared %d times", count)
-	}
-}
-
-func TestGenerateTodoFrontmatter(t *testing.T) {
-	tmpl, _ := Get("todo")
-
-	todoOpts := &TodoOptions{
-		Status:   "open",
-		Due:      "2026-02-20",
-		Priority: "high",
-	}
-
-	frontmatter := tmpl.GenerateFrontmatterWithOptions("20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "Fix login bug", "my-project", nil, todoOpts)
-
-	if !strings.Contains(frontmatter, `type: "todo"`) {
-		t.Errorf("Todo frontmatter should contain type: todo")
-	}
-
-	if !strings.Contains(frontmatter, `status: "open"`) {
-		t.Errorf("Todo frontmatter should contain status")
-	}
-
-	if !strings.Contains(frontmatter, `due: "2026-02-20"`) {
-		t.Errorf("Todo frontmatter should contain due date")
-	}
-
-	if !strings.Contains(frontmatter, `priority: "high"`) {
-		t.Errorf("Todo frontmatter should contain priority")
 	}
 }
 
@@ -231,5 +198,33 @@ func TestGenerateNote(t *testing.T) {
 	// Should have acceptance criteria section
 	if !strings.Contains(note, "Acceptance Criteria") {
 		t.Errorf("Note should contain Acceptance Criteria section")
+	}
+}
+
+func TestGenerateFrontmatter_OKFFields(t *testing.T) {
+	id := "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+	// A plain note: OKF `type` is always written and defaults to "note";
+	// the structured `kind` is omitted (note is the default); timestamp present.
+	note, _ := Get("meeting")
+	fm := note.GenerateFrontmatter(id, "M", "p", nil)
+	if !strings.Contains(fm, `type: "note"`) {
+		t.Error("note should always write OKF type")
+	}
+	if strings.Contains(fm, "kind:") {
+		t.Error("note frontmatter should omit the default kind")
+	}
+	if !strings.Contains(fm, "timestamp:") {
+		t.Error("frontmatter should include timestamp")
+	}
+
+	// A non-default kind: both `type` and `kind` are written.
+	issue, _ := Get("issue")
+	fm = issue.GenerateFrontmatter(id, "T", "p", nil)
+	if !strings.Contains(fm, `type: "issue"`) || !strings.Contains(fm, `kind: "issue"`) {
+		t.Errorf("issue should write both type and kind:\n%s", fm)
+	}
+	if !strings.Contains(fm, "timestamp:") {
+		t.Error("issue frontmatter should include timestamp")
 	}
 }

@@ -2,10 +2,11 @@
 
 ## Go Architecture
 - Use the **Internal Pattern**: Logic lives in `cli/internal/`, binaries in `cli/cmd/`.
-- **CUE Validation**: All YAML frontmatter must be unified with the `#Zettel` schema in `cli/internal/config`.
-- **Bleve Mapping**: Use the `keyword` analyzer for `id`, `project`, and `category`. Use the `en` analyzer for `body`.
+- **CUE Validation**: All YAML frontmatter must be unified with the `#Concept` schema in `cli/internal/config`.
+- **No derived stores**: Search (`cli/internal/search`) and the link graph (`bundle.LoadGraph`) are computed from the files on every call. Do not add a cache or index that can drift from the bundle.
+- **Shared write path**: Concept creation, frontmatter edits, moves, deletes and `index.md` listings go through `cli/internal/bundle`.
 
 ## Neovim Integration
 - **Async Only**: Never block the UI. Use `plenary.job`.
-- **snacks.nvim**: Stream JSON-lines from the CLI to the snacks.nvim picker.
-- **Ephemeral Files**: MOC (Map of Content) files should be written to a `tmp/` directory which is git-ignored.
+- **snacks.nvim**: Feed the CLI's `--json` output to the snacks.nvim picker.
+- **Ephemeral Files**: Exported files are written to the git-ignored `ephemeral/` directory at the bundle root.

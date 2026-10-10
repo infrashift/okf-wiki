@@ -38,4 +38,4 @@
 
 ## Related Stories
 
-- [[]]
+<!-- - [Related concept](/path/to/concept.md) -->

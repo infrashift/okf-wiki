@@ -1,15 +1,17 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
-func TestLoadSchema(t *testing.T) {
-	schema, err := LoadSchema()
+func TestLoadConceptSchema(t *testing.T) {
+	schema, err := LoadConceptSchema()
 	if err != nil {
-		t.Fatalf("LoadSchema() error = %v", err)
+		t.Fatalf("LoadConceptSchema() error = %v", err)
 	}
 
 	if schema.Err() != nil {
@@ -17,222 +19,182 @@ func TestLoadSchema(t *testing.T) {
 	}
 }
 
-func TestLoadZettelSchema(t *testing.T) {
-	schema, err := LoadZettelSchema()
-	if err != nil {
-		t.Fatalf("LoadZettelSchema() error = %v", err)
+func TestDiscover(t *testing.T) {
+	project := t.TempDir()
+	wikiDir := filepath.Join(project, WikiDirName)
+	if err := os.MkdirAll(wikiDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(project, "src", "internal", "deep")
+	if err := os.MkdirAll(nested, 0755); err != nil {
+		t.Fatal(err)
 	}
 
-	if schema.Err() != nil {
-		t.Fatalf("schema has error: %v", schema.Err())
+	// Found at the start directory itself.
+	cfg, err := Discover(project)
+	if err != nil {
+		t.Fatalf("Discover(project) error = %v", err)
+	}
+	if cfg.RootPath != wikiDir {
+		t.Errorf("RootPath = %q, want %q", cfg.RootPath, wikiDir)
+	}
+
+	// Found from a nested subdirectory (walks upward).
+	cfg, err = Discover(nested)
+	if err != nil {
+		t.Fatalf("Discover(nested) error = %v", err)
+	}
+	if cfg.RootPath != wikiDir {
+		t.Errorf("RootPath from nested dir = %q, want %q", cfg.RootPath, wikiDir)
 	}
 }
 
-func TestLoadDefaultConfig(t *testing.T) {
-	cfg, err := Load("")
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+func TestDiscover_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	_, err := Discover(dir)
+	if err == nil {
+		t.Fatal("Discover() expected error when no .okfw exists")
 	}
-
-	// Check defaults
-	home, _ := os.UserHomeDir()
-	expectedRoot := filepath.Join(home, "zk_vault")
-	if cfg.RootPath != expectedRoot {
-		t.Errorf("RootPath = %q, want %q", cfg.RootPath, expectedRoot)
+	var noWiki *ErrNoWiki
+	if !errors.As(err, &noWiki) {
+		t.Fatalf("expected *ErrNoWiki, got %T: %v", err, err)
 	}
-
-	if cfg.IndexPath != ".zk_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".zk_index")
-	}
-
-	if cfg.Editor != "nvim" {
-		t.Errorf("Editor = %q, want %q", cfg.Editor, "nvim")
-	}
-
-	if cfg.Folders.Untethered != "untethered" {
-		t.Errorf("Folders.Untethered = %q, want %q", cfg.Folders.Untethered, "untethered")
-	}
-
-	if cfg.Folders.Tethered != "tethered" {
-		t.Errorf("Folders.Tethered = %q, want %q", cfg.Folders.Tethered, "tethered")
-	}
-
-	if cfg.Folders.Tmp != "tmp" {
-		t.Errorf("Folders.Tmp = %q, want %q", cfg.Folders.Tmp, "tmp")
+	if !strings.Contains(err.Error(), "okfw init") {
+		t.Errorf("error should advise running okfw init, got: %v", err)
 	}
 }
 
-func TestLoadConfigFromFile(t *testing.T) {
-	// Create a temporary config file
-	tmpDir := t.TempDir()
-	configPath := filepath.Join(tmpDir, "config.cue")
-
-	configContent := `
-root_path: "/custom/path"
-editor: "vim"
-`
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		t.Fatalf("failed to write test config: %v", err)
+func TestDiscover_IgnoresOkfwFile(t *testing.T) {
+	// A plain file named .okfw must not count as a wiki.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, WikiDirName), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
 	}
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-
-	if cfg.RootPath != "/custom/path" {
-		t.Errorf("RootPath = %q, want %q", cfg.RootPath, "/custom/path")
-	}
-
-	if cfg.Editor != "vim" {
-		t.Errorf("Editor = %q, want %q", cfg.Editor, "vim")
-	}
-
-	// Defaults should still apply for unset values
-	if cfg.IndexPath != ".zk_index" {
-		t.Errorf("IndexPath = %q, want %q", cfg.IndexPath, ".zk_index")
+	if _, err := Discover(dir); err == nil {
+		t.Error("Discover() should not treat a .okfw file as a wiki")
 	}
 }
 
-func TestValidateZettelYAML_Valid(t *testing.T) {
+func TestValidateConceptYAML_Valid(t *testing.T) {
 	validYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test Zettel"
+title: "Test Concept"
+type: "note"
 project: "test-project"
-category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_ValidWithParent(t *testing.T) {
+func TestValidateConceptYAML_ValidWithParent(t *testing.T) {
 	validYAML := `
 id: "20260213110000-ffffffff-1111-2222-3333-444444444444"
-title: "Child Zettel"
+title: "Child Concept"
+type: "note"
 project: "test-project"
-category: "tethered"
 tags:
   - "child"
 created: "2026-02-13T11:00:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_ValidUUIDv7(t *testing.T) {
+func TestValidateConceptYAML_ValidUUIDv7(t *testing.T) {
 	validYAML := `
 id: "019680f0-7e00-7abc-8def-1234567890ab"
-title: "UUIDv7 Zettel"
-category: "untethered"
+title: "UUIDv7 Concept"
+type: "note"
 tags: []
 created: "2026-04-10T12:00:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() UUIDv7 should be valid, got error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() UUIDv7 should be valid, got error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_InvalidID(t *testing.T) {
+func TestValidateConceptYAML_InvalidID(t *testing.T) {
 	invalidYAML := `
 id: "12345"
 title: "Test"
+type: "note"
 project: "test"
-category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for invalid ID, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for invalid ID, got nil")
 	}
 }
 
-func TestValidateZettelYAML_EmptyTitle(t *testing.T) {
+func TestValidateConceptYAML_EmptyTitle(t *testing.T) {
 	invalidYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: ""
+type: "note"
 project: "test"
-category: "untethered"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for empty title, got nil")
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for empty title, got nil")
 	}
 }
 
-func TestValidateZettelYAML_UntetheredWithoutProject(t *testing.T) {
-	// Untethered notes can omit project entirely
+func TestValidateConceptYAML_WithoutProject(t *testing.T) {
+	// Notes can omit project entirely
 	validYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Quick Idea"
-category: "untethered"
+type: "note"
 tags: []
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(validYAML)); err != nil {
-		t.Errorf("ValidateZettelYAML() untethered without project should be valid, got error = %v", err)
+	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() note without project should be valid, got error = %v", err)
 	}
 }
 
-func TestValidateZettelYAML_TetheredRequiresProject(t *testing.T) {
-	// Tethered notes must have a non-empty project
-	invalidYAML := `
+func TestValidateConceptYAML_LegacyCategoryTolerated(t *testing.T) {
+	// Notes written before category removal may still carry the field; it is
+	// tolerated as an ignored legacy key (OKF permissive consumption).
+	legacyYAML := `
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
-category: "tethered"
-tags: []
-created: "2026-02-13T10:45:00Z"
-`
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for tethered note without project, got nil")
-	}
-}
-
-func TestValidateZettelYAML_TetheredEmptyProject(t *testing.T) {
-	// Tethered notes cannot have empty project
-	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"
-project: ""
-category: "tethered"
-tags: []
-created: "2026-02-13T10:45:00Z"
-`
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for tethered note with empty project, got nil")
-	}
-}
-
-func TestValidateZettelYAML_InvalidCategory(t *testing.T) {
-	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"
-project: "test"
-category: "draft"
-tags: []
-created: "2026-02-13T10:45:00Z"
-`
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for invalid category, got nil")
-	}
-}
-
-func TestValidateZettelYAML_MissingCreated(t *testing.T) {
-	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"
+type: "note"
 project: "test"
 category: "untethered"
 tags: []
+created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 `
-	if err := ValidateZettelYAML([]byte(invalidYAML)); err == nil {
-		t.Error("ValidateZettelYAML() expected error for missing created, got nil")
+	if err := ValidateConceptYAML([]byte(legacyYAML)); err != nil {
+		t.Errorf("ValidateConceptYAML() legacy category should be tolerated, got error = %v", err)
+	}
+}
+
+func TestValidateConceptYAML_MissingCreated(t *testing.T) {
+	invalidYAML := `
+id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+title: "Test"
+type: "note"
+project: "test"
+tags: []
+`
+	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
+		t.Error("ValidateConceptYAML() expected error for missing created, got nil")
 	}
 }
 
@@ -240,6 +202,7 @@ func TestExtractFrontmatter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 ---
 
 # Content here
@@ -250,7 +213,8 @@ title: "Test"
 	}
 
 	expected := `id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test"`
+title: "Test"
+type: "note"`
 	if string(frontmatter) != expected {
 		t.Errorf("ExtractFrontmatter() = %q, want %q", string(frontmatter), expected)
 	}
@@ -259,6 +223,7 @@ title: "Test"`
 func TestExtractFrontmatter_NoOpeningDelimiter(t *testing.T) {
 	content := []byte(`id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 ---
 `)
 	_, err := ExtractFrontmatter(content)
@@ -271,6 +236,7 @@ func TestExtractFrontmatter_NoClosingDelimiter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
+type: "note"
 `)
 	_, err := ExtractFrontmatter(content)
 	if err == nil {
@@ -281,12 +247,13 @@ title: "Test"
 func TestParseFrontmatter(t *testing.T) {
 	content := []byte(`---
 id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-title: "Test Zettel"
+title: "Test Concept"
+type: "note"
 project: "test-project"
-category: "untethered"
 tags:
   - "test"
 created: "2026-02-13T10:45:00Z"
+timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Content
@@ -300,16 +267,12 @@ created: "2026-02-13T10:45:00Z"
 		t.Errorf("ID = %q, want %q", z.ID, "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 	}
 
-	if z.Title != "Test Zettel" {
-		t.Errorf("Title = %q, want %q", z.Title, "Test Zettel")
+	if z.Title != "Test Concept" {
+		t.Errorf("Title = %q, want %q", z.Title, "Test Concept")
 	}
 
 	if z.Project != "test-project" {
 		t.Errorf("Project = %q, want %q", z.Project, "test-project")
-	}
-
-	if z.Category != "untethered" {
-		t.Errorf("Category = %q, want %q", z.Category, "untethered")
 	}
 
 	if len(z.Tags) != 1 || z.Tags[0] != "test" {
@@ -319,9 +282,9 @@ created: "2026-02-13T10:45:00Z"
 
 func TestParseAndValidate_ValidFile(t *testing.T) {
 	// Read the valid test file
-	content, err := os.ReadFile("../../testdata/valid_zettel.md")
+	content, err := os.ReadFile("../../testdata/valid_concept.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)
@@ -335,9 +298,9 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 }
 
 func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_zettel_with_parent.md")
+	content, err := os.ReadFile("../../testdata/valid_concept_with_parent.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)
@@ -351,9 +314,9 @@ func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 }
 
 func TestParseAndValidate_InvalidFile(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/invalid_zettel.md")
+	content, err := os.ReadFile("../../testdata/invalid_concept.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	_, err = ParseAndValidate(content)
@@ -362,10 +325,10 @@ func TestParseAndValidate_InvalidFile(t *testing.T) {
 	}
 }
 
-func TestParseAndValidate_UntetheredWithoutProject(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_fleeting_no_project.md")
+func TestParseAndValidate_NoProject(t *testing.T) {
+	content, err := os.ReadFile("../../testdata/valid_concept_no_project.md")
 	if err != nil {
-		t.Skipf("testdata file not found: %v", err)
+		t.Fatalf("testdata fixture missing: %v", err)
 	}
 
 	z, err := ParseAndValidate(content)
@@ -373,11 +336,38 @@ func TestParseAndValidate_UntetheredWithoutProject(t *testing.T) {
 		t.Fatalf("ParseAndValidate() error = %v", err)
 	}
 
-	if z.Category != "untethered" {
-		t.Errorf("Category = %q, want %q", z.Category, "untethered")
-	}
-
 	if z.Project != "" {
 		t.Errorf("Project = %q, want empty string", z.Project)
+	}
+}
+
+func TestExtractBody(t *testing.T) {
+	cases := map[string]struct {
+		content string
+		want    string
+	}{
+		"lf": {
+			content: "---\ntitle: \"T\"\n---\n\n# Body\n",
+			want:    "\n# Body\n",
+		},
+		"crlf": {
+			content: "---\r\ntitle: \"T\"\r\n---\r\n\r\n# Body\r\n",
+			want:    "\r\n# Body\r\n",
+		},
+		"no frontmatter": {
+			content: "# Just a heading\n",
+			want:    "# Just a heading\n",
+		},
+		"unclosed frontmatter": {
+			content: "---\ntitle: \"T\"\n",
+			want:    "",
+		},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := ExtractBody([]byte(c.content)); got != c.want {
+				t.Errorf("ExtractBody(%q) = %q, want %q", c.content, got, c.want)
+			}
+		})
 	}
 }

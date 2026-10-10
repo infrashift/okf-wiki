@@ -1,0 +1,413 @@
+*okfw.txt*  OKF Wiki integration for NeoVim
+
+Author:  infrashift
+License: Apache-2.0
+
+INTRODUCTION                                                *okfw* *okfw.nvim*
+
+okfw.nvim provides NeoVim integration for the okfw CLI tool, enabling seamless
+management of an OKF Wiki knowledge base directly from your editor.
+
+Features:
+  - Create concepts
+  - Daily notes with review workflows
+  - Note templates (meeting, user-story, feature, etc.)
+  - Full-text search with snacks.nvim picker integration
+  - Graph visualization of concept relationships
+  - Backlinks discovery
+  - Tag completion in YAML frontmatter
+  - Link insertion between concepts
+
+REQUIREMENTS                                               *okfw-requirements*
+
+  - NeoVim 0.9+
+  - plenary.nvim (required)
+  - snacks.nvim (optional, for picker UI)
+  - okfw CLI binary in $PATH
+  - An initialized wiki: run |:OkfwInit| (or `okfw init` from a shell) once
+    at your project root to create the .okfw/ directory
+
+There is no config file. The plugin discovers the wiki by running `okfw root`
+from NeoVim's current working directory, which searches upward for a .okfw/
+directory the way git finds .git — so the plugin works from any subdirectory
+of your project.
+
+INSTALLATION                                               *okfw-installation*
+
+Using lazy.nvim: >lua
+    {
+        "infrashift/okf-wiki",
+        dependencies = {
+            "nvim-lua/plenary.nvim",
+            "folke/snacks.nvim",
+        },
+        config = function()
+            require("okfw").setup({
+                bin = "okfw",
+            })
+        end,
+    }
+<
+
+Using packer.nvim: >lua
+    use {
+        "infrashift/okf-wiki",
+        requires = { "nvim-lua/plenary.nvim" },
+        config = function()
+            require("okfw").setup()
+        end,
+    }
+<
+
+SETUP                                                             *okfw-setup*
+
+                                                            *okfw.setup()*
+require("okfw").setup({opts})
+
+    Configure the plugin. Call this in your init.lua or plugin config.
+
+    Options: ~
+        {bin}    (string)  Path to okfw binary. Default: "okfw"
+
+    Example: >lua
+        require("okfw").setup({
+            bin = "/usr/local/bin/okfw",
+        })
+<
+
+COMMANDS                                                       *okfw-commands*
+
+All commands are prefixed with "Okfw" for discoverability.
+
+Wiki Setup ~
+                                                                   *:OkfwInit*
+:OkfwInit               Initialize an OKF wiki for the current project.
+                        Runs `okfw init` in NeoVim's current working
+                        directory: creates .okfw/ at the git repository
+                        root (or the cwd outside git), writes
+                        .okfw/.gitignore, and generates the OKF root
+                        index.md. Running it again is a no-op.
+
+Daily Notes ~
+                                                                  *:OkfwDaily*
+:OkfwDaily [date]       Open or create a daily note.
+                        - No argument: today's note
+                        - "yesterday": yesterday's note
+                        - YYYY-MM-DD: specific date
+
+                                                              *:OkfwDailyList*
+:OkfwDailyList[!]       Browse daily notes with picker.
+                        With !: show this week only
+
+Note Creation ~
+                                                                   *:OkfwNote*
+:OkfwNote [--project NAME]
+                        Create a new concept.
+                        --project {NAME}: optional project name
+
+                                                               *:OkfwTemplate*
+:OkfwTemplate [name]    Create note from template.
+                        Without argument: opens template picker
+
+Search ~
+                                                                 *:OkfwSearch*
+:OkfwSearch[!] [flags] [query]
+                        Search concepts with optional filters.
+                        With !: live search (updates as you type)
+
+                        Flags: ~
+                          --project {val}    filter by project name
+                          --type {val}       free-form OKF type (e.g. note, issue)
+                          --kind {val}       note, daily-note, issue
+                          --status {val}     draft, stable, deprecated
+                          --stale            stale_after instant has been reached
+                          --tag {val}        filter by tag (repeatable)
+
+                        Examples: >vim
+                          :OkfwSearch authentication
+                          :OkfwSearch --status draft
+                          :OkfwSearch --project my-project --stale
+                          :OkfwSearch! --kind issue
+<
+
+Delete and move ~
+                                                                  *:OkfwDelete*
+:OkfwDelete [{path}]      Delete a concept: the file and its index.md line.
+                          Inbound links are reported, not rewritten. With no argument, acts on the current
+                          buffer. Asks for confirmation (defaulting to No) and
+                          then wipes the orphaned buffer.
+
+                          Concepts still linking to the deleted one are reported
+                          but not edited: OKF requires consumers to tolerate a
+                          link whose target does not exist.
+
+                                                                   *:OkfwMove*
+:OkfwMove [{src}] {dest}  Move or rename a concept. With one argument, moves the
+                          current buffer's concept; with two, {src} is the
+                          source. Omit {dest} entirely to be prompted.
+
+                          {dest} follows mv: a path ending in .md is the new full
+                          path, anything else is a directory to move into. The
+                          concept keeps its id, the buffer follows it to the new
+                          path, and links are repaired at both ends — inbound
+                          links in other concepts, and the moved concept's own
+                          relative links.
+
+                                                                  *:OkfwIndex*
+:OkfwIndex [path]       Regenerate the bundle's index.md listings
+                        (`okfw index-md`). Search needs no index. Saving a
+                        concept refreshes the listings automatically.
+                        Default: the bundle of the current directory
+
+Graph ~
+                                                                  *:OkfwGraph*
+:OkfwGraph [args]       Show graph in a scratch buffer (Mermaid syntax).
+                        {limit}: max nodes (default: 10)
+                        --depth N: max BFS hops
+                        --start ID: center on a concept
+                        Press q to close the buffer.
+
+                        Output is Mermaid flowchart syntax: >
+                          graph LR;
+                            A["Note Title A"];
+                            B["Note Title B"];
+                            A --> B;
+<
+                        Nodes are declared with their titles as labels.
+                        A --> B means A's body has a markdown link to B.
+                        Paste into mermaid.live or any Mermaid renderer.
+
+                                                                 *:OkfwExport*
+:OkfwExport [args]      Export graph subset as portable markdown.
+                        --limit N: max concepts to export (default: 10)
+                        --depth N: max BFS hops
+                        --start ID: center on a concept
+
+                        Copies concepts into <root>/ephemeral/ as <id>.md,
+                        with in-bundle markdown links rewritten to point at
+                        <id>.md. The ephemeral/ directory has a
+                        .gitignore that ignores all exported files.
+
+                        Links to concepts NOT in the export set are left
+                        unchanged. The directory is wiped on each export.
+
+Tags ~
+                                                            *:OkfwRefreshTags*
+:OkfwRefreshTags        Refresh tag cache.
+
+LUA API                                                           *okfw-api*
+
+All functions are available via `require("okfw")`.
+
+Daily Notes ~
+                                                                *okfw.daily()*
+daily({opts})           Open or create daily note.
+                        opts.date: "yesterday" or "YYYY-MM-DD"
+
+                                                          *okfw.daily_picker()*
+daily_picker({opts})    Browse daily notes with picker.
+                        opts.week: show this week only
+                        opts.month: show this month only
+
+                                                           *okfw.list_daily()*
+list_daily({opts}, {callback})
+                        Get daily notes asynchronously.
+
+                                                      *okfw.list_daily_sync()*
+list_daily_sync({opts}) Get daily notes synchronously.
+
+Note Creation ~
+                                                          *okfw.create_note()*
+create_note({opts})     Create a new concept.
+                        opts.title: optional title (prompted if omitted)
+                        opts.project: optional project name
+
+                                                   *okfw.create_from_template()*
+create_from_template({opts})
+                        Create note from template.
+                        opts.template: template name (picker if omitted)
+                        opts.project: project name
+
+                                                       *okfw.template_picker()*
+template_picker({opts}) Open picker for templates.
+
+Note Management ~
+                                                          *okfw.set_project()*
+set_project({path}, {project})
+                        Set project for a concept.
+
+Search ~
+                                                               *okfw.search()*
+search({query}, {opts}) Search concepts.
+                        opts.project, opts.tags, opts.limit
+                        opts.type, opts.kind, opts.status, opts.stale
+                        opts.on_results: callback function
+
+                                                                *okfw.index()*
+index({path})           Regenerate the index.md listings (`okfw index-md`).
+
+                                                           *okfw.index_file()*
+index_file({path})      Refresh the listings okfw maintains after {path} was
+                        saved by hand (`okfw index-md --no-adopt`). Runs on
+                        BufWritePost for concept buffers.
+
+                                                      *okfw.resolve_concept()*
+resolve_concept({ref})  Return the absolute path of the concept with
+                        frontmatter id {ref} (or a unique prefix of 8+ hex
+                        digits), or OKF concept ID {ref} (its bundle-relative
+                        path, with or without .md); nil if none.
+
+                                                        *okfw.preview_by_id()*
+preview_by_id({ref})    Preview the concept resolve_concept() finds.
+
+Graph ~
+                                                                *okfw.graph()*
+graph({opts})           Show Mermaid graph in scratch buffer.
+                        opts.path, opts.limit, opts.depth, opts.start
+
+                                                               *okfw.export()*
+export({opts})          Export graph subset as portable markdown.
+                        opts.path, opts.limit, opts.depth, opts.start
+                        Writes <id>.md files to <root>/ephemeral/ with
+                        in-bundle links rewritten to <id>.md.
+
+Preview ~
+                                                         *okfw.preview_note()*
+preview_note({path})    Preview note in floating window.
+
+Linking ~
+                                                          *okfw.insert_link()*
+insert_link({entry}, {use_title})
+                        Insert a markdown link to {entry} (a search result
+                        with file_path and title) at the cursor. The target is
+                        the wiki-relative path, e.g. [text](/dir/note.md);
+                        {use_title} makes the title the link text.
+
+                                                          *okfw.link_picker()*
+link_picker({opts})     Open picker for linking.
+                        opts.include_title: use the concept title as the
+                        link text
+
+                                                          *okfw.follow_link()*
+follow_link()           Open the concept named by the link under the cursor;
+                        the ftplugin maps it to gf in concept buffers. Reads
+                        the [text](dest) link the cursor is on, or else the
+                        path under it, so it also follows a path-valued
+                        frontmatter field such as `resource: /tables/x.md`.
+                        A path starting with / resolves against the wiki root,
+                        any other against the current file's directory, except
+                        in frontmatter, where only ./ and ../ are relative and
+                        a bare path also resolves against the wiki root. A
+                        #fragment is ignored, a URL is reported rather than
+                        opened, and a missing target is reported.
+
+Backlinks ~
+                                                        *okfw.get_backlinks()*
+get_backlinks({id}, {callback})
+                        Get backlinks asynchronously.
+
+                                                      *okfw.backlinks_panel()*
+backlinks_panel({opts}) Open floating backlinks panel.
+
+                                                      *okfw.backlinks_split()*
+backlinks_split({opts}) Open backlinks in split.
+                        opts.position: "right", "left", "bottom", "top"
+
+                                                     *okfw.toggle_backlinks()*
+toggle_backlinks()      Toggle backlinks panel.
+
+Tags ~
+                                                            *okfw.add_tags()*
+add_tags({tags}, {path})
+                        Add tags to a concept's frontmatter.
+                        {tags}: string (space- or comma-separated) or table
+                        {path}: optional file path (default: current buffer)
+
+Validation ~
+                                                            *okfw.validate()*
+validate({path})        Validate frontmatter against CUE schema.
+                        {path}: optional file path (default: current buffer)
+
+                                                             *okfw.get_tags()*
+get_tags({callback})    Get all tags asynchronously.
+
+                                                        *okfw.get_tags_sync()*
+get_tags_sync()         Get all tags synchronously.
+
+                                                        *okfw.refresh_tags()*
+refresh_tags()          Clear and reload tag cache.
+
+                                                       *okfw.complete_tags()*
+complete_tags()         Trigger tag completion at cursor.
+
+                                                 *okfw.setup_tag_completion()*
+setup_tag_completion()  Set up tag completion for markdown.
+
+                                                            *okfw.setup_cmp()*
+setup_cmp()             Register nvim-cmp source.
+
+PICKER                                                         *okfw-picker*
+
+If snacks.nvim is installed, additional functions are available:
+
+require("okfw.picker").search({opts})      Search all concepts
+require("okfw.picker").live_search({opts}) Live search
+
+    Search opts: ~
+        {project}     Filter by project name
+        {kind}        Filter by kind (note/daily-note/issue)
+        {status}      Filter by OKF lifecycle status (draft/stable/deprecated)
+        {stale}       Only concepts whose stale_after has passed
+        {tags}        Table of tag strings (AND logic)
+require("okfw.picker").insert_link({opts}) Insert link to concept
+
+Picker Keymaps ~
+    <CR>        Open note
+    <C-p>       Preview in floating window
+    <C-l>       Insert a markdown link: [path](/path/to/note.md)
+    <C-S-l>     Insert a markdown link with the title as link text
+
+FILETYPE SETTINGS                                         *okfw-ftplugin*
+
+When editing a concept file (markdown with id: in frontmatter), the plugin
+automatically sets up:
+
+  - omnifunc for tag completion
+  - <C-x><C-t> for manual tag completion
+  - <localleader>l for link insertion
+  - <localleader>L for link insertion with title
+  - <localleader>b for backlinks toggle
+  - <localleader>a for adding tags (all concept types)
+  - <localleader>v for validating frontmatter (all concept types)
+  - <localleader>p for set project (plain notes)
+  - gf to follow the markdown link under the cursor
+  - a BufWritePost hook that refreshes the index.md listings
+
+SUGGESTED KEYMAPS                                             *okfw-keymaps*
+
+Add these to your configuration: >lua
+
+    -- Daily notes
+    vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>")
+    vim.keymap.set("n", "<leader>zD", "<cmd>OkfwDaily yesterday<cr>")
+    vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList<cr>")
+
+    -- Note creation
+    vim.keymap.set("n", "<leader>zn", function()
+        require("okfw").create_note()
+    end)
+    vim.keymap.set("n", "<leader>zt", "<cmd>OkfwTemplate<cr>")
+
+    -- Search
+    vim.keymap.set("n", "<leader>zz", "<cmd>OkfwSearch<cr>")
+    vim.keymap.set("n", "<leader>z/", "<cmd>OkfwSearch!<cr>")
+
+    -- Graph
+    vim.keymap.set("n", "<leader>zg", "<cmd>OkfwGraph<cr>")
+<
+
+LICENSE                                                       *okfw-license*
+
+Apache License 2.0. See the LICENSE file in the repository.
+
+ vim:tw=78:ts=8:ft=help:norl:

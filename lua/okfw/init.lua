@@ -1,0 +1,1922 @@
+local M = {}
+
+M.setup = function(opts)
+    M.config = vim.tbl_deep_extend("force", {
+        bin = "okfw",
+    }, opts or {})
+end
+
+M.create_note = function(opts_or_project, project)
+    -- Handle legacy call signature: create_note(_, project)
+    local opts
+    if type(opts_or_project) == "string" then
+        opts = { project = project }
+    else
+        opts = opts_or_project or {}
+    end
+
+    local title = opts.title
+    if not title or title == "" then
+        title = vim.fn.input("Note Title: ")
+        if title == "" then return end
+    end
+
+    local cwd = vim.fn.getcwd()
+    local args = { "create", title }
+
+    if opts.project and opts.project ~= "" then
+        table.insert(args, "--project")
+        table.insert(args, opts.project)
+    end
+
+    local created_file = ""
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        cwd = cwd,
+        on_stdout = function(_, data)
+            local match = data:match("Created: (.+)")
+            if match then
+                created_file = match
+            end
+        end,
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    print("Note created successfully")
+                    if created_file ~= "" and vim.fn.filereadable(created_file) == 1 then
+                        vim.cmd("edit " .. vim.fn.fnameescape(created_file))
+                    end
+                else
+                    local err = table.concat(j:stderr_result(), "\n")
+                    if err ~= "" then
+                        vim.notify("Failed to create note: " .. err, vim.log.levels.ERROR)
+                    else
+                        vim.notify("Failed to create note", vim.log.levels.ERROR)
+                    end
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Available templates (cached)
+M._templates_cache = nil
+
+-- Daily notes functions
+
+-- Create or open a daily note
+M.daily = function(opts)
+    opts = opts or {}
+
+    local args = { "daily" }
+
+    -- Handle date options
+    if opts.date then
+        if opts.date == "yesterday" then
+            table.insert(args, "--yesterday")
+        else
+            table.insert(args, "--date")
+            table.insert(args, opts.date)
+        end
+    end
+
+    local daily_file = ""
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        on_stdout = function(_, data)
+            -- Capture the file path from output
+            local match = data:match("Daily note: (.+)")
+            if match then
+                daily_file = match
+            end
+            match = data:match("Created daily note: (.+)")
+            if match then
+                daily_file = match
+            end
+        end,
+        on_exit = function(_job, return_val)
+            vim.schedule(function()
+                if return_val == 0 and daily_file ~= "" then
+                    vim.cmd("edit " .. vim.fn.fnameescape(daily_file))
+                elseif return_val ~= 0 then
+                    print("Failed to open daily note")
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- List daily notes (async)
+M.list_daily = function(opts, callback)
+    opts = opts or {}
+
+    local args = { "daily", "--list", "--json" }
+
+    if opts.week then
+        table.insert(args, "--week")
+    elseif opts.month then
+        table.insert(args, "--month")
+    end
+
+    local results_json = ""
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        on_stdout = function(_, data)
+            results_json = results_json .. data
+        end,
+        on_exit = function(_job, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    callback({})
+                    return
+                end
+
+                local ok, results = pcall(vim.json.decode, results_json)
+                if not ok or type(results) ~= "table" then
+                    callback({})
+                    return
+                end
+
+                callback(results)
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- List daily notes synchronously
+M.list_daily_sync = function(opts)
+    opts = opts or {}
+
+    local args = { "daily", "--list", "--json" }
+
+    if opts.week then
+        table.insert(args, "--week")
+    elseif opts.month then
+        table.insert(args, "--month")
+    end
+
+    local Job = require("plenary.job")
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = args,
+    })
+
+    job:sync(5000)
+    local results_json = table.concat(job:result(), "\n")
+
+    local ok, results = pcall(vim.json.decode, results_json)
+    if not ok or type(results) ~= "table" then
+        return {}
+    end
+
+    return results
+end
+
+-- Picker for daily notes (requires snacks.nvim)
+M.daily_picker = function(opts)
+    opts = opts or {}
+
+    local has_snacks, Snacks = pcall(require, "snacks")
+    if not has_snacks then
+        print("snacks.nvim required for daily picker")
+        return
+    end
+
+    -- Get daily notes
+    local daily_notes = M.list_daily_sync(opts)
+
+    if #daily_notes == 0 then
+        vim.notify("No daily notes found", vim.log.levels.INFO)
+        return
+    end
+
+    local items = {}
+    for idx, entry in ipairs(daily_notes) do
+        table.insert(items, {
+            idx = idx,
+            text = entry.date .. " " .. (entry.title or ""),
+            display = entry.title or entry.date,
+            file = entry.file_path,
+            data = entry,
+        })
+    end
+
+    Snacks.picker.pick({
+        source = "okfw_daily",
+        title = "Daily Notes",
+        items = items,
+        format = function(item, _picker)
+            return { { item.display or item.text } }
+        end,
+        preview = "file",
+        confirm = function(picker, item)
+            picker:close()
+            if item and item.file then
+                vim.cmd("edit " .. vim.fn.fnameescape(item.file))
+            end
+        end,
+    })
+end
+
+-- Template definitions matching CLI
+M.templates = {
+    {
+        name = "meeting",
+        description = "Meeting notes with attendees and action items",
+    },
+    {
+        name = "book-review",
+        description = "Book review with rating and key takeaways",
+    },
+    {
+        name = "snippet",
+        description = "Code snippet with context and explanation",
+    },
+    {
+        name = "project-idea",
+        description = "Project idea with goals and next steps",
+    },
+    {
+        name = "user-story",
+        description = "User story with acceptance criteria",
+    },
+    {
+        name = "feature",
+        description = "Feature specification with requirements",
+    },
+    {
+        name = "daily",
+        description = "Daily note for thoughts, tasks, and reflections",
+    },
+    {
+        name = "issue",
+        description = "Issue tracking like GitHub (bug, enhancement, question)",
+        type = "issue",
+    },
+}
+
+-- Get template by name
+M.get_template = function(name)
+    for _, tmpl in ipairs(M.templates) do
+        if tmpl.name == name then
+            return tmpl
+        end
+    end
+    return nil
+end
+
+-- Create note from template
+M.create_from_template = function(opts)
+    opts = opts or {}
+
+    local function do_create(template_name, project)
+        local title = vim.fn.input("Note Title: ")
+        if title == "" then return end
+
+        local args = { "create", title, "--template", template_name }
+
+        if project and project ~= "" then
+            table.insert(args, "--project")
+            table.insert(args, project)
+        end
+
+        local created_file = ""
+        local job = require('plenary.job'):new({
+            command = M.config.bin,
+            args = args,
+            on_stdout = function(_, data)
+                local match = data:match("Created: (.+)")
+                if match then
+                    created_file = match
+                end
+            end,
+            on_exit = function(j, return_val)
+                vim.schedule(function()
+                    if return_val == 0 then
+                        print("Note created from template: " .. template_name)
+                        -- Open the created file
+                        if created_file ~= "" and vim.fn.filereadable(created_file) == 1 then
+                            vim.cmd("edit " .. vim.fn.fnameescape(created_file))
+                        end
+                    else
+                        local err = table.concat(j:stderr_result(), "\n")
+                        if err ~= "" then
+                            vim.notify("Failed to create note from template: " .. err, vim.log.levels.ERROR)
+                        else
+                            vim.notify("Failed to create note from template", vim.log.levels.ERROR)
+                        end
+                    end
+                end)
+            end,
+        })
+        job:start()
+    end
+
+    -- If template specified, use it directly
+    if opts.template then
+        do_create(opts.template, opts.project)
+        return
+    end
+
+    -- Otherwise show picker
+    local has_snacks = pcall(require, "snacks")
+    if has_snacks then
+        M.template_picker(opts)
+    else
+        -- Fallback: prompt for template name
+        local names = {}
+        for _, tmpl in ipairs(M.templates) do
+            table.insert(names, tmpl.name)
+        end
+        print("Available templates: " .. table.concat(names, ", "))
+        local template_name = vim.fn.input("Template: ")
+        if template_name ~= "" then
+            do_create(template_name, opts.project)
+        end
+    end
+end
+
+-- Picker for templates (requires snacks.nvim)
+M.template_picker = function(opts)
+    opts = opts or {}
+
+    local has_snacks, Snacks = pcall(require, "snacks")
+    if not has_snacks then
+        print("snacks.nvim required for template picker")
+        return
+    end
+
+    local items = {}
+    for idx, entry in ipairs(M.templates) do
+        local display = string.format("%-15s %s",
+            entry.name, entry.description)
+        table.insert(items, {
+            idx = idx,
+            text = entry.name .. " " .. entry.description,
+            display = display,
+            data = entry,
+        })
+    end
+
+    Snacks.picker.pick({
+        source = "okfw_templates",
+        title = "Select Template",
+        items = items,
+        format = function(item, _picker)
+            return { { item.display or item.text } }
+        end,
+        confirm = function(picker, item)
+            picker:close()
+            if not item or not item.data then return end
+            local tmpl = item.data
+
+            -- Prompt for title
+            local title = vim.fn.input("Note Title: ")
+            if title == "" then return end
+
+            local project = opts.project
+
+            local args = { "create", title, "--template", tmpl.name }
+            if project and project ~= "" then
+                table.insert(args, "--project")
+                table.insert(args, project)
+            end
+
+            local created_file = ""
+            local job = require('plenary.job'):new({
+                command = M.config.bin,
+                args = args,
+                on_stdout = function(_, data)
+                    local match = data:match("Created: (.+)")
+                    if match then
+                        created_file = match
+                    end
+                end,
+                on_exit = function(j, return_val)
+                    vim.schedule(function()
+                        if return_val == 0 then
+                            print("Created from template: " .. tmpl.name)
+                            if created_file ~= "" then
+                                vim.cmd("edit " .. vim.fn.fnameescape(created_file))
+                            end
+                        else
+                            local err = table.concat(j:stderr_result(), "\n")
+                            if err ~= "" then
+                                vim.notify("Failed to create note: " .. err, vim.log.levels.ERROR)
+                            else
+                                vim.notify("Failed to create note", vim.log.levels.ERROR)
+                            end
+                        end
+                    end)
+                end,
+            })
+            job:start()
+        end,
+    })
+end
+
+M.set_project = function(file_path, project)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+
+    if not project or project == "" then
+        project = vim.fn.input("Project: ")
+        if project == "" then return end
+    end
+
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = { "set-project", file_path, project },
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    print("Project updated to: " .. project)
+                    if vim.fn.expand("%:p") == file_path then
+                        vim.cmd("edit!")
+                    end
+                else
+                    local err = table.concat(j:stderr_result(), "\n")
+                    print("Failed to set project: " .. err)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Delete a concept: the file and its index.md line. Inbound links are reported,
+-- not rewritten (OKF tolerates a link to a concept that does not exist).
+--
+-- The confirmation happens here rather than in the CLI. plenary.job hands the
+-- child a pipe, and `okfw delete` refuses to prompt on anything that is not a
+-- terminal — so the plugin asks, then passes --force.
+M.delete_note = function(file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        vim.notify("No concept specified", vim.log.levels.WARN)
+        return
+    end
+
+    local name = vim.fn.fnamemodify(file_path, ":t")
+    if vim.fn.confirm("Delete concept " .. name .. "?", "&No\n&Yes", 1) ~= 2 then
+        return
+    end
+
+    local bufnr = vim.fn.bufnr(file_path)
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "delete", file_path, "--force", "--json" },
+        cwd = vim.fn.getcwd(),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("Failed to delete: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+                local ok, res = pcall(vim.json.decode, table.concat(j:result(), "\n"))
+                vim.notify("Deleted " .. name)
+                -- Dangling links are expected, not a failure: OKF requires
+                -- consumers to tolerate a link whose target does not exist.
+                if ok and res and res.inbound and #res.inbound > 0 then
+                    vim.notify(
+                        #res.inbound .. " concept(s) still link to it: " .. table.concat(res.inbound, ", "),
+                        vim.log.levels.WARN
+                    )
+                end
+                -- The buffer now names a file that is gone.
+                if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) then
+                    vim.api.nvim_buf_delete(bufnr, { force = true })
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Move or rename a concept, repairing links at both ends. The concept keeps its
+-- id, so `parent` hierarchies survive.
+M.move_note = function(file_path, dest)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        vim.notify("No concept specified", vim.log.levels.WARN)
+        return
+    end
+
+    if not dest or dest == "" then
+        dest = vim.fn.input({
+            prompt = "Move to (directory, or path ending in .md): ",
+            completion = "dir",
+        })
+        if dest == "" then return end
+    end
+
+    local bufnr = vim.fn.bufnr(file_path)
+    local was_current = vim.fn.expand("%:p") == file_path
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "move", file_path, dest, "--json" },
+        cwd = vim.fn.getcwd(),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("Failed to move: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+                local ok, res = pcall(vim.json.decode, table.concat(j:result(), "\n"))
+                if not ok or not res or not res.to then
+                    vim.notify("Moved, but could not read the new path", vim.log.levels.WARN)
+                    return
+                end
+                local msg = "Moved to " .. (res.to_rel or res.to)
+                if res.rewrote and #res.rewrote > 0 then
+                    msg = msg .. " (rewrote links in " .. #res.rewrote .. " concept(s))"
+                end
+                vim.notify(msg)
+                -- Follow the concept: reopen at its new path and drop the buffer
+                -- still pointing at the old one.
+                if was_current then
+                    vim.cmd("edit " .. vim.fn.fnameescape(res.to))
+                end
+                if bufnr ~= -1 and vim.api.nvim_buf_is_valid(bufnr) and vim.fn.bufnr(res.to) ~= bufnr then
+                    vim.api.nvim_buf_delete(bufnr, { force = true })
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Search concepts (requires results to be displayed somehow)
+M.search = function(query, opts)
+    opts = opts or {}
+    local args = { "search", "--json" }
+
+    if query and query ~= "" then
+        table.insert(args, query)
+    end
+
+    if opts.project and opts.project ~= "" then
+        table.insert(args, "--project")
+        table.insert(args, opts.project)
+    end
+
+    if opts.tags and type(opts.tags) == "table" then
+        for _, tag in ipairs(opts.tags) do
+            table.insert(args, "--tag")
+            table.insert(args, tag)
+        end
+    end
+
+    if opts.limit then
+        table.insert(args, "--limit")
+        table.insert(args, tostring(opts.limit))
+    end
+
+    local results_json = ""
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        on_stdout = function(_, data)
+            results_json = results_json .. data
+        end,
+        on_exit = function(_job, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    local ok, results = pcall(vim.json.decode, results_json)
+                    if ok and opts.on_results then
+                        opts.on_results(results)
+                    elseif ok then
+                        -- Default: print results
+                        if #results == 0 then
+                            print("No results found")
+                        else
+                            for _, r in ipairs(results) do
+                                print(string.format("%s: %s", r.id, r.title))
+                            end
+                        end
+                    end
+                else
+                    print("Search failed")
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Regenerate the bundle's index.md listings (`okfw index-md`). Search and the
+-- link graph are computed from the files, so the listings are the only thing
+-- there is to refresh. `path` selects which bundle; it defaults to the cwd's.
+M.index = function(path)
+    local args = { "index-md" }
+    if path and path ~= "" then table.insert(args, path) end
+
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        cwd = vim.fn.getcwd(),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    print(table.concat(j:result(), "\n"))
+                else
+                    local err = table.concat(j:stderr_result(), "\n")
+                    print("Failed to refresh index.md listings: " .. err)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Refresh the listings after a concept was saved by hand, silently. A title or
+-- description edited in the buffer otherwise stays stale in index.md until the
+-- next okfw write. --no-adopt keeps this to the listings okfw already
+-- maintains, as its own writers do; it never takes over a hand-written one.
+M.index_file = function(path)
+    if not path or path == "" then
+        return
+    end
+
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = { "index-md", "--no-adopt" },
+        -- Run from the file's directory so the bundle it belongs to is found.
+        cwd = vim.fn.fnamemodify(path, ":h"),
+        on_exit = function(_, return_val)
+            if return_val ~= 0 then
+                vim.schedule(function()
+                    vim.notify("okfw: failed to refresh index.md listings after saving "
+                        .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.WARN)
+                end)
+            end
+        end,
+    })
+    job:start()
+end
+
+-- Add tags to a concept (`okfw add-tags`). `tags` is a space- or
+-- comma-separated string or a list; `file_path` defaults to the current buffer.
+M.add_tags = function(tags, file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+    if type(tags) == "string" then
+        tags = vim.split(tags, "[%s,]+", { trimempty = true })
+    end
+    if not tags or #tags == 0 then
+        return
+    end
+
+    local args = { "add-tags", file_path }
+    vim.list_extend(args, tags)
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        cwd = vim.fn.fnamemodify(file_path, ":h"),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    print("Added tags: " .. table.concat(tags, ", "))
+                    M._tag_cache = nil
+                    if vim.fn.expand("%:p") == file_path then
+                        vim.cmd("edit!")
+                    end
+                else
+                    print("Failed to add tags: " .. table.concat(j:stderr_result(), "\n"))
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Validate a concept's frontmatter against the schema (`okfw validate`).
+-- `file_path` defaults to the current buffer.
+M.validate = function(file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = { "validate", file_path },
+        cwd = vim.fn.fnamemodify(file_path, ":h"),
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                local out = vim.trim(table.concat(j:result(), "\n") .. "\n" .. table.concat(j:stderr_result(), "\n"))
+                if return_val == 0 then
+                    vim.notify(out ~= "" and out or "Valid", vim.log.levels.INFO)
+                else
+                    vim.notify(out, vim.log.levels.ERROR)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Extract concept ID from current buffer frontmatter
+local function get_current_concept_id()
+    local lines = vim.api.nvim_buf_get_lines(0, 0, 20, false)
+    local in_frontmatter = false
+
+    for i, line in ipairs(lines) do
+        if i == 1 and line == "---" then
+            in_frontmatter = true
+        elseif in_frontmatter and line == "---" then
+            break
+        elseif in_frontmatter then
+            local id = line:match('^id:%s*"?([%w%-]+)"?')
+            if id then
+                return id
+            end
+        end
+    end
+
+    return nil
+end
+
+-- Generate graph visualization (ASCII tree in a scratch buffer)
+M.graph = function(opts)
+    opts = opts or {}
+    local limit = opts.limit or 10
+    local depth = opts.depth or 0
+
+    -- Build args: path is optional (the CLI defaults to the discovered bundle)
+    local args = { "graph" }
+
+    if opts.path and opts.path ~= "" then
+        table.insert(args, opts.path)
+    end
+
+    table.insert(args, "--limit")
+    table.insert(args, tostring(limit))
+
+    if depth > 0 then
+        table.insert(args, "--depth")
+        table.insert(args, tostring(depth))
+    end
+
+    -- Use current concept as the start node if available
+    local start_id = opts.start
+    if not start_id then
+        start_id = get_current_concept_id()
+    end
+    if start_id and start_id ~= "" then
+        table.insert(args, "--start")
+        table.insert(args, start_id)
+    end
+
+    local stdout_lines = {}
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        on_stdout = function(_, data)
+            table.insert(stdout_lines, data)
+        end,
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("Failed to generate graph: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+
+                -- Open scratch buffer with Mermaid graph
+                local buf = vim.api.nvim_create_buf(false, true)
+                vim.api.nvim_buf_set_lines(buf, 0, -1, false, stdout_lines)
+                vim.api.nvim_set_option_value("buftype", "nofile", { buf = buf })
+                vim.api.nvim_set_option_value("bufhidden", "wipe", { buf = buf })
+                vim.api.nvim_set_option_value("modifiable", false, { buf = buf })
+                vim.api.nvim_set_option_value("filetype", "mermaid", { buf = buf })
+                vim.api.nvim_buf_set_name(buf, "okfw-graph")
+                vim.api.nvim_set_current_buf(buf)
+                vim.api.nvim_set_option_value("wrap", false, { win = 0 })
+
+                -- Map q to close
+                vim.keymap.set("n", "q", function()
+                    vim.api.nvim_buf_delete(buf, { force = true })
+                end, { buffer = buf, nowait = true })
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Export graph subset as portable markdown to ephemeral/
+M.export = function(opts)
+    opts = opts or {}
+    local limit = opts.limit or 10
+    local depth = opts.depth or 0
+
+    local args = { "export" }
+
+    if opts.path and opts.path ~= "" then
+        table.insert(args, opts.path)
+    end
+
+    table.insert(args, "--limit")
+    table.insert(args, tostring(limit))
+
+    if depth > 0 then
+        table.insert(args, "--depth")
+        table.insert(args, tostring(depth))
+    end
+
+    local start_id = opts.start
+    if not start_id then
+        start_id = get_current_concept_id()
+    end
+    if start_id and start_id ~= "" then
+        table.insert(args, "--start")
+        table.insert(args, start_id)
+    end
+
+    local stderr_lines = {}
+    local job = require('plenary.job'):new({
+        command = M.config.bin,
+        args = args,
+        on_stderr = function(_, data)
+            table.insert(stderr_lines, data)
+        end,
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    local err = table.concat(stderr_lines, "\n")
+                    vim.notify("Export failed: " .. err, vim.log.levels.ERROR)
+                    return
+                end
+
+                local summary = table.concat(stderr_lines, "\n")
+                if summary ~= "" then
+                    vim.notify(summary, vim.log.levels.INFO)
+                else
+                    vim.notify("Export complete", vim.log.levels.INFO)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Preview note in floating window
+M.preview_note = function(file_path)
+    file_path = file_path or vim.fn.expand("%:p")
+    if file_path == "" then
+        print("No file specified")
+        return
+    end
+
+    -- Check file exists
+    if vim.fn.filereadable(file_path) ~= 1 then
+        print("File not found: " .. file_path)
+        return
+    end
+
+    -- Read file content
+    local lines = vim.fn.readfile(file_path)
+    if #lines == 0 then
+        print("File is empty")
+        return
+    end
+
+    -- Calculate window dimensions
+    local width = math.min(100, vim.o.columns - 10)
+    local height = math.min(#lines + 2, vim.o.lines - 10)
+    local row = math.floor((vim.o.lines - height) / 2)
+    local col = math.floor((vim.o.columns - width) / 2)
+
+    -- Create buffer
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
+    vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+
+    -- Create floating window
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        row = row,
+        col = col,
+        style = "minimal",
+        border = "rounded",
+        title = " " .. vim.fn.fnamemodify(file_path, ":t") .. " ",
+        title_pos = "center",
+    })
+
+    -- Set window options
+    vim.api.nvim_win_set_option(win, "wrap", true)
+    vim.api.nvim_win_set_option(win, "cursorline", true)
+
+    -- Auto-close preview when focus leaves (prevents bufferline buffer swap)
+    vim.api.nvim_create_autocmd("WinLeave", {
+        buffer = buf,
+        once = true,
+        callback = function()
+            if vim.api.nvim_win_is_valid(win) then
+                vim.api.nvim_win_close(win, true)
+            end
+        end,
+    })
+
+    -- Store file path for opening
+    vim.b[buf].okfw_preview_path = file_path
+
+    -- Keymaps for the preview window
+    local close_preview = function()
+        if vim.api.nvim_win_is_valid(win) then
+            vim.api.nvim_win_close(win, true)
+        end
+    end
+
+    local open_note = function()
+        local path = vim.b[buf].okfw_preview_path
+        close_preview()
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
+    end
+
+    vim.keymap.set("n", "q", close_preview, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "<Esc>", close_preview, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "<CR>", open_note, { buffer = buf, nowait = true })
+
+    return { buf = buf, win = win }
+end
+
+-- Preview a concept by its frontmatter id or its OKF concept ID (the
+-- bundle-relative path, with or without ".md").
+--
+-- This used to run a search capped at one result and then look for the id in
+-- it, so it found the concept only when it happened to rank first.
+M.preview_by_id = function(id)
+    if not id or id == "" then
+        id = vim.fn.input("Concept ID: ")
+        if id == "" then return end
+    end
+    local path = M.resolve_concept(id)
+    if path then
+        M.preview_note(path)
+    else
+        print("Concept not found: " .. id)
+    end
+end
+
+-- Resolve a frontmatter id or OKF concept ID to an absolute path, or nil.
+M.resolve_concept = function(ref)
+    local root = M.bundle_root()
+    if not root or not ref or ref == "" then return nil end
+    root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+
+    -- OKF concept ID: the bundle-relative path.
+    if ref:find("/") or ref:match("%.md$") then
+        local rel = ref:gsub("^/", "")
+        for _, cand in ipairs({ rel, rel .. ".md" }) do
+            local p = root .. "/" .. cand
+            if vim.fn.filereadable(p) == 1 then return p end
+        end
+        return nil
+    end
+
+    local function id_of(p)
+        local ok, lines = pcall(vim.fn.readfile, p, "", 20)
+        if not ok or lines[1] ~= "---" then return nil end
+        for i = 2, #lines do
+            if lines[i] == "---" then return nil end
+            local v = lines[i]:match('^id:%s*["\']?([^"\']+)["\']?%s*$')
+            if v then return v end
+        end
+        return nil
+    end
+    local function compact(id) return id:gsub("-", ""):lower() end
+
+    -- Filenames embed the id's first 12 hex characters, so try those first.
+    local short = compact(ref):sub(1, 12)
+    for _, p in ipairs(vim.fn.globpath(root, "**/*--" .. short .. "*.md", false, true)) do
+        if id_of(p) == ref then return p end
+    end
+    -- Otherwise scan, accepting a unique prefix of 8+ hex digits as the CLI
+    -- does (`okfw set-lifecycle 019f0494 draft`).
+    local want = compact(ref)
+    local prefix_ok = #want >= 8 and want:match("^%x+$") ~= nil
+    local prefixed = {}
+    for _, p in ipairs(vim.fn.globpath(root, "**/*.md", false, true)) do
+        -- ephemeral/ holds `okfw export` copies, which carry the same id.
+        if not vim.startswith(p, root .. "/ephemeral/") then
+            local id = id_of(p)
+            if id == ref then return p end
+            if prefix_ok and id and vim.startswith(compact(id), want) then
+                table.insert(prefixed, p)
+            end
+        end
+    end
+    if #prefixed == 1 then return prefixed[1] end
+    -- A bare concept ID at the bundle root.
+    if vim.fn.filereadable(root .. "/" .. ref .. ".md") == 1 then
+        return root .. "/" .. ref .. ".md"
+    end
+    return nil
+end
+
+-- Cached wiki roots (path of the project's .okfw directory), queried from the
+-- CLI. Keyed by cwd: the wiki is per-project and discovered by walking upward,
+-- so switching projects within one session must not reuse a stale root.
+M._bundle_roots = {}
+M.bundle_root = function()
+    local cwd = vim.fn.getcwd()
+    if M._bundle_roots[cwd] then return M._bundle_roots[cwd] end
+    local Job = require("plenary.job")
+    local job = Job:new({ command = M.config.bin, args = { "root" }, cwd = cwd })
+    job:sync(5000)
+    local out = vim.trim(table.concat(job:result(), "\n"))
+    if out ~= "" then M._bundle_roots[cwd] = out end
+    return M._bundle_roots[cwd]
+end
+
+-- Initialize an OKF wiki for the current project (noop when already present).
+M.init_wiki = function()
+    local cwd = vim.fn.getcwd()
+    local job = require("plenary.job"):new({
+        command = M.config.bin,
+        args = { "init" },
+        cwd = cwd,
+        on_exit = function(j, return_val)
+            vim.schedule(function()
+                if return_val == 0 then
+                    local out = table.concat(j:result(), "\n")
+                    print(out ~= "" and out or "OKF wiki initialized")
+                    M._bundle_roots[cwd] = nil -- rediscover on next use
+                else
+                    local err = table.concat(j:stderr_result(), "\n")
+                    vim.notify("okfw init failed: " .. err, vim.log.levels.ERROR)
+                end
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Convert an absolute path to a bundle-relative OKF link target ("/dir/file.md").
+-- Returns nil if the path is outside the bundle.
+M.bundle_rel = function(abs)
+    if not abs or abs == "" then return nil end
+    abs = vim.fn.fnamemodify(abs, ":p")
+    local root = M.bundle_root()
+    if not root then return nil end
+    root = vim.fn.fnamemodify(root, ":p"):gsub("/$", "")
+    if abs:sub(1, #root + 1) == root .. "/" then
+        return abs:sub(#root + 1) -- keeps the leading "/"
+    end
+    return nil
+end
+
+-- Insert a vanilla markdown link to a concept entry ({ file_path, title, id }).
+-- When use_title is true the link text is the concept title, otherwise its slug.
+M.insert_link = function(entry, use_title)
+    if not entry or not entry.file_path then
+        print("No link target")
+        return
+    end
+
+    local target = M.bundle_rel(entry.file_path)
+    if not target then
+        vim.notify("Link target is outside the bundle", vim.log.levels.WARN)
+        return
+    end
+
+    -- Prevent self-linking
+    local current = M.bundle_rel(vim.api.nvim_buf_get_name(0))
+    if current and current == target then
+        vim.notify("Cannot link a note to itself", vim.log.levels.WARN)
+        return
+    end
+
+    local text
+    if use_title and entry.title and entry.title ~= "" then
+        text = entry.title
+    else
+        text = target:match("([^/]+)%.md$") or entry.title or target
+    end
+
+    local link = string.format("[%s](%s)", text, target)
+
+    -- Insert at cursor position
+    local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+    local line = vim.api.nvim_get_current_line()
+    local new_line = line:sub(1, col) .. link .. line:sub(col + 1)
+    vim.api.nvim_set_current_line(new_line)
+
+    -- Move cursor to end of inserted link
+    vim.api.nvim_win_set_cursor(0, { row, col + #link })
+end
+
+-- Whether the cursor sits inside the buffer's YAML frontmatter.
+local function cursor_in_frontmatter()
+    if vim.api.nvim_buf_get_lines(0, 0, 1, false)[1] ~= "---" then return false end
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    if row == 1 then return false end
+    for i, l in ipairs(vim.api.nvim_buf_get_lines(0, 1, -1, false)) do
+        if l == "---" or l == "..." then return row <= i end
+    end
+    return false
+end
+
+-- Follow the markdown link under the cursor. Absolute ("/...") targets resolve
+-- against the bundle root; relative targets against the current file's directory.
+-- A path-valued frontmatter field follows the CLI's rule (graph.RefLink): only
+-- "./" and "../" are relative there, and a bare path is read from the bundle root.
+M.follow_link = function()
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+
+    local href
+    local i = 1
+    while true do
+        local ms, me, cap = line:find("%[[^%]]*%]%(([^)]+)%)", i)
+        if not ms then break end
+        if col >= ms and col <= me then
+            href = cap
+            break
+        end
+        i = me + 1
+    end
+    if not href then
+        href = vim.fn.expand("<cfile>")
+    end
+    if not href or href == "" then
+        vim.notify("No link under cursor", vim.log.levels.INFO)
+        return
+    end
+
+    href = href:gsub("#.*$", "")
+    if href:match("^%a[%w+.-]*://") then
+        vim.notify("External link: " .. href, vim.log.levels.INFO)
+        return
+    end
+    if not href:match("^%.%.?/") and href:sub(1, 1) ~= "/" and cursor_in_frontmatter() then
+        href = "/" .. href
+    end
+
+    local target
+    if href:sub(1, 1) == "/" then
+        local root = M.bundle_root()
+        if not root then
+            vim.notify("Bundle root unknown", vim.log.levels.WARN)
+            return
+        end
+        target = root:gsub("/$", "") .. href
+    else
+        local dir = vim.fn.expand("%:p:h")
+        target = vim.fn.fnamemodify(dir .. "/" .. href, ":p")
+    end
+
+    if vim.fn.filereadable(target) == 1 then
+        vim.cmd("edit " .. vim.fn.fnameescape(target))
+    else
+        vim.notify("Link target not found: " .. target, vim.log.levels.WARN)
+    end
+end
+
+-- Prompt for an ID and insert a markdown link to that concept.
+M.insert_link_prompt = function(include_title)
+    local id = vim.fn.input("Concept ID: ")
+    if id == "" then return end
+
+    M.search("", {
+        limit = 200,
+        on_results = function(results)
+            for _, r in ipairs(results) do
+                if r.id == id then
+                    M.insert_link(r, include_title)
+                    return
+                end
+            end
+            vim.notify("Concept not found: " .. id, vim.log.levels.WARN)
+        end,
+    })
+end
+
+-- Open picker to search notes and insert link (requires snacks.nvim)
+M.link_picker = function(opts)
+    opts = opts or {}
+    local include_title = opts.include_title
+
+    local has_snacks, Snacks = pcall(require, "snacks")
+    if not has_snacks then
+        print('snacks.nvim required for link picker. Use :lua require("okfw").insert_link_prompt() instead.')
+        return
+    end
+
+    -- Get search results
+    local Job = require("plenary.job")
+
+    local args = { "search", "--json", "--limit", "50" }
+    if opts.query and opts.query ~= "" then
+        table.insert(args, opts.query)
+    end
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = args,
+    })
+
+    job:sync(10000)
+    local results_json = table.concat(job:result(), "\n")
+
+    local ok, results = pcall(vim.json.decode, results_json)
+    if not ok or type(results) ~= "table" then
+        vim.notify("No concepts found to link", vim.log.levels.INFO)
+        return
+    end
+
+    -- Filter out the current note to prevent self-linking
+    local current_id = get_current_concept_id()
+    if current_id then
+        local filtered = {}
+        for _, r in ipairs(results) do
+            if r.id ~= current_id then
+                table.insert(filtered, r)
+            end
+        end
+        results = filtered
+    end
+
+    if #results == 0 then
+        vim.notify("No concepts found to link", vim.log.levels.INFO)
+        return
+    end
+
+    local items = {}
+    for idx, entry in ipairs(results) do
+        local display = entry.title or entry.id
+        if entry.project and entry.project ~= "" then
+            display = display .. " [" .. entry.project .. "]"
+        end
+
+        table.insert(items, {
+            idx = idx,
+            text = (entry.title or "") .. " " .. (entry.id or ""),
+            display = display,
+            file = entry.file_path,
+            data = entry,
+        })
+    end
+
+    Snacks.picker.pick({
+        source = "okfw_link",
+        title = "Insert Link to Concept",
+        items = items,
+        format = function(item, _picker)
+            return { { item.display or item.text } }
+        end,
+        preview = "file",
+        confirm = function(picker, item)
+            picker:close()
+            if item and item.data then
+                M.insert_link(item.data, include_title)
+            end
+        end,
+        actions = {
+            insert_titled_link = function(picker, item)
+                if item and item.data then
+                    picker:close()
+                    M.insert_link(item.data, true)
+                end
+            end,
+        },
+        win = {
+            input = {
+                keys = {
+                    ["<C-t>"] = { "insert_titled_link", mode = { "n", "i" } },
+                },
+            },
+        },
+    })
+end
+
+-- Tag completion support
+-- Cache for tags to avoid repeated searches
+M._tag_cache = nil
+M._tag_cache_time = 0
+M._tag_cache_ttl = 60 -- Cache TTL in seconds
+
+-- Get all unique tags from indexed concepts (async)
+M.get_tags = function(callback)
+    local Job = require("plenary.job")
+    local results_json = ""
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = { "search", "--json", "--limit", "500" },
+        on_stdout = function(_, data)
+            results_json = results_json .. data
+        end,
+        on_exit = function(_, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    callback({})
+                    return
+                end
+
+                local ok, results = pcall(vim.json.decode, results_json)
+                if not ok then
+                    callback({})
+                    return
+                end
+
+                -- Collect unique tags
+                local tag_set = {}
+                for _, r in ipairs(results) do
+                    if r.tags and type(r.tags) == "table" then
+                        for _, tag in ipairs(r.tags) do
+                            tag_set[tag] = true
+                        end
+                    end
+                end
+
+                -- Convert to sorted list
+                local tags = {}
+                for tag in pairs(tag_set) do
+                    table.insert(tags, tag)
+                end
+                table.sort(tags)
+
+                -- Update cache
+                M._tag_cache = tags
+                M._tag_cache_time = os.time()
+
+                callback(tags)
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Get tags synchronously (for completion)
+M.get_tags_sync = function()
+    -- Check cache
+    local now = os.time()
+    if M._tag_cache and (now - M._tag_cache_time) < M._tag_cache_ttl then
+        return M._tag_cache
+    end
+
+    local Job = require("plenary.job")
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = { "search", "--json", "--limit", "500" },
+    })
+
+    job:sync(5000)
+    local results_json = table.concat(job:result(), "\n")
+
+    local ok, results = pcall(vim.json.decode, results_json)
+    if not ok then
+        return M._tag_cache or {}
+    end
+
+    -- Collect unique tags
+    local tag_set = {}
+    for _, r in ipairs(results) do
+        if r.tags and type(r.tags) == "table" then
+            for _, tag in ipairs(r.tags) do
+                tag_set[tag] = true
+            end
+        end
+    end
+
+    -- Convert to sorted list
+    local tags = {}
+    for tag in pairs(tag_set) do
+        table.insert(tags, tag)
+    end
+    table.sort(tags)
+
+    -- Update cache
+    M._tag_cache = tags
+    M._tag_cache_time = now
+
+    return tags
+end
+
+-- Refresh tag cache
+M.refresh_tags = function()
+    M._tag_cache = nil
+    M._tag_cache_time = 0
+    M.get_tags(function(tags)
+        print("Refreshed " .. #tags .. " tags")
+    end)
+end
+
+-- Manual tag completion using vim's completion menu
+M.complete_tags = function()
+    local tags = M.get_tags_sync()
+    if #tags == 0 then
+        print("No tags found.")
+        return
+    end
+
+    -- Get current line context
+    local line = vim.api.nvim_get_current_line()
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    local before_cursor = line:sub(1, col)
+
+    -- Find the start of the current word
+    local start_col = col
+    for i = col, 1, -1 do
+        local char = before_cursor:sub(i, i)
+        if char:match("[%s,\"']") then
+            break
+        end
+        start_col = i - 1
+    end
+
+    -- Get partial input for filtering
+    local partial = before_cursor:sub(start_col + 1, col)
+
+    -- Filter tags by partial match
+    local matches = {}
+    for _, tag in ipairs(tags) do
+        if partial == "" or tag:lower():find(partial:lower(), 1, true) then
+            table.insert(matches, tag)
+        end
+    end
+
+    if #matches == 0 then
+        print("No matching tags")
+        return
+    end
+
+    -- Show completion menu
+    vim.fn.complete(start_col + 1, matches)
+end
+
+-- Check if cursor is in YAML frontmatter tags section
+local function in_tags_section()
+    local bufnr = vim.api.nvim_get_current_buf()
+    local row = vim.api.nvim_win_get_cursor(0)[1]
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, row, false)
+
+    local in_frontmatter = false
+    local frontmatter_end = false
+    local in_tags = false
+
+    for i, line in ipairs(lines) do
+        if i == 1 and line == "---" then
+            in_frontmatter = true
+        elseif in_frontmatter and line == "---" then
+            frontmatter_end = true
+            break
+        elseif in_frontmatter then
+            if line:match("^tags:") then
+                in_tags = true
+            elseif line:match("^%w+:") and not line:match("^%s+-") then
+                in_tags = false
+            end
+        end
+    end
+
+    return in_frontmatter and not frontmatter_end and in_tags
+end
+
+-- Omni completion function for tags
+M.omnifunc = function(findstart, base)
+    if findstart == 1 then
+        -- Find the start of the word
+        local line = vim.api.nvim_get_current_line()
+        local col = vim.api.nvim_win_get_cursor(0)[2]
+        local start = col
+
+        while start > 0 do
+            local char = line:sub(start, start)
+            if char:match("[%s,\"'-]") then
+                break
+            end
+            start = start - 1
+        end
+
+        return start
+    else
+        -- Return matching tags
+        local tags = M.get_tags_sync()
+        local matches = {}
+
+        for _, tag in ipairs(tags) do
+            if base == "" or tag:lower():find(base:lower(), 1, true) then
+                table.insert(matches, {
+                    word = tag,
+                    menu = "[okfw-tag]",
+                })
+            end
+        end
+
+        return matches
+    end
+end
+
+-- Set up tag completion for markdown files
+M.setup_tag_completion = function()
+    vim.api.nvim_create_autocmd("FileType", {
+        pattern = "markdown",
+        callback = function()
+            -- Set omnifunc for manual completion
+            vim.bo.omnifunc = "v:lua.require'okfw'.omnifunc"
+
+            -- Set up <C-x><C-o> for omni completion in insert mode
+            vim.keymap.set("i", "<C-x><C-t>", function()
+                if in_tags_section() then
+                    require("okfw").complete_tags()
+                else
+                    -- Fall back to default behavior
+                    vim.api.nvim_feedkeys(
+                        vim.api.nvim_replace_termcodes("<C-x><C-o>", true, false, true),
+                        "n",
+                        false
+                    )
+                end
+            end, { buffer = true, desc = "Complete okfw tags" })
+        end,
+    })
+end
+
+-- nvim-cmp source for tag completion (if nvim-cmp is available)
+M.cmp_source = function()
+    local source = {}
+
+    source.new = function()
+        return setmetatable({}, { __index = source })
+    end
+
+    source.get_trigger_characters = function()
+        return { "-", " " }
+    end
+
+    source.is_available = function()
+        -- Only available in markdown files in tags section
+        if vim.bo.filetype ~= "markdown" then
+            return false
+        end
+        return in_tags_section()
+    end
+
+    source.complete = function(self, request, callback)
+        local tags = M.get_tags_sync()
+        local items = {}
+
+        for _, tag in ipairs(tags) do
+            table.insert(items, {
+                label = tag,
+                kind = require("cmp").lsp.CompletionItemKind.Keyword,
+                documentation = "Concept tag",
+            })
+        end
+
+        callback({ items = items })
+    end
+
+    return source
+end
+
+-- Register nvim-cmp source if available
+M.setup_cmp = function()
+    local has_cmp, cmp = pcall(require, "cmp")
+    if not has_cmp then
+        return false
+    end
+
+    cmp.register_source("okfw_tags", M.cmp_source().new())
+    return true
+end
+
+-- Backlinks panel
+-- State for the backlinks panel
+M._backlinks_state = {
+    buf = nil,
+    win = nil,
+    backlinks = {},
+}
+
+-- Get backlinks for a concept (async)
+M.get_backlinks = function(id_or_file, callback)
+    local Job = require("plenary.job")
+    local results_json = ""
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = { "backlinks", id_or_file, "--json" },
+        on_stdout = function(_, data)
+            results_json = results_json .. data
+        end,
+        on_exit = function(_, return_val)
+            vim.schedule(function()
+                if return_val ~= 0 then
+                    callback({})
+                    return
+                end
+
+                local ok, results = pcall(vim.json.decode, results_json)
+                if not ok or type(results) ~= "table" then
+                    callback({})
+                    return
+                end
+
+                callback(results)
+            end)
+        end,
+    })
+    job:start()
+end
+
+-- Get backlinks synchronously
+M.get_backlinks_sync = function(id_or_file)
+    local Job = require("plenary.job")
+
+    local job = Job:new({
+        command = M.config.bin,
+        args = { "backlinks", id_or_file, "--json" },
+    })
+
+    job:sync(5000)
+    local results_json = table.concat(job:result(), "\n")
+
+    local ok, results = pcall(vim.json.decode, results_json)
+    if not ok or type(results) ~= "table" then
+        return {}
+    end
+
+    return results
+end
+
+-- Open backlinks panel as a floating window
+M.backlinks_panel = function(opts)
+    opts = opts or {}
+
+    -- Save all modified concept buffers so backlinks scan finds latest links
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(bufnr) and vim.bo[bufnr].modified then
+            local name = vim.api.nvim_buf_get_name(bufnr)
+            if name:match("%.md$") then
+                vim.api.nvim_buf_call(bufnr, function() vim.cmd("silent write") end)
+            end
+        end
+    end
+
+    -- Get the concept ID
+    local target = opts.id or opts.file or get_current_concept_id()
+    if not target then
+        print("No concept ID found. Open a concept file first.")
+        return
+    end
+
+    -- Get backlinks
+    local backlinks = M.get_backlinks_sync(target)
+    M._backlinks_state.backlinks = backlinks
+
+    -- Build panel content
+    local lines = {}
+    table.insert(lines, " Backlinks (" .. #backlinks .. ")")
+    table.insert(lines, string.rep("─", 40))
+
+    if #backlinks == 0 then
+        table.insert(lines, "")
+        table.insert(lines, "  No backlinks found")
+        table.insert(lines, "")
+    else
+        for i, bl in ipairs(backlinks) do
+            table.insert(lines, "")
+            local title = bl.title or bl.id
+            if #title > 35 then
+                title = title:sub(1, 32) .. "..."
+            end
+            table.insert(lines, string.format(" %d. %s", i, title))
+            table.insert(lines, string.format("    %s", bl.id))
+        end
+        table.insert(lines, "")
+    end
+
+    table.insert(lines, string.rep("─", 40))
+    table.insert(lines, " <CR> open │ q close │ p preview")
+
+    -- Calculate window dimensions
+    local width = 44
+    local height = math.min(#lines, vim.o.lines - 10)
+    local row = 2
+    local col = vim.o.columns - width - 2
+
+    -- Close existing panel if open
+    if M._backlinks_state.win and vim.api.nvim_win_is_valid(M._backlinks_state.win) then
+        vim.api.nvim_win_close(M._backlinks_state.win, true)
+    end
+
+    -- Create buffer
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
+    vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_name(buf, "okfw-backlinks")
+
+    -- Create floating window
+    local win = vim.api.nvim_open_win(buf, true, {
+        relative = "editor",
+        width = width,
+        height = height,
+        row = row,
+        col = col,
+        style = "minimal",
+        border = "rounded",
+        title = " Backlinks ",
+        title_pos = "center",
+    })
+
+    -- Set window options
+    vim.api.nvim_win_set_option(win, "wrap", true)
+    vim.api.nvim_win_set_option(win, "cursorline", true)
+
+    -- Store state
+    M._backlinks_state.buf = buf
+    M._backlinks_state.win = win
+
+    -- Helper to get selected backlink index from cursor position
+    local function get_selected_index()
+        local cursor_row = vim.api.nvim_win_get_cursor(win)[1]
+        -- Find which backlink the cursor is on
+        local current_index = 0
+        local line_num = 0
+        for _, line in ipairs(lines) do
+            line_num = line_num + 1
+            local idx = line:match("^ (%d+)%.")
+            if idx then
+                current_index = tonumber(idx)
+            end
+            if line_num == cursor_row and current_index > 0 then
+                return current_index
+            end
+        end
+        return current_index
+    end
+
+    -- Keymaps
+    local augroup = vim.api.nvim_create_augroup("OkfwBacklinksPanel", { clear = true })
+
+    local close_panel = function()
+        pcall(vim.api.nvim_del_augroup_by_name, "OkfwBacklinksPanel")
+        if M._backlinks_state.win and vim.api.nvim_win_is_valid(M._backlinks_state.win) then
+            vim.api.nvim_win_close(M._backlinks_state.win, true)
+        end
+        M._backlinks_state.win = nil
+        M._backlinks_state.buf = nil
+    end
+
+    -- Auto-close panel when focus leaves (synchronous to beat bufferline's buffer switch)
+    vim.api.nvim_create_autocmd("WinLeave", {
+        group = augroup,
+        buffer = buf,
+        callback = close_panel,
+    })
+
+    -- Auto-close panel when buffer is switched (e.g. clicking a bufferline tab)
+    vim.api.nvim_create_autocmd("BufLeave", {
+        group = augroup,
+        buffer = buf,
+        callback = close_panel,
+    })
+
+    local open_selected = function()
+        local idx = get_selected_index()
+        if idx > 0 and idx <= #backlinks then
+            local bl = backlinks[idx]
+            close_panel()
+            vim.cmd("edit " .. vim.fn.fnameescape(bl.file_path))
+        end
+    end
+
+    local preview_selected = function()
+        local idx = get_selected_index()
+        if idx > 0 and idx <= #backlinks then
+            local bl = backlinks[idx]
+            M.preview_note(bl.file_path)
+        end
+    end
+
+    vim.keymap.set("n", "q", close_panel, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "<Esc>", close_panel, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "<CR>", open_selected, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "p", preview_selected, { buffer = buf, nowait = true })
+    vim.keymap.set("n", "o", open_selected, { buffer = buf, nowait = true })
+
+    -- Position cursor on first backlink if any
+    if #backlinks > 0 then
+        vim.api.nvim_win_set_cursor(win, { 4, 0 })
+    end
+
+    return { buf = buf, win = win, backlinks = backlinks }
+end
+
+-- Open backlinks in split window
+M.backlinks_split = function(opts)
+    opts = opts or {}
+    local position = opts.position or "right"
+
+    -- Get the concept ID
+    local target = opts.id or opts.file or get_current_concept_id()
+    if not target then
+        print("No concept ID found. Open a concept file first.")
+        return
+    end
+
+    -- Get backlinks
+    local backlinks = M.get_backlinks_sync(target)
+
+    -- Build content
+    local lines = {}
+    table.insert(lines, "# Backlinks")
+    table.insert(lines, "")
+    table.insert(lines, "Notes linking to: " .. target)
+    table.insert(lines, "")
+
+    if #backlinks == 0 then
+        table.insert(lines, "*No backlinks found*")
+    else
+        for _, bl in ipairs(backlinks) do
+            local title = bl.title or bl.id
+            table.insert(lines, string.format("- **%s** `%s`", title, bl.id))
+            table.insert(lines, string.format("  %s", bl.file_path))
+            table.insert(lines, "")
+        end
+    end
+
+    -- Create split
+    if position == "right" then
+        vim.cmd("vsplit")
+    elseif position == "left" then
+        vim.cmd("leftabove vsplit")
+    elseif position == "bottom" then
+        vim.cmd("split")
+    else
+        vim.cmd("aboveleft split")
+    end
+
+    -- Create buffer
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, buf)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_option(buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
+    vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+    vim.api.nvim_buf_set_name(buf, "okfw-backlinks-" .. target)
+
+    -- Resize to reasonable width
+    if position == "right" or position == "left" then
+        vim.cmd("vertical resize 50")
+    else
+        vim.cmd("resize 15")
+    end
+
+    return { buf = buf, backlinks = backlinks }
+end
+
+-- Toggle backlinks panel
+M.toggle_backlinks = function(opts)
+    if M._backlinks_state.win and vim.api.nvim_win_is_valid(M._backlinks_state.win) then
+        pcall(vim.api.nvim_del_augroup_by_name, "OkfwBacklinksPanel")
+        vim.api.nvim_win_close(M._backlinks_state.win, true)
+        M._backlinks_state.win = nil
+        M._backlinks_state.buf = nil
+    else
+        M.backlinks_panel(opts)
+    end
+end
+
+-- Telescope integration (lazy loaded)
+M.telescope = setmetatable({}, {
+    __index = function(_, key)
+        local ok, telescope_ext = pcall(require, "okfw.telescope")
+        if ok then
+            return telescope_ext[key]
+        end
+        return function()
+            print("Telescope not available. Install telescope.nvim for this feature.")
+        end
+    end,
+})
+
+return M

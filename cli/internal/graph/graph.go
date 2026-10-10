@@ -2,26 +2,28 @@ package graph
 
 import (
 	"fmt"
-	"regexp"
+	"net/url"
+	"path"
 	"sort"
 	"strings"
 )
 
-// Node represents a zettel in the graph.
+// Node represents a concept in the graph.
 type Node struct {
 	ID       string
 	Title    string
 	FilePath string
 	Project  string
-	Category string
-	Parent   string   // Optional parent zettel ID
-	Children []string // Child zettel IDs
-	Links    []string // Links found in body content via [[id]] or [[id|title]] scanning (not from frontmatter)
+	Parent   string   // Optional parent concept ID
+	Children []string // Child concept IDs
+	Links    []string // Concept keys of its link targets — body links, then path-valued frontmatter fields; a missing target has no node
+	Tags     []string // Frontmatter tags, for tag queries
 }
 
-// Graph represents the zettelkasten link graph.
+// Graph represents the bundle link graph.
 type Graph struct {
-	nodes map[string]*Node
+	nodes     map[string]*Node
+	backlinks map[string][]string // target ID → IDs of nodes whose Links contain it
 }
 
 // New creates a new empty graph.
@@ -46,25 +48,59 @@ func (g *Graph) NodeCount() int {
 	return len(g.nodes)
 }
 
-// AllNodes returns all nodes in the graph.
+// AllNodes returns all nodes in the graph, in id order.
 func (g *Graph) AllNodes() []*Node {
 	nodes := make([]*Node, 0, len(g.nodes))
-	for _, n := range g.nodes {
-		nodes = append(nodes, n)
+	for _, id := range g.sortedIDs() {
+		nodes = append(nodes, g.nodes[id])
 	}
 	return nodes
 }
 
-// BuildRelationships processes parent fields and builds bidirectional relationships.
+// sortedIDs returns every node id in order. Anything whose output depends on
+// the order nodes are visited in goes through it rather than ranging over the
+// map, whose order Go randomises on every range: a capped query reached a
+// different subset of a hub's neighbours on every run.
+func (g *Graph) sortedIDs() []string {
+	ids := make([]string, 0, len(g.nodes))
+	for id := range g.nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// BuildRelationships processes parent fields and builds bidirectional
+// relationships, including the reverse-link index used by FindConnected.
+// Idempotent: safe to call again after adding nodes. Children and backlinks
+// are recorded in id order, which is the order FindConnected visits them in.
 func (g *Graph) BuildRelationships() {
 	for _, node := range g.nodes {
+		node.Children = nil
+	}
+	g.backlinks = make(map[string][]string, len(g.nodes))
+	for _, id := range g.sortedIDs() {
+		node := g.nodes[id]
 		// Add this node as a child of its parent
 		if node.Parent != "" {
 			if parent, ok := g.nodes[node.Parent]; ok {
 				parent.Children = append(parent.Children, node.ID)
 			}
 		}
+		// Index reverse links (who links TO each target)
+		for _, linkID := range node.Links {
+			g.backlinks[linkID] = append(g.backlinks[linkID], node.ID)
+		}
 	}
+}
+
+// backlinksTo returns the IDs of nodes whose Links point at id, building the
+// index on first use if BuildRelationships hasn't been called.
+func (g *Graph) backlinksTo(id string) []string {
+	if g.backlinks == nil {
+		g.BuildRelationships()
+	}
+	return g.backlinks[id]
 }
 
 // bfsItem tracks a node ID and its distance from the start node.
@@ -130,16 +166,10 @@ func (g *Graph) FindConnected(startID string, limit int, maxDepth int) []*Node {
 				queue = append(queue, bfsItem{id: linkID, depth: nextDepth})
 			}
 		}
-		// Reverse links (notes that link TO this node)
-		for _, other := range g.nodes {
-			if visited[other.ID] {
-				continue
-			}
-			for _, linkID := range other.Links {
-				if linkID == node.ID {
-					queue = append(queue, bfsItem{id: other.ID, depth: nextDepth})
-					break
-				}
+		// Reverse links (notes that link TO this node), via the index
+		for _, srcID := range g.backlinksTo(node.ID) {
+			if !visited[srcID] {
+				queue = append(queue, bfsItem{id: srcID, depth: nextDepth})
 			}
 		}
 	}
@@ -157,11 +187,19 @@ func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 		return nil
 	}
 
-	// Start from the node with the most connections for a meaningful graph
+	// Start from the node with the most connections for a meaningful graph;
+	// among equals, the lowest id.
 	var startID string
 	maxConns := -1
-	for id, node := range g.nodes {
-		conns := len(node.Links) + len(node.Children)
+	for _, id := range g.sortedIDs() {
+		node := g.nodes[id]
+		// Live links only: a link to a missing concept connects nothing.
+		conns := len(node.Children)
+		for _, l := range node.Links {
+			if g.nodes[l] != nil {
+				conns++
+			}
+		}
 		if node.Parent != "" {
 			conns++
 		}
@@ -220,7 +258,7 @@ func (g *Graph) GetEdges(nodes []*Node) []Edge {
 //
 // The root is startNodeID (if provided and present), otherwise the most-connected
 // node. Children are sorted by ID for stable output. Directional markers show
-// where the [[id]] link lives: "←" means the tree-child links back to its
+// where the link lives: "←" means the tree-child links back to its
 // tree-parent; "→" means the tree-parent links forward to the tree-child.
 // Cross-edges (links between nodes already placed in the tree) are shown as
 // inline annotations, e.g. "(also → Node B)". Disconnected nodes appear as
@@ -293,8 +331,10 @@ func GenerateASCIITree(nodes []*Node, edges []Edge, startNodeID string) string {
 			}
 		}
 
-		// Sort by ID for deterministic output
-		sort.Slice(neighbours, func(i, j int) bool {
+		// Sort by ID for deterministic output. Stable, so a neighbour that is
+		// both linked to and linking back keeps its forward entry, which comes
+		// first and wins below: the link lives in the tree parent.
+		sort.SliceStable(neighbours, func(i, j int) bool {
 			return neighbours[i].id < neighbours[j].id
 		})
 
@@ -431,56 +471,137 @@ func GenerateMermaid(nodes []*Node, edges []Edge) string {
 	return sb.String()
 }
 
-// idPattern matches either UUIDv7 or legacy YYYYMMDDHHmmss-UUID format.
-const idPattern = `(?:[0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+// --- Vanilla markdown link helpers (OKF) ---
 
-// linkReplacePattern captures both the ID and optional display text from [[id]] or [[id|title]] links.
-var linkReplacePattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|([^\]]+))?\]\]`)
-
-// TransformLinks converts [[id]] and [[id|title]] links to portable [title](id.md) markdown links
-// for IDs present in nodeMap. Links to IDs not in nodeMap are left unchanged.
-func TransformLinks(content string, nodeMap map[string]*Node) string {
-	return linkReplacePattern.ReplaceAllStringFunc(content, func(match string) string {
-		sub := linkReplacePattern.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		id := sub[1]
-		display := sub[2] // may be empty
-
-		node, ok := nodeMap[id]
-		if !ok {
-			return match
-		}
-
-		if display == "" {
-			display = node.Title
-			if display == "" {
-				display = id
-			}
-		}
-
-		return fmt.Sprintf("[%s](%s.md)", display, id)
-	})
-}
-
-// ExtractLinks finds all [[id]] or [[id|title]] style links in content.
-var linkPattern = regexp.MustCompile(`\[\[(` + idPattern + `)(?:\|[^\]]+)?\]\]`)
-
-func ExtractLinks(content string) []string {
-	matches := linkPattern.FindAllStringSubmatch(content, -1)
-	var links []string
+// ExtractLinkTargets returns the deduplicated destinations of internal markdown
+// links in body, in order of first appearance and as written (still
+// percent-encoded, fragment removed). External links are excluded. See
+// linkDests for what counts as a link.
+func ExtractLinkTargets(body string) []string {
+	var out []string
 	seen := make(map[string]bool)
-
-	for _, match := range matches {
-		if len(match) >= 2 {
-			id := match[1]
-			if !seen[id] {
-				links = append(links, id)
-				seen[id] = true
-			}
+	for _, d := range linkDests(body) {
+		href := body[d.start:d.end]
+		if !seen[href] {
+			seen[href] = true
+			out = append(out, href)
 		}
 	}
+	return out
+}
 
-	return links
+// NormalizeTarget converts a markdown href into a clean bundle-relative path
+// (forward slashes, no leading slash, percent-decoded). Relative hrefs resolve against fromDir,
+// the linking file's bundle-relative directory. Returns "" for external links.
+func NormalizeTarget(href, fromDir string) string {
+	if strings.Contains(href, "://") {
+		return ""
+	}
+	if i := strings.IndexByte(href, '#'); i >= 0 {
+		href = href[:i]
+	}
+	href = strings.TrimSpace(href)
+	if href == "" {
+		return ""
+	}
+	if u, err := url.PathUnescape(href); err == nil {
+		href = u
+	}
+	var p string
+	if strings.HasPrefix(href, "/") {
+		p = path.Clean(strings.TrimPrefix(href, "/"))
+	} else {
+		p = path.Clean(path.Join(fromDir, href))
+	}
+	// A link that climbs out of the bundle names nothing in it, and resolving
+	// it anyway made readers open files outside the bundle.
+	if p == ".." || strings.HasPrefix(p, "../") {
+		return ""
+	}
+	return strings.TrimPrefix(p, "/")
+}
+
+// RefLink returns the body-link spelling of a path-valued frontmatter field
+// (OKF section 6.2): a path starting "./" or "../" resolves from the concept's
+// directory, as a body link does, and any other path from the bundle root, so
+// a bare one gains a leading "/". Body links are not read this way; section
+// 6.1 makes a bare body link a standard markdown relative path.
+//
+// Section 6.2 does not say what a bare path is relative to, and okfw first
+// read it from the concept's directory. That left the spec's own Appendix A
+// example (executor.resource: references/skills/run-on-bq.md, written from
+// computations/revenue.md) and 12 of 12 such paths in the upstream acme_retail
+// bundle pointing at nothing. This reading resolves every one of them and
+// §6.2's own ../computations/revenue.md, and is the one proposed in upstream
+// issues #245 and #408.
+func RefLink(value string) string {
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") {
+		return value
+	}
+	return "/" + value
+}
+
+// NormalizeRef resolves a path-valued frontmatter field (OKF section 6.2) by
+// RefLink's rule, and returns "" unless it names a markdown file inside the
+// bundle. The same field may hold a URL, a scope descriptor ("all queries in
+// project X") or a non-concept file such as an attester's .py, and none of
+// those is an edge between concepts.
+func NormalizeRef(value, fromDir string) string {
+	v := strings.TrimSpace(value)
+	if i := strings.IndexByte(v, '#'); i >= 0 {
+		v = v[:i]
+	}
+	if !isInternalMarkdown(v) {
+		return ""
+	}
+	return NormalizeTarget(RefLink(v), fromDir)
+}
+
+// RewriteLinks applies rewrite to the destination of every internal markdown
+// link in body. rewrite receives the destination as written (fragment removed)
+// and returns a replacement path; returning "" or the same value leaves the
+// link unchanged. The fragment, any title and the link text are kept.
+//
+// The replacement is spliced at the destination's own offsets rather than by
+// substring substitution: when a link's text equals its target —
+// "[/dir/a.md](/dir/a.md)", which is exactly what the plugin's link-insert
+// keymap produces — replacing the first occurrence of the href rewrote the
+// visible text and left the actual target untouched.
+//
+// A replacement containing characters that end a bare destination (spaces,
+// parentheses, angle brackets) is percent-encoded, unless the original was
+// written in angle brackets, where spaces are legal.
+func RewriteLinks(body string, rewrite func(href string) string) string {
+	dests := linkDests(body)
+	if len(dests) == 0 {
+		return body
+	}
+	var b strings.Builder
+	last := 0
+	for _, d := range dests {
+		href := body[d.start:d.end]
+		nh := rewrite(href)
+		if nh == "" || nh == href {
+			continue
+		}
+		if d.angled {
+			nh = strings.NewReplacer("<", "%3C", ">", "%3E", "\n", "%0A").Replace(nh)
+		} else {
+			nh = encodeDest(nh)
+		}
+		b.WriteString(body[last:d.start])
+		b.WriteString(nh)
+		last = d.end
+	}
+	if last == 0 {
+		return body
+	}
+	b.WriteString(body[last:])
+	return b.String()
+}
+
+// encodeDest percent-encodes the characters that would end or break a bare
+// link destination.
+func encodeDest(s string) string {
+	return strings.NewReplacer(" ", "%20", "\t", "%09", "(", "%28", ")", "%29", "<", "%3C", ">", "%3E").Replace(s)
 }

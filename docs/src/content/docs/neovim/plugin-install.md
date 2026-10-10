@@ -1,16 +1,16 @@
 ---
 title: Plugin Installation
-description: Install and configure the zk NeoVim plugin for seamless Zettelkasten integration.
+description: Install and configure the okfw NeoVim plugin for seamless OKF Wiki integration.
 ---
 
-The `zk` NeoVim plugin provides seamless integration for creating notes directly from your editor.
+The `okfw` NeoVim plugin provides seamless integration for creating notes directly from your editor.
 
 ## Prerequisites
 
 - NeoVim 0.9+
 - [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (required dependency)
 - [snacks.nvim](https://github.com/folke/snacks.nvim) (optional, for picker UI)
-- `zk` binary installed and in your `$PATH`
+- `okfw` binary installed and in your `$PATH`
 
 ## Installation
 
@@ -18,14 +18,14 @@ The `zk` NeoVim plugin provides seamless integration for creating notes directly
 
 ```lua
 {
-    "infrashift/zettelkasten",
+    "infrashift/okf-wiki",
     dependencies = {
         "nvim-lua/plenary.nvim",
         "folke/snacks.nvim",  -- Optional, for picker UI
     },
     config = function()
-        require("zk").setup({
-            bin = "zk",  -- Path to zk binary
+        require("okfw").setup({
+            bin = "okfw",  -- Path to okfw binary
         })
     end,
 }
@@ -35,11 +35,11 @@ The `zk` NeoVim plugin provides seamless integration for creating notes directly
 
 ```lua
 use {
-    "infrashift/zettelkasten",
+    "infrashift/okf-wiki",
     requires = { "nvim-lua/plenary.nvim" },
     config = function()
-        require("zk").setup({
-            bin = "zk",
+        require("okfw").setup({
+            bin = "okfw",
         })
     end,
 }
@@ -49,71 +49,84 @@ use {
 
 ```vim
 Plug 'nvim-lua/plenary.nvim'
-Plug 'infrashift/zettelkasten'
+Plug 'infrashift/okf-wiki'
 
 " In your init.lua or after/plugin:
-lua require("zk").setup({ bin = "zk" })
+lua require("okfw").setup({ bin = "okfw" })
 ```
 
 ### Manual Installation
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/infrashift/zettelkasten.git ~/.local/share/nvim/site/pack/plugins/start/zettelkasten
+   git clone https://github.com/infrashift/okf-wiki.git ~/.local/share/nvim/site/pack/plugins/start/okf-wiki
    ```
 
 2. Ensure plenary.nvim is also installed
 
 3. Add to your `init.lua`:
    ```lua
-   require("zk").setup({
-       bin = "zk",
+   require("okfw").setup({
+       bin = "okfw",
    })
    ```
+
+## Initialize a Wiki
+
+The plugin discovers the wiki by running `okfw root` from NeoVim's current
+working directory, which searches upward for a `.okfw/` directory (the way git
+finds `.git`). If your project doesn't have a wiki yet, initialize one with
+the `:OkfwInit` user command (it runs `okfw init` in the cwd):
+
+```vim
+:OkfwInit
+```
+
+This creates `.okfw/` at the git repository root; running it again is a no-op.
 
 ## Configuration
 
 ### Basic Setup
 
 ```lua
-require("zk").setup({
-    bin = "zk",  -- Default: "zk"
+require("okfw").setup({
+    bin = "okfw",  -- Default: "okfw"
 })
 ```
 
 ### Custom Binary Path
 
 ```lua
-require("zk").setup({
-    bin = "/usr/local/bin/zk",
+require("okfw").setup({
+    bin = "/usr/local/bin/okfw",
 })
 ```
 
 ### With Development Build
 
 ```lua
-require("zk").setup({
-    bin = vim.fn.expand("~/projects/zettelkasten/zk"),
+require("okfw").setup({
+    bin = vim.fn.expand("~/projects/okf-wiki/okfw"),
 })
 ```
 
 ### Full Setup with Tag Completion
 
 ```lua
-require("zk").setup({
-    bin = "zk",
+require("okfw").setup({
+    bin = "okfw",
 })
 
 -- Enable tag completion in markdown files
-require("zk").setup_tag_completion()
+require("okfw").setup_tag_completion()
 
 -- Register nvim-cmp source (optional, if using nvim-cmp)
-require("zk").setup_cmp()
+require("okfw").setup_cmp()
 ```
 
 ## Filetype Settings
 
-When editing a zettel file (markdown with `id:` in frontmatter), the plugin
+When editing a concept file (markdown with `id:` in frontmatter), the plugin
 automatically provides buffer-local keymaps:
 
 | Keymap | Description |
@@ -122,116 +135,108 @@ automatically provides buffer-local keymaps:
 | `<localleader>l` | Insert link |
 | `<localleader>L` | Insert link with title |
 | `<localleader>b` | Toggle backlinks |
-| `<localleader>p` | Set project (note and todo types) |
-| `<localleader>t` | Tether / Untether (note and todo types) |
-| `<localleader>a` | Add tags (all zettel types) |
-| `<localleader>v` | Validate frontmatter (all zettel types) |
-| `<localleader>s` | Set todo status (todo-type only) |
+| `<localleader>p` | Set project |
+| `<localleader>a` | Add tags (all concept types) |
+| `<localleader>v` | Validate frontmatter (all concept types) |
+| `gf` | Follow the markdown link under the cursor (`/` resolves to the wiki root) |
+
+Saving a concept buffer also refreshes the wiki's `index.md` listings
+(`okfw index-md --no-adopt`), so an edited title or description shows up in them.
 
 ## Help Documentation
 
-Full documentation is available via `:help zk`.
+Full documentation is available via `:help okfw`.
 
-See [User Commands](/zettelkasten/neovim/user-commands/) for a complete reference of all `:Zk` commands.
+See [User Commands](/okf-wiki/neovim/user-commands/) for a complete reference of all `:Okfw` commands.
 
 ## Keybindings
 
 Add these to your NeoVim configuration:
 
 ```lua
--- Quick untethered note (no project)
+-- Quick note
 vim.keymap.set("n", "<leader>zf", function()
-    require("zk").create_note("untethered")
-end, { desc = "Create untethered note" })
-
--- Quick tethered note (will use git project)
-vim.keymap.set("n", "<leader>zp", function()
-    require("zk").create_note("tethered")
-end, { desc = "Create tethered note" })
-
--- Tether current note
-vim.keymap.set("n", "<leader>zP", function()
-    require("zk").tether_note()
-end, { desc = "Tether note" })
+    require("okfw").create_note()
+end, { desc = "Create note" })
 
 -- Set project on current note
 vim.keymap.set("n", "<leader>zs", function()
-    require("zk").set_project()
+    require("okfw").set_project()
 end, { desc = "Set project" })
 
 -- Search with picker
 vim.keymap.set("n", "<leader>zz", function()
-    require("zk.picker").search()
-end, { desc = "Search zettels" })
+    require("okfw.picker").search()
+end, { desc = "Search concepts" })
 
 -- Live search
 vim.keymap.set("n", "<leader>z/", function()
-    require("zk.picker").live_search()
-end, { desc = "Live search zettels" })
+    require("okfw.picker").live_search()
+end, { desc = "Live search concepts" })
 
--- Index current directory
+-- Regenerate index.md listings
 vim.keymap.set("n", "<leader>zi", function()
-    require("zk").index()
-end, { desc = "Index zettels" })
+    require("okfw").index()
+end, { desc = "Refresh index.md listings" })
 
 -- Generate graph visualization
 vim.keymap.set("n", "<leader>zg", function()
-    require("zk").graph()
+    require("okfw").graph()
 end, { desc = "Generate graph" })
 
 -- Preview current note in floating window
 vim.keymap.set("n", "<leader>zv", function()
-    require("zk").preview_note()
+    require("okfw").preview_note()
 end, { desc = "Preview note" })
 
 -- Preview note by ID
 vim.keymap.set("n", "<leader>zV", function()
-    require("zk").preview_by_id()
+    require("okfw").preview_by_id()
 end, { desc = "Preview by ID" })
 
 -- Insert link (opens picker)
 vim.keymap.set("n", "<leader>zl", function()
-    require("zk").link_picker()
+    require("okfw").link_picker()
 end, { desc = "Insert link" })
 
 -- Insert link with title
 vim.keymap.set("n", "<leader>zL", function()
-    require("zk").link_picker({ include_title = true })
+    require("okfw").link_picker({ include_title = true })
 end, { desc = "Insert link with title" })
 
 -- Toggle backlinks panel
 vim.keymap.set("n", "<leader>zb", function()
-    require("zk").toggle_backlinks()
+    require("okfw").toggle_backlinks()
 end, { desc = "Toggle backlinks" })
 
 -- Open backlinks in split
 vim.keymap.set("n", "<leader>zB", function()
-    require("zk").backlinks_split()
+    require("okfw").backlinks_split()
 end, { desc = "Backlinks split" })
 
 -- Create note from template (opens picker)
 vim.keymap.set("n", "<leader>zt", function()
-    require("zk").template_picker()
+    require("okfw").template_picker()
 end, { desc = "Create from template" })
 
 -- Quick meeting notes
 vim.keymap.set("n", "<leader>zm", function()
-    require("zk").create_from_template("meeting")
+    require("okfw").create_from_template({ template = "meeting" })
 end, { desc = "Create meeting notes" })
 
 -- Today's daily note
 vim.keymap.set("n", "<leader>zd", function()
-    require("zk").daily()
+    require("okfw").daily()
 end, { desc = "Today's daily note" })
 
 -- Yesterday's daily note (morning review)
 vim.keymap.set("n", "<leader>zD", function()
-    require("zk").daily({ date = "yesterday" })
+    require("okfw").daily({ date = "yesterday" })
 end, { desc = "Yesterday's daily note" })
 
 -- Browse daily notes
 vim.keymap.set("n", "<leader>zw", function()
-    require("zk").daily_picker()
+    require("okfw").daily_picker()
 end, { desc = "Browse daily notes" })
 ```
 
@@ -241,23 +246,21 @@ end, { desc = "Browse daily notes" })
 local wk = require("which-key")
 wk.register({
     z = {
-        name = "Zettelkasten",
-        f = { function() require("zk").create_note("untethered") end, "Untethered note" },
-        p = { function() require("zk").create_note("tethered") end, "Tethered note" },
-        P = { function() require("zk").tether_note() end, "Tether note" },
-        s = { function() require("zk").set_project() end, "Set project" },
-        g = { function() require("zk").graph() end, "Generate graph" },
-        v = { function() require("zk").preview_note() end, "Preview note" },
-        V = { function() require("zk").preview_by_id() end, "Preview by ID" },
-        l = { function() require("zk").link_picker() end, "Insert link" },
-        L = { function() require("zk").link_picker({ include_title = true }) end, "Insert link with title" },
-        b = { function() require("zk").toggle_backlinks() end, "Toggle backlinks" },
-        B = { function() require("zk").backlinks_split() end, "Backlinks split" },
-        t = { function() require("zk").template_picker() end, "Create from template" },
-        m = { function() require("zk").create_from_template("meeting") end, "Meeting notes" },
-        d = { function() require("zk").daily() end, "Today's daily" },
-        D = { function() require("zk").daily({ date = "yesterday" }) end, "Yesterday's daily" },
-        w = { function() require("zk").daily_picker() end, "Browse daily notes" },
+        name = "OKF Wiki",
+        f = { function() require("okfw").create_note() end, "Create note" },
+        s = { function() require("okfw").set_project() end, "Set project" },
+        g = { function() require("okfw").graph() end, "Generate graph" },
+        v = { function() require("okfw").preview_note() end, "Preview note" },
+        V = { function() require("okfw").preview_by_id() end, "Preview by ID" },
+        l = { function() require("okfw").link_picker() end, "Insert link" },
+        L = { function() require("okfw").link_picker({ include_title = true }) end, "Insert link with title" },
+        b = { function() require("okfw").toggle_backlinks() end, "Toggle backlinks" },
+        B = { function() require("okfw").backlinks_split() end, "Backlinks split" },
+        t = { function() require("okfw").template_picker() end, "Create from template" },
+        m = { function() require("okfw").create_from_template({ template = "meeting" }) end, "Meeting notes" },
+        d = { function() require("okfw").daily() end, "Today's daily" },
+        D = { function() require("okfw").daily({ date = "yesterday" }) end, "Yesterday's daily" },
+        w = { function() require("okfw").daily_picker() end, "Browse daily notes" },
     },
 }, { prefix = "<leader>" })
 ```
@@ -265,23 +268,23 @@ wk.register({
 ## How It Works
 
 1. When you call `create_note()`, NeoVim prompts for a note title
-2. The plugin invokes `zk create "title" --category <category>`
-3. The `zk` binary detects your current git project automatically
+2. The plugin invokes `okfw create "title"`
+3. The `okfw` binary discovers the project's `.okfw/` wiki by searching upward from NeoVim's cwd
 4. A confirmation message appears on success
 
 ## Troubleshooting
 
-### "zk: command not found"
+### "okfw: command not found"
 
-Ensure the `zk` binary is in your `$PATH`:
+Ensure the `okfw` binary is in your `$PATH`:
 
 ```bash
-# Check if zk is accessible
-which zk
+# Check if okfw is accessible
+which okfw
 
 # If not, add to PATH or specify full path in setup
-require("zk").setup({
-    bin = "/full/path/to/zk",
+require("okfw").setup({
+    bin = "/full/path/to/okfw",
 })
 ```
 
@@ -297,10 +300,16 @@ Install plenary.nvim:
 use "nvim-lua/plenary.nvim"
 ```
 
+### "no OKF wiki found"
+
+The project has no `.okfw/` directory anywhere up the tree from NeoVim's cwd.
+Run `:OkfwInit` (or `okfw init` from a shell at your project root) to create
+one.
+
 ### Notes Not Created
 
-1. Check that `zk create` works from terminal
-2. Verify you're in a git repository (for project detection)
+1. Check that `okfw create` works from terminal
+2. Verify a wiki exists (`okfw root` from the same directory)
 3. Check NeoVim messages with `:messages`
 
 ## API Reference
@@ -310,67 +319,33 @@ use "nvim-lua/plenary.nvim"
 Initialize the plugin with configuration options.
 
 ```lua
-require("zk").setup({
-    bin = "zk",  -- Path to zk binary (default: "zk")
+require("okfw").setup({
+    bin = "okfw",  -- Path to okfw binary (default: "okfw")
 })
 ```
 
-### `create_note(note_category, project)`
+### `create_note(opts)`
 
-Create a new note with the specified category.
+Create a new note.
 
 **Parameters:**
-- `note_category` (string): Either `"untethered"` or `"tethered"`
-- `project` (string, optional): Project context. If nil, auto-detected from git.
+- `opts` (table, optional):
+  - `title` (string): Note title. Prompted for when omitted.
+  - `project` (string): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title via `vim.fn.input()`
-2. Executes `zk create` asynchronously via plenary.job
+2. Executes `okfw create` asynchronously via plenary.job
 3. Prints success/failure message
 
 ```lua
-require("zk").create_note("untethered")
-require("zk").create_note("tethered", "my-project")
-```
-
-### `tether_note(file_path, project)`
-
-Tether an untethered note (promote to tethered).
-
-**Parameters:**
-- `file_path` (string, optional): Path to the note. Defaults to current buffer.
-- `project` (string, optional): Project context. If nil, auto-detected from git.
-
-**Behavior:**
-1. Executes `zk tether` asynchronously
-2. Reloads the buffer if the tethered file is currently open
-3. Prints success/failure message
-
-```lua
-require("zk").tether_note()  -- Current file, auto-detect project
-require("zk").tether_note(nil, "my-project")  -- Current file, explicit project
-```
-
-### `untether_note(file_path)`
-
-Untether a tethered note (revert to untethered).
-
-**Parameters:**
-- `file_path` (string, optional): Path to the note. Defaults to current buffer.
-
-**Behavior:**
-1. Executes `zk untether` asynchronously
-2. Reloads the buffer if the untethered file is currently open
-3. Prints success/failure message
-
-```lua
-require("zk").untether_note()  -- Current file
-require("zk").untether_note("/path/to/note.md")  -- Specific file
+require("okfw").create_note()
+require("okfw").create_note({ project = "my-project" })
 ```
 
 ### `set_project(file_path, project)`
 
-Set or update the project for a zettel.
+Set or update the project for a concept.
 
 **Parameters:**
 - `file_path` (string, optional): Path to the note. Defaults to current buffer.
@@ -378,61 +353,65 @@ Set or update the project for a zettel.
 
 **Behavior:**
 1. Prompts for project name if not provided
-2. Executes `zk set-project` asynchronously
+2. Executes `okfw set-project` asynchronously
 3. Reloads the buffer if the modified file is currently open
 4. Prints success/failure message
 
 ```lua
-require("zk").set_project()  -- Current file, prompt for project
-require("zk").set_project(nil, "my-project")  -- Current file, explicit project
+require("okfw").set_project()  -- Current file, prompt for project
+require("okfw").set_project(nil, "my-project")  -- Current file, explicit project
 ```
 
 ### `search(query, opts)`
 
-Search zettels with optional filters.
+Search concepts with optional filters.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query.
 - `opts` (table, optional):
   - `project` (string): Filter by project
-  - `category` (string): Filter by category
   - `tags` (table): Filter by tags (AND logic)
   - `limit` (number): Max results
   - `on_results` (function): Callback receiving results array
 
 ```lua
-require("zk").search("authentication")
-require("zk").search("query", { project = "my-project", on_results = function(r) ... end })
+require("okfw").search("authentication")
+require("okfw").search("query", { project = "my-project", on_results = function(r) ... end })
 ```
 
 ### `index(path)`
 
-Index zettels for searching.
+Regenerate the wiki's OKF `index.md` listings (runs `okfw index-md`). There is
+no search index: search and the graph read the files directly, so the listings
+are the only derived state to refresh. Saving a concept buffer already refreshes
+them.
 
 **Parameters:**
-- `path` (string, optional): Path to index. Defaults to current directory.
+- `path` (string, optional): Bundle path. Defaults to the wiki discovered from the cwd.
 
 ```lua
-require("zk").index()  -- Index cwd
-require("zk").index("~/zk_vault/")
+require("okfw").index()  -- Discovered wiki
+require("okfw").index("path/to/.okfw/")
 ```
 
 ### `graph(opts)`
 
-Generate an ASCII tree visualization of note relationships.
+Render note relationships as a Mermaid flowchart.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `path` (string): Path to scan. Defaults to current directory.
+  - `path` (string): Path to scan. Defaults to the discovered wiki.
   - `limit` (number): Maximum nodes to display. Defaults to 10.
+  - `depth` (number): Maximum hops from the start node. Defaults to unlimited.
+  - `start` (string): Start concept. Defaults to the concept in the current buffer.
 
 **Behavior:**
-1. Executes `zk graph` asynchronously
-2. Opens the ASCII tree output in a vertical split
+1. Executes `okfw graph` asynchronously
+2. Opens the Mermaid output in a scratch buffer (filetype `mermaid`; `q` closes it)
 
 ```lua
-require("zk").graph()  -- Graph cwd with defaults
-require("zk").graph({ limit = 20, path = "~/zk_vault/" })
+require("okfw").graph()  -- Graph cwd with defaults
+require("okfw").graph({ limit = 20, path = "path/to/.okfw/" })
 ```
 
 ### `preview_note(file_path)`
@@ -450,84 +429,90 @@ Preview a note in a floating window.
 **Returns:** Table with `buf` (buffer handle) and `win` (window handle)
 
 ```lua
-require("zk").preview_note()  -- Preview current file
-require("zk").preview_note("/path/to/note.md")
+require("okfw").preview_note()  -- Preview current file
+require("okfw").preview_note("/path/to/note.md")
 ```
 
 ### `preview_by_id(id)`
 
-Preview a note by its ID (searches the index).
+Preview a note by its ID (resolved by scanning the wiki).
 
 **Parameters:**
-- `id` (string, optional): 12-digit zettel ID. Prompts for input if nil.
+- `id` (string, optional): The frontmatter id or a unique prefix of it (8+ hex digits, e.g. `019f0494`), or the concept's OKF concept ID (its wiki-relative path minus `.md`). Prompts for input if nil.
 
 **Behavior:**
 1. Searches for note with matching ID
 2. Opens floating preview if found
 
 ```lua
-require("zk").preview_by_id("202602131045")
-require("zk").preview_by_id()  -- Prompts for ID
+require("okfw").preview_by_id("019f0494-00a8-7206-b788-c5bbfa2430a8")
+require("okfw").preview_by_id()  -- Prompts for ID
 ```
 
-### `insert_link(id, title, include_title)`
+### Inserting links
 
-Insert a zettel link at the cursor position.
+Link insertion is normally done through the **link picker**, bound to
+`<localleader>l` by default. It lets you search your concepts and insert a
+vanilla markdown link to the one you pick — no need to know the concept id.
 
-**Parameters:**
-- `id` (string): The 12-digit zettel ID
-- `title` (string, optional): Note title for `[[id|title]]` format
-- `include_title` (boolean): If true and title provided, uses `[[id|title]]` format
+The inserted link points at the target concept's wiki-relative file path (a
+leading `/` means the wiki root), for example:
 
-**Behavior:**
-1. Formats link as `[[id]]` or `[[id|title]]`
-2. Inserts at cursor position
-3. Moves cursor to end of inserted link
-
-```lua
-require("zk").insert_link("202602131045")  -- Inserts [[202602131045]]
-require("zk").insert_link("202602131045", "My Note", true)  -- Inserts [[202602131045|My Note]]
+```markdown
+[Title](/infra/note--019f049400a8.md)
 ```
 
-### `insert_link_prompt(include_title)`
+To follow a link, place the cursor on it and press `gf`.
 
-Prompt for a zettel ID and insert a link.
+#### `link_picker(opts)`
 
-**Parameters:**
-- `include_title` (boolean, optional): If true, searches for title and uses `[[id|title]]` format
-
-```lua
-require("zk").insert_link_prompt()       -- Prompts for ID, inserts [[id]]
-require("zk").insert_link_prompt(true)   -- Prompts for ID, inserts [[id|title]]
-```
-
-### `link_picker(opts)`
-
-Open a picker to search and insert a link. Requires snacks.nvim.
+Open a picker to search and insert a markdown link. Requires snacks.nvim. This
+is what `<localleader>l` invokes.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `include_title` (boolean): Default format for `<CR>` action
+  - `include_title` (boolean): Default format for the `<CR>` action — `true`
+    uses the concept title as the link text, otherwise the path is used
   - `query` (string): Initial search query
 
 **Picker keymaps:**
-- `<CR>` - Insert link (format depends on `include_title` option)
-- `<C-t>` - Insert link with title `[[id|title]]`
+- `<CR>` - Insert markdown link (link text depends on `include_title` option)
+- `<C-t>` - Insert markdown link using the concept title as the link text
 
 ```lua
-require("zk").link_picker()  -- Opens picker, <CR> inserts [[id]]
-require("zk").link_picker({ include_title = true })  -- <CR> inserts [[id|title]]
+require("okfw").link_picker()  -- Opens picker, <CR> inserts [path](/path.md)
+require("okfw").link_picker({ include_title = true })  -- <CR> inserts [title](/path.md)
+```
+
+#### `follow_link()`
+
+Open the concept named by the link under the cursor. This is what `gf` invokes
+in a concept buffer; call it yourself to bind it to another key.
+
+It reads the markdown link (`[text](dest)`) the cursor is on, or failing that
+the path under the cursor, so it also follows a path-valued frontmatter field
+such as `resource: "/tables/orders.md"` or a `sources[].resource`. A path
+starting with `/` resolves against the wiki root, any other against the current
+file's directory. Frontmatter is the exception: only `./` and `../` paths are
+relative there, so a bare `policies/refunds.md` resolves against the wiki root,
+as the CLI reads it. A `#fragment` is ignored, a URL is reported rather than
+opened, and a target that does not exist is reported.
+
+```lua
+vim.keymap.set("n", "<CR>", function()
+    require("okfw").follow_link()
+end, { buffer = true, desc = "Follow okfw link" })
 ```
 
 ### `get_tags(callback)`
 
-Get all unique tags from indexed zettels (async).
+Get all unique tags used across the wiki's concepts (async).
 
 **Parameters:**
 - `callback` (function): Called with sorted list of tags
 
 ```lua
-require("zk").get_tags(function(tags)
+require("okfw").get_tags(function(tags)
     for _, tag in ipairs(tags) do
         print(tag)
     end
@@ -541,7 +526,7 @@ Get all tags synchronously. Uses a 60-second cache.
 **Returns:** Sorted list of tag strings
 
 ```lua
-local tags = require("zk").get_tags_sync()
+local tags = require("okfw").get_tags_sync()
 ```
 
 ### `refresh_tags()`
@@ -549,7 +534,7 @@ local tags = require("zk").get_tags_sync()
 Clear the tag cache and reload tags.
 
 ```lua
-require("zk").refresh_tags()
+require("okfw").refresh_tags()
 ```
 
 ### `complete_tags()`
@@ -557,7 +542,7 @@ require("zk").refresh_tags()
 Trigger manual tag completion at cursor using vim's completion menu.
 
 ```lua
-require("zk").complete_tags()
+require("okfw").complete_tags()
 ```
 
 ### `setup_tag_completion()`
@@ -570,7 +555,7 @@ Set up automatic tag completion for markdown files.
 3. Only completes when cursor is in frontmatter `tags:` section
 
 ```lua
-require("zk").setup_tag_completion()
+require("okfw").setup_tag_completion()
 ```
 
 ### `setup_cmp()`
@@ -580,28 +565,27 @@ Register nvim-cmp source for tag completion.
 **Returns:** `true` if nvim-cmp is available, `false` otherwise
 
 ```lua
-if require("zk").setup_cmp() then
+if require("okfw").setup_cmp() then
     print("nvim-cmp source registered")
 end
 ```
 
 ### `get_backlinks(id_or_file, callback)`
 
-Get all notes that link to the specified zettel (async).
+Get all notes that link to the specified concept (async).
 
 **Parameters:**
-- `id_or_file` (string): Zettel ID or file path
+- `id_or_file` (string): Concept ID or file path
 - `callback` (function): Called with list of backlink objects
 
 **Backlink object fields:**
-- `id`: Zettel ID
+- `id`: Concept ID
 - `title`: Note title
 - `project`: Project name
-- `category`: "untethered" or "tethered"
 - `file_path`: Absolute path to file
 
 ```lua
-require("zk").get_backlinks("202602131045", function(backlinks)
+require("okfw").get_backlinks("202602131045", function(backlinks)
     print("Found " .. #backlinks .. " backlinks")
 end)
 ```
@@ -613,7 +597,7 @@ Get backlinks synchronously.
 **Returns:** List of backlink objects
 
 ```lua
-local backlinks = require("zk").get_backlinks_sync("202602131045")
+local backlinks = require("okfw").get_backlinks_sync("202602131045")
 ```
 
 ### `backlinks_panel(opts)`
@@ -622,7 +606,7 @@ Open a floating backlinks panel for the current note.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `id` (string): Zettel ID to show backlinks for
+  - `id` (string): Concept ID to show backlinks for
   - `file` (string): File path to show backlinks for
 
 **Panel keymaps:**
@@ -633,8 +617,8 @@ Open a floating backlinks panel for the current note.
 **Returns:** Table with `buf`, `win`, and `backlinks`
 
 ```lua
-require("zk").backlinks_panel()  -- Current note
-require("zk").backlinks_panel({ id = "202602131045" })
+require("okfw").backlinks_panel()  -- Current note
+require("okfw").backlinks_panel({ id = "202602131045" })
 ```
 
 ### `backlinks_split(opts)`
@@ -644,12 +628,12 @@ Open backlinks in a split window.
 **Parameters:**
 - `opts` (table, optional):
   - `position` (string): "right" (default), "left", "bottom", or "top"
-  - `id` (string): Zettel ID
+  - `id` (string): Concept ID
   - `file` (string): File path
 
 ```lua
-require("zk").backlinks_split()
-require("zk").backlinks_split({ position = "bottom" })
+require("okfw").backlinks_split()
+require("okfw").backlinks_split({ position = "bottom" })
 ```
 
 ### `toggle_backlinks(opts)`
@@ -657,16 +641,16 @@ require("zk").backlinks_split({ position = "bottom" })
 Toggle the floating backlinks panel.
 
 ```lua
-require("zk").toggle_backlinks()
+require("okfw").toggle_backlinks()
 ```
 
 ### `templates`
 
-Table containing template metadata. Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`.
+List of template metadata. Available templates: `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`.
 
 ```lua
-for name, meta in pairs(require("zk").templates) do
-    print(name .. ": " .. meta.description)
+for _, meta in ipairs(require("okfw").templates) do
+    print(meta.name .. ": " .. meta.description)
 end
 ```
 
@@ -677,30 +661,30 @@ Get template metadata by name.
 **Parameters:**
 - `name` (string): Template name
 
-**Returns:** Table with `name`, `description`, `category`, `tags` or `nil` if not found
+**Returns:** Table with `name`, `description`, `tags` or `nil` if not found
 
 ```lua
-local tmpl = require("zk").get_template("meeting")
+local tmpl = require("okfw").get_template("meeting")
 print(tmpl.description)  -- "Meeting notes with attendees and action items"
-print(tmpl.category)     -- "untethered"
 ```
 
-### `create_from_template(template_name, project)`
+### `create_from_template(opts)`
 
 Create a note from a template.
 
 **Parameters:**
-- `template_name` (string): Template name (e.g., `"meeting"`, `"user-story"`)
-- `project` (string, optional): Project context. If nil, auto-detected from git.
+- `opts` (table, optional):
+  - `template` (string): Template name (e.g., `"meeting"`, `"user-story"`). Opens the template picker when omitted.
+  - `project` (string): Project metadata for the note. Omitted when nil.
 
 **Behavior:**
 1. Prompts for note title
-2. Executes `zk create --template <name>` asynchronously
+2. Executes `okfw create --template <name>` asynchronously
 3. Prints success/failure message
 
 ```lua
-require("zk").create_from_template("meeting")
-require("zk").create_from_template("feature", "my-project")
+require("okfw").create_from_template({ template = "meeting" })
+require("okfw").create_from_template({ template = "feature", project = "my-project" })
 ```
 
 ### `template_picker(opts)`
@@ -717,8 +701,8 @@ Open a picker to select a template and create a note. Requires snacks.nvim.
 3. Creates note using selected template
 
 ```lua
-require("zk").template_picker()
-require("zk").template_picker({ project = "my-project" })
+require("okfw").template_picker()
+require("okfw").template_picker({ project = "my-project" })
 ```
 
 ### `daily(opts)`
@@ -735,9 +719,9 @@ Create or open a daily note. Daily notes are idempotent - the same file is retur
 3. Opens the daily note in the current buffer
 
 ```lua
-require("zk").daily()                       -- Today
-require("zk").daily({ date = "yesterday" }) -- Yesterday
-require("zk").daily({ date = "2026-02-10" }) -- Specific date
+require("okfw").daily()                       -- Today
+require("okfw").daily({ date = "yesterday" }) -- Yesterday
+require("okfw").daily({ date = "2026-02-10" }) -- Specific date
 ```
 
 ### `list_daily(opts, callback)`
@@ -756,7 +740,7 @@ Get daily notes asynchronously.
 - `file_path`: Absolute path to file
 
 ```lua
-require("zk").list_daily({ week = true }, function(notes)
+require("okfw").list_daily({ week = true }, function(notes)
     for _, note in ipairs(notes) do
         print(note.date .. ": " .. note.file_path)
     end
@@ -773,8 +757,8 @@ Get daily notes synchronously.
 **Returns:** List of daily note objects
 
 ```lua
-local notes = require("zk").list_daily_sync()
-local this_week = require("zk").list_daily_sync({ week = true })
+local notes = require("okfw").list_daily_sync()
+local this_week = require("okfw").list_daily_sync({ week = true })
 ```
 
 ### `daily_picker(opts)`
@@ -787,43 +771,34 @@ Open a picker to browse daily notes. Requires snacks.nvim.
   - `month` (boolean): Show only this month's notes
 
 ```lua
-require("zk").daily_picker()
-require("zk").daily_picker({ week = true })
-require("zk").daily_picker({ month = true })
+require("okfw").daily_picker()
+require("okfw").daily_picker({ week = true })
+require("okfw").daily_picker({ month = true })
 ```
 
 ## Picker API
 
 Requires snacks.nvim to be installed.
 
-### `require("zk.picker").search(opts)`
+### `require("okfw.picker").search(opts)`
 
-Open picker with all indexed zettels.
+Open picker with all concepts.
 
-### `require("zk.picker").live_search(opts)`
+### `require("okfw.picker").live_search(opts)`
 
 Open picker with live search (results update as you type).
 
-### `require("zk.picker").untethered(opts)`
-
-Browse only untethered notes.
-
-### `require("zk.picker").tethered(opts)`
-
-Browse only tethered notes.
-
 **Common opts:**
 - `project` (string): Filter by project
-- `category` (string): Filter by category
 - `tags` (table): Filter by tags
 - `limit` (number): Max results
 
-### `require("zk.picker").insert_link(opts)`
+### `require("okfw.picker").insert_link(opts)`
 
-Open picker specifically for inserting links. Same as `require("zk").link_picker(opts)`.
+Open picker specifically for inserting links. Same as `require("okfw").link_picker(opts)`.
 
 **Opts:**
-- `include_title` (boolean): Use `[[id|title]]` format by default
+- `include_title` (boolean): Use the concept title as the link text by default
 
 ## Future Features
 
