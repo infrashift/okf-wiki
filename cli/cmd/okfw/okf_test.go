@@ -634,3 +634,28 @@ func TestValidateOKFReportsAnotherVersionWithoutFailing(t *testing.T) {
 		t.Errorf("err = %v, output:\n%s", err, out)
 	}
 }
+
+// TestValidateOKFWarnsOnABrokenFrontmatterPath: a path-valued field naming a
+// concept is a link (section 6.2), so a broken one is reported like a broken
+// body link, naming the field. A URL, a scope descriptor or a non-markdown
+// file is not a concept link and is not checked.
+func TestValidateOKFWarnsOnABrokenFrontmatterPath(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "tables/orders.md", "---\ntype: Table\n---\n")
+	writeConceptFile(t, root, "report.md", "---\ntype: Report\n"+
+		"resource: /tables/orders.md\n"+
+		"sources:\n  - resource: https://example.com/x.md\n  - resource: all queries in project X\n"+
+		"  - resource: ./notes/gone.md\n"+
+		"attester:\n  resource: references/check.py\n---\n")
+	out, err := captureStdout(t, func() error { return runValidateOKF(cfg, root) })
+	if err != nil {
+		t.Fatalf("a broken link is a warning, not a violation: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "sources[2].resource target not found: ./notes/gone.md") {
+		t.Errorf("missing the broken source warning:\n%s", out)
+	}
+	if n := strings.Count(out, "target not found"); n != 1 {
+		t.Errorf("%d broken-link warnings, want 1:\n%s", n, out)
+	}
+}

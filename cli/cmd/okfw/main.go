@@ -572,14 +572,19 @@ Examples:
 						fromDir = ""
 					}
 				}
-				transformed := graph.RewriteLinks(string(content), func(href string) string {
+				toExported := func(href string) string {
 					if id, ok := pathToID[graph.NormalizeTarget(href, fromDir)]; ok {
 						return id + ".md"
 					}
 					return href
-				})
+				}
+				transformed := []byte(graph.RewriteLinks(string(content), toExported))
+				// Frontmatter paths are links too, and name files the export renames.
+				if out, err := bundle.RewritePathRefs(transformed, fromDir, toExported); err == nil {
+					transformed = out
+				}
 				outPath := filepath.Join(ephemeralDir, node.ID+".md")
-				if err := os.WriteFile(outPath, []byte(transformed), 0644); err != nil {
+				if err := os.WriteFile(outPath, transformed, 0644); err != nil {
 					fmt.Fprintf(os.Stderr, "Warning: failed to write %s: %v\n", outPath, err)
 					continue
 				}
@@ -1422,6 +1427,17 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(tr))); err != nil {
 				brokenLinks++
 				problems = append(problems, fmt.Sprintf("  ⚠ %s: link target not found: %s", rel, href))
+			}
+		}
+		// A path-valued field naming a concept is a link as well (section 6.2).
+		for _, r := range z.PathRefs() {
+			tr := graph.NormalizeRef(r.Value, fromDir)
+			if tr == "" {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(tr))); err != nil {
+				brokenLinks++
+				problems = append(problems, fmt.Sprintf("  ⚠ %s: %s target not found: %s", rel, r.Field, r.Value))
 			}
 		}
 		return nil

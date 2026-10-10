@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -94,7 +95,8 @@ func eachConcept(root string, fn func(abs, rel string) error) error {
 }
 
 // InboundLinks returns the bundle-relative paths of concepts linking to target
-// (itself bundle-relative), excluding target's own self-links.
+// (itself bundle-relative), from the body or a path-valued frontmatter field,
+// excluding target's own self-links.
 func InboundLinks(root, target string) ([]string, error) {
 	var sources []string
 	err := eachConcept(root, func(abs, rel string) error {
@@ -105,12 +107,8 @@ func InboundLinks(root, target string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		fromDir := RelDir(rel)
-		for _, href := range graph.ExtractLinkTargets(config.ExtractBody(content)) {
-			if graph.NormalizeTarget(href, fromDir) == target {
-				sources = append(sources, rel)
-				return nil
-			}
+		if linksTo(content, RelDir(rel), target) {
+			sources = append(sources, rel)
 		}
 		return nil
 	})
@@ -230,9 +228,9 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 	oldDir, newDir := RelDir(oldRel), RelDir(newRel)
 
 	// 1. Keep the moved concept's own relative links resolving to the same
-	//    targets from its new directory.
-	body := config.ExtractBody(content)
-	fixedBody := graph.RewriteLinks(body, func(href string) string {
+	//    targets from its new directory, in the body and in its path-valued
+	//    frontmatter fields alike.
+	ownLink := func(href string) string {
 		target := graph.NormalizeTarget(href, oldDir)
 		if target == "" {
 			return ""
@@ -248,7 +246,9 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 			return "" // bundle-absolute links to other concepts survive a move
 		}
 		return retarget(href, newDir, target)
-	})
+	}
+	body := config.ExtractBody(content)
+	fixedBody := graph.RewriteLinks(body, ownLink)
 
 	moved := content
 	if fixedBody != body {
@@ -256,6 +256,10 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		if err != nil {
 			return nil, err
 		}
+	}
+	moved, err = RewritePathRefs(moved, oldDir, ownLink)
+	if err != nil {
+		return nil, err
 	}
 	// A move changes the concept's OKF identity, so it is a meaningful change.
 	moved, err = UpdateFrontmatter(moved, nil)
@@ -284,18 +288,27 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		}
 		srcBody := config.ExtractBody(srcContent)
 		fromDir := RelDir(rel)
-		out := graph.RewriteLinks(srcBody, func(href string) string {
+		inbound := func(href string) string {
 			if graph.NormalizeTarget(href, fromDir) != oldRel {
 				return ""
 			}
 			return retarget(href, fromDir, newRel)
-		})
-		if out == srcBody {
-			return nil
 		}
-		rewritten, ferr := ReplaceBody(srcContent, out)
-		if ferr != nil {
-			return nil // not a concept we can safely rewrite
+		rewritten := srcContent
+		if out := graph.RewriteLinks(srcBody, inbound); out != srcBody {
+			var ferr error
+			if rewritten, ferr = ReplaceBody(srcContent, out); ferr != nil {
+				return nil // not a concept we can safely rewrite
+			}
+		}
+		if mayReference(rewritten, oldRel) {
+			var ferr error
+			if rewritten, ferr = RewritePathRefs(rewritten, fromDir, inbound); ferr != nil {
+				return nil // frontmatter we cannot safely re-encode
+			}
+		}
+		if bytes.Equal(rewritten, srcContent) {
+			return nil
 		}
 		if werr := os.WriteFile(abs, rewritten, 0644); werr != nil {
 			return werr

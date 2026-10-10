@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +98,24 @@ func TestValidateAcceptsEveryConceptReference(t *testing.T) {
 		if out, err := runCmd(t, rootCmd(), "validate", ref); err != nil {
 			t.Errorf("validate %s: %v\n%s", ref, err, out)
 		}
+	}
+}
+
+// TestExportRewritesFrontmatterPaths: export renames every file to its id, so
+// a frontmatter path naming another concept has to follow, as body links do.
+func TestExportRewritesFrontmatterPaths(t *testing.T) {
+	cfg := bundleAt(t)
+	writeConceptFile(t, cfg.RootPath, "tables/orders.md",
+		conceptContent("019680f0-7e00-7abc-8def-100000000000", "Orders", "note", "# Orders\n\n[report](/finance/report.md)"))
+	writeConceptFile(t, cfg.RootPath, "finance/report.md", strings.Replace(
+		conceptContent("019680f0-7e00-7abc-8def-200000000000", "Report", "note", "# Report"),
+		"---\n\n", "sources:\n  - resource: \"../tables/orders.md\"\n---\n\n", 1))
+
+	if _, err := runCmd(t, rootCmd(), "export"); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	got := readFile(t, filepath.Join(cfg.RootPath, "ephemeral", "019680f0-7e00-7abc-8def-200000000000.md"))
+	if !strings.Contains(got, `resource: "019680f0-7e00-7abc-8def-100000000000.md"`) {
+		t.Errorf("export left the source pointing at the old path:\n%s", got)
 	}
 }

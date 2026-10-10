@@ -115,7 +115,7 @@ OKF spec §5.1. Append entries with `okfw add-source`.
 | Field | Format | Description |
 |-------|--------|-------------|
 | `sources` | List | Where the concept's knowledge came from |
-| `sources[].resource` | String | **Required within an entry.** Either a concrete artifact a consumer can follow (a URL or bundle-relative path) or a scope descriptor it cannot, such as `all queries in project X`. |
+| `sources[].resource` | String | **Required within an entry.** Either a concrete artifact a consumer can follow (a URL or bundle-relative path) or a scope descriptor it cannot, such as `all queries in project X`. A path naming another concept is a link: it shows in backlinks and the graph, `okfw move` keeps it pointing at the concept, and `gf` follows it. A relative path resolves from the citing concept's directory, as a body link does. |
 | `sources[].id` | String | Join key for body footnotes — see below |
 | `sources[].title` | String | Human-readable label |
 | `sources[].author` | Actor | Who or what produced the source |

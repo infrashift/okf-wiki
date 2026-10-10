@@ -95,7 +95,8 @@ the files on every call. Asks for confirmation unless `--force` is given, and
 refuses to prompt when stdin is not a terminal — a script that forgot `--force`
 stops rather than deleting.
 
-Concepts that still link to the deleted one are **reported, not repaired**. OKF
+Concepts that still link to the deleted one, from their body or a path-valued
+frontmatter field, are **reported, not repaired**. OKF
 requires consumers to tolerate a link whose target does not exist, so a dangling
 link is not malformed; rewriting someone's prose to tidy one would destroy
 authored content. `okfw graph-query dangling` finds them later.
@@ -114,7 +115,11 @@ are bundle-relative and cannot escape the bundle or name one of its internal
 dot-directories.
 
 The concept's `id` does not change, so hierarchies built with `parent` survive.
-Links are repaired at **both** ends, because a move breaks two different sets:
+Links are repaired at **both** ends, because a move breaks two different sets.
+A link here means a body link or a path-valued frontmatter field naming a
+concept (`resource`, `sources[].resource`, `computation`, `executor.resource`,
+`attester.resource`); frontmatter is rewritten in place, keeping comments and
+quoting.
 
 - Other concepts pointing at the old path are retargeted, keeping whichever form
   they used — a bundle-absolute link stays absolute, a relative one stays relative.
@@ -459,6 +464,13 @@ the bundle. `ephemeral/` is gitignored and safe to delete.
 `okfw graph`, it builds the graph from the files on every call — there is no
 graph database to sync.
 
+An edge is a body link to another concept, or a path-valued frontmatter field
+that names one: `resource`, `sources[].resource`, `computation`,
+`executor.resource` and `attester.resource` (OKF §6.2). A path starting with `/`
+resolves from the wiki root and any other from the concept's own directory, as
+body links do. A URL, a scope descriptor (`all queries in project X`) or a file
+that is not markdown (an attester's `.py`) is not an edge.
+
 ### Query backlinks
 ```bash
 okfw graph-query backlinks <id>
@@ -484,7 +496,7 @@ okfw graph-query dangling
 okfw graph-query dangling --json
 ```
 
-Reports body links to `.md` files that do not exist — typically left behind by
+Reports links to `.md` files that do not exist — typically left behind by
 `okfw delete` — and `parent` references to ids no concept declares. A missing
 link target is named by its OKF concept ID (its path minus `.md`), and
 `okfw graph-query backlinks <that path>` lists everything still pointing at it.

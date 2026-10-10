@@ -64,6 +64,7 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 
 	type parsed struct {
 		node    *graph.Node
+		z       *config.Concept
 		body    string
 		fromDir string
 	}
@@ -94,6 +95,7 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 				Parent:   z.Parent,
 				Tags:     z.Tags,
 			},
+			z:       z,
 			body:    config.ExtractBody(content),
 			fromDir: RelDir(rel),
 		})
@@ -123,7 +125,7 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 	}
 	g := graph.New()
 	for _, c := range concepts {
-		c.node.Links = config.ResolveBodyLinks(c.body, c.fromDir, keyOf)
+		c.node.Links = config.ResolveConceptLinks(c.z, c.body, c.fromDir, keyOf)
 		g.AddNode(c.node)
 	}
 	if g.NodeCount() == 0 {

@@ -16,7 +16,7 @@ type Node struct {
 	Project  string
 	Parent   string   // Optional parent concept ID
 	Children []string // Child concept IDs
-	Links    []string // Concept keys of the body's link targets; a missing target has no node
+	Links    []string // Concept keys of its link targets — body links, then path-valued frontmatter fields; a missing target has no node
 	Tags     []string // Frontmatter tags, for tag queries
 }
 
@@ -519,6 +519,22 @@ func NormalizeTarget(href, fromDir string) string {
 		return ""
 	}
 	return strings.TrimPrefix(p, "/")
+}
+
+// NormalizeRef resolves a path-valued frontmatter field (OKF section 6.2) the
+// way NormalizeTarget resolves a body link, and returns "" unless it names a
+// markdown file inside the bundle. The same field may hold a URL, a scope
+// descriptor ("all queries in project X") or a non-concept file such as an
+// attester's .py, and none of those is an edge between concepts.
+func NormalizeRef(value, fromDir string) string {
+	v := strings.TrimSpace(value)
+	if i := strings.IndexByte(v, '#'); i >= 0 {
+		v = v[:i]
+	}
+	if !isInternalMarkdown(v) {
+		return ""
+	}
+	return NormalizeTarget(v, fromDir)
 }
 
 // RewriteLinks applies rewrite to the destination of every internal markdown

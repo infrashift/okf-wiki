@@ -100,8 +100,13 @@ type Concept struct {
 	Generated *Generated   `yaml:"generated,omitempty"`
 	Verified  VerifiedList `yaml:"verified,omitempty"`
 
-	// OKF Attested Computation (section 10); the other keys pass through.
-	Runtime string `yaml:"runtime,omitempty"`
+	// OKF Attested Computation (section 10). Only the keys okfw reads are
+	// typed: runtime for the business rule, and the three that hold a path
+	// (section 6.2), which are edges in the link graph. The rest pass through.
+	Runtime     string       `yaml:"runtime,omitempty"`
+	Computation string       `yaml:"computation,omitempty"`
+	Executor    *ResourceRef `yaml:"executor,omitempty"`
+	Attester    *ResourceRef `yaml:"attester,omitempty"`
 
 	// OKF provenance
 	Sources     []Source     `yaml:"sources,omitempty"`

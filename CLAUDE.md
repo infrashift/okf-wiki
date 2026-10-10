@@ -58,7 +58,17 @@ Kinds (`kind`): `note` (default), `daily-note`, `issue`. OKF's required
 free-form `type` field is also written on every concept, and `--type` filters
 on it.
 Links: vanilla markdown links to bundle-relative (`/dir/file.md`) or relative
-(`./file.md`) paths.
+(`./file.md`) paths, **and** the path-valued frontmatter fields of OKF §6.2
+(`resource`, `sources[].resource`, `computation`, `executor.resource`,
+`attester.resource`) when they name a `.md` file in the bundle
+(`graph.NormalizeRef`). Every link consumer handles both: the graph, delete's
+inbound report, move at both ends, export and `validate --okf`.
+`Concept.PathRefs` reads the five fields and `bundle.pathRefNodes` rewrites
+them; `TestPathRefFieldsMatchTheRewriter` keeps the two lists in step. A
+relative frontmatter path resolves from the concept's directory, as §6.2's
+`../computations/revenue.md` example requires — chosen deliberately although
+the upstream `acme_retail` reference bundle writes them root-relative without
+a `/` (10 of its 12 then dangle); do not switch bases to match that data.
 
 **okfw targets OKF v0.2** (`okf_version: "0.2"`, stamped on the bundle-root
 `index.md` only — the sole place the spec permits frontmatter in an index file).
