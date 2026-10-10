@@ -89,3 +89,30 @@ jobs:
       # commands, so a stale reference there is a real break.
       - name: Luacheck
         run: luacheck lua/ plugin/
+
+  # The Lua suite drives the real okfw binary through the plugin, so it catches
+  # a plugin calling a command or flag the CLI no longer has — which luacheck
+  # cannot. Run at the plugin's floor (plugin/okfw.lua requires 0.9) and at the
+  # version the e2e image and devcontainer use.
+  neovim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        nvim: [v0.9.5, v0.11.4]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim }}
+
+      - name: Plugin integration suite
+        run: make integration-test

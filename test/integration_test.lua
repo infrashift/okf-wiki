@@ -1,5 +1,8 @@
 -- Integration test for okfw NeoVim plugin
--- Run with: nvim --headless -u NONE -c "luafile test/integration_test.lua"
+-- Run with: make integration-test
+-- (nvim --headless -u NONE -l test/integration_test.lua). Use -l, not
+-- -c "luafile ...": under -c an uncaught Lua error leaves headless nvim waiting
+-- for input instead of exiting, so a crash hangs CI rather than failing it.
 
 local test_passed = true
 local test_output = {}

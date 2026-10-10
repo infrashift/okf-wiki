@@ -35,7 +35,8 @@ RUN okfw --help >/dev/null
 
 # The integration test sources plugin/okfw.lua, drives the okfw CLI via
 # plenary.job, and exercises link insertion/follow plus delete and move. It calls
-# cq 1 on any failed assertion, which fails this RUN (and therefore the build).
-RUN nvim --headless -u NONE -c "luafile test/integration_test.lua"
+# cq 1 on any failed assertion, and `-l` exits non-zero on an uncaught error,
+# so either fails this RUN (and therefore the build).
+RUN nvim --headless -u NONE -l test/integration_test.lua
 
-CMD ["bash", "-lc", "nvim --headless -u NONE -c 'luafile test/integration_test.lua'"]
+CMD ["bash", "-lc", "nvim --headless -u NONE -l test/integration_test.lua"]

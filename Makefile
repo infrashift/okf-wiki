@@ -54,7 +54,7 @@ ui-check:
 integration-test: build
 	@echo "Running NeoVim plugin integration tests..."
 	@test -d /tmp/nvim-test-plugins/plenary.nvim || git clone --depth 1 https://github.com/nvim-lua/plenary.nvim /tmp/nvim-test-plugins/plenary.nvim
-	nvim --headless -u NONE -c "luafile test/integration_test.lua"
+	nvim --headless -u NONE -l test/integration_test.lua
 
 # The e2e image runs its tests as build steps, so a failed assertion fails the
 # build. It runs the NeoVim plugin suite against the okfw binary in a clean
