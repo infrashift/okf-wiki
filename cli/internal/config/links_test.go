@@ -60,15 +60,3 @@ func TestReadConceptKeyFallsBackToTheConceptID(t *testing.T) {
 		t.Errorf("missing file key = %q, want empty", got)
 	}
 }
-
-func TestReadConceptID(t *testing.T) {
-	root := t.TempDir()
-	id := "019680f0-7e00-7abc-8def-1234567890ab"
-	p := writeConcept(t, root, "a--0001.md", id)
-	if got := ReadConceptID(p); got != id {
-		t.Errorf("ReadConceptID = %q, want %q", got, id)
-	}
-	if got := ReadConceptID(filepath.Join(root, "missing.md")); got != "" {
-		t.Errorf("missing file should yield empty id, got %q", got)
-	}
-}

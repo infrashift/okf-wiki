@@ -406,3 +406,55 @@ func TestResolveConceptPathAcceptsAUniqueIDPrefix(t *testing.T) {
 		t.Error("a 7-digit prefix resolved; prefixes need at least 8 digits")
 	}
 }
+
+// A concept copied as a template keeps its id. Lookup stopped at the first
+// file declaring it, so a writer edited whichever copy the walk reached first.
+func TestResolveConceptPathRefusesADuplicatedID(t *testing.T) {
+	cfg, root := testCfg(t)
+	const id = "019f0494-1111-7abc-8def-1234567890ab"
+	for _, rel := range []string{"a--0001.md", "copy-of-a--0001.md"} {
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(GenerateBasicNote(id, "A", "", nil)), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, ref := range []string{id, "019f04941111"} {
+		_, err := ResolveConceptPath(cfg, ref)
+		if err == nil || !strings.Contains(err.Error(), "a--0001.md") || !strings.Contains(err.Error(), "copy-of-a--0001.md") {
+			t.Errorf("%s: err = %v, want a refusal naming both copies", ref, err)
+		}
+	}
+	// A path still picks one copy out.
+	if got, err := ResolveConceptPath(cfg, "copy-of-a--0001.md"); err != nil || filepath.Base(got) != "copy-of-a--0001.md" {
+		t.Errorf("by path: got %q, %v", got, err)
+	}
+}
+
+// Lookup skips parsing any file that does not contain the reference in one of
+// the id layouts. Each case here is one the pre-filter must not hide.
+func TestResolveConceptPathFindsEveryIDLayoutThroughItsPrefilter(t *testing.T) {
+	cfg, root := testCfg(t)
+	write := func(rel, id string) string {
+		p := filepath.Join(root, rel)
+		if err := os.WriteFile(p, []byte(GenerateBasicNote(id, "X", "", nil)), 0644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	legacy := write("legacy--0001.md", "20240115103000-9b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d")
+	upper := write("upper--0002.md", "019F0494-2222-7ABC-8DEF-1234567890AB")
+	odd := write("odd--0003.md", "my-hand-written-id")
+
+	for ref, want := range map[string]string{
+		"20240115103000-9b2c3d4e-5f60-4a1b-8c2d-3e4f5a6b7c8d": legacy,
+		"20240115":                legacy,
+		"202401151030009b2c":      legacy,
+		"20240115103000-9b2c3d4e": legacy,
+		"019f0494-2222":           upper,
+		"019f04942222":            upper,
+		"my-hand-written-id":      odd,
+	} {
+		if got, err := ResolveConceptPath(cfg, ref); err != nil || got != want {
+			t.Errorf("%s: got %q, %v; want %s", ref, got, err, want)
+		}
+	}
+}

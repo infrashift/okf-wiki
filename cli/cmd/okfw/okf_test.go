@@ -382,6 +382,28 @@ func TestRunValidateAllAcceptsAConformantBundle(t *testing.T) {
 	}
 }
 
+// Two valid concepts sharing an id pass every per-file check; only the bundle
+// view can see them, and lookup by that id now refuses, so --all must say which
+// files they are.
+func TestRunValidateAllReportsADuplicatedID(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	const id = "019680f0-7e00-7abc-8def-1234567890ab"
+	note := bundle.GenerateBasicNote(id, "Fine", "", nil)
+	writeConceptFile(t, root, "fine--0001.md", note)
+	writeConceptFile(t, root, "sub/copy-of-fine--0001.md", note)
+	writeConceptFile(t, root, "other--0002.md",
+		bundle.GenerateBasicNote("019680f0-7e00-7abc-8def-0000000000ff", "Other", "", nil))
+
+	out, err := captureStdout(t, func() error { return runValidateAll(cfg, root) })
+	if err == nil || !strings.Contains(err.Error(), "1 id(s) are declared by more than one concept") {
+		t.Errorf("err = %v, want the duplicate reported as a failure", err)
+	}
+	if !strings.Contains(out, "id "+id+" is declared by 2 concepts: fine--0001.md, sub/copy-of-fine--0001.md") {
+		t.Errorf("output does not name both copies:\n%s", out)
+	}
+}
+
 // --- runMigrate ---
 
 const legacyTodoConcept = `---

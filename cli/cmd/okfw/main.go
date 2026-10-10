@@ -1274,9 +1274,14 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 // bundle. This is the bulk counterpart to `okfw validate <file>`; runValidateOKF
 // deliberately checks far less, because OKF conformance permits concepts okfw
 // itself would reject.
+//
+// It also reports ids declared by more than one concept — a concept copied as
+// a template keeps its id — which no per-file check can see. Lookup by such
+// an id refuses rather than guessing, so the copies have to be told apart.
 func runValidateAll(cfg *config.Config, root string) error {
 	var concepts, invalid int
 	var problems []string
+	pathsByID := map[string][]string{}
 
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -1303,18 +1308,39 @@ func runValidateAll(cfg *config.Config, root string) error {
 			invalid++
 			problems = append(problems, fmt.Sprintf("  ✗ %s: %v", rel, err))
 		}
+		// Leniently, so an otherwise invalid copy still counts as a duplicate.
+		if z, err := config.ParseFrontmatter(content); err == nil && z.ID != "" {
+			pathsByID[z.ID] = append(pathsByID[z.ID], filepath.ToSlash(rel))
+		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
 
+	var duplicated []string
+	for id, paths := range pathsByID {
+		if len(paths) > 1 {
+			duplicated = append(duplicated, id)
+		}
+	}
+	sort.Strings(duplicated)
+	for _, id := range duplicated {
+		problems = append(problems, fmt.Sprintf("  ✗ id %s is declared by %d concepts: %s",
+			id, len(pathsByID[id]), strings.Join(pathsByID[id], ", ")))
+	}
+
 	for _, pmsg := range problems {
 		fmt.Println(pmsg)
 	}
-	fmt.Printf("\nokfw schema: %d concept(s), %d invalid.\n", concepts, invalid)
-	if invalid > 0 {
+	fmt.Printf("\nokfw schema: %d concept(s), %d invalid, %d duplicated id(s).\n", concepts, invalid, len(duplicated))
+	switch {
+	case invalid > 0 && len(duplicated) > 0:
+		return fmt.Errorf("%d concept(s) failed schema validation and %d id(s) are duplicated", invalid, len(duplicated))
+	case invalid > 0:
 		return fmt.Errorf("%d concept(s) failed schema validation", invalid)
+	case len(duplicated) > 0:
+		return fmt.Errorf("%d id(s) are declared by more than one concept", len(duplicated))
 	}
 	return nil
 }

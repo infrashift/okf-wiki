@@ -7,20 +7,6 @@ import (
 	"okfw/cli/internal/graph"
 )
 
-// ReadConceptID reads a concept file and returns its frontmatter `id`, or "" if
-// the file cannot be read or parsed.
-func ReadConceptID(absPath string) string {
-	content, err := os.ReadFile(absPath)
-	if err != nil {
-		return ""
-	}
-	z, err := ParseFrontmatter(content)
-	if err != nil {
-		return ""
-	}
-	return z.ID
-}
-
 // ReadConceptKey reads the concept at bundleRel and returns its ConceptKey, or
 // "" when there is no concept there.
 func ReadConceptKey(bundleRoot, bundleRel string) string {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -134,8 +135,32 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 	// which is how the docs and `okfw search` output abbreviate ids.
 	compactRef := compactID(idOrPath)
 	prefixOK := len(compactRef) >= 8 && isHex(compactRef)
-	var found string
-	var prefixed []string
+
+	// Every file declaring the id is collected, not just the first: two files
+	// share one when a concept is copied as a template, and stopping at the
+	// first match handed a writer whichever copy the walk reached first.
+	// Walking the whole bundle is affordable because almost no file needs its
+	// YAML parsed: a file must contain the reference, as typed or rewritten
+	// with the dashes of either id layout, to declare it. The first eight hex
+	// digits alone would not do — they are a UUIDv7's timestamp, shared by
+	// every concept written the same day.
+	needles := [][]byte{[]byte(idOrPath)}
+	if prefixOK {
+		for _, cuts := range [][]int{uuidDashes, legacyIDDashes} {
+			d := dashed(compactRef, cuts)
+			needles = append(needles, []byte(d), []byte(strings.ToUpper(d)))
+		}
+	}
+	mayDeclare := func(content []byte) bool {
+		for _, n := range needles {
+			if bytes.Contains(content, n) {
+				return true
+			}
+		}
+		return false
+	}
+
+	var exact, prefixed []string
 	err := filepath.Walk(cfg.RootPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -149,40 +174,52 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 		if !strings.HasSuffix(path, ".md") || IsReservedBase(info.Name()) {
 			return nil
 		}
-		// Fast path: a legacy <id>.md filename.
+		// A legacy <id>.md filename.
 		if info.Name() == idOrPath+".md" {
-			found = path
-			return filepath.SkipAll
+			exact = append(exact, path)
+			return nil
 		}
-		id := config.ReadConceptID(path)
-		if id == idOrPath {
-			found = path
-			return filepath.SkipAll
+		content, err := os.ReadFile(path)
+		if err != nil || !mayDeclare(content) {
+			return nil
 		}
-		if prefixOK && id != "" && strings.HasPrefix(compactID(id), compactRef) {
+		z, err := config.ParseFrontmatter(content)
+		if err != nil {
+			return nil
+		}
+		if z.ID == idOrPath {
+			exact = append(exact, path)
+			return nil
+		}
+		if prefixOK && z.ID != "" && strings.HasPrefix(compactID(z.ID), compactRef) {
 			prefixed = append(prefixed, path)
 		}
 		return nil
 	})
-	if err != nil && err != filepath.SkipAll {
+	if err != nil {
 		return "", fmt.Errorf("error searching for concept: %w", err)
 	}
 
-	if found == "" && len(prefixed) == 1 {
-		found = prefixed[0]
-	}
-	if found != "" {
-		return filepath.Abs(found)
-	}
-	if len(prefixed) > 1 {
-		names := make([]string, 0, len(prefixed))
-		for _, p := range prefixed {
+	relNames := func(paths []string) string {
+		names := make([]string, 0, len(paths))
+		for _, p := range paths {
 			if rel, err := relSlash(cfg.RootPath, p); err == nil {
 				names = append(names, rel)
 			}
 		}
+		return strings.Join(names, ", ")
+	}
+	switch {
+	case len(exact) == 1:
+		return filepath.Abs(exact[0])
+	case len(exact) > 1:
+		return "", fmt.Errorf("id %s is declared by %d concepts: %s — give the path of the one you mean, and run `okfw validate --all`",
+			idOrPath, len(exact), relNames(exact))
+	case len(prefixed) == 1:
+		return filepath.Abs(prefixed[0])
+	case len(prefixed) > 1:
 		return "", fmt.Errorf("id prefix %s is ambiguous; it matches %d concepts: %s",
-			idOrPath, len(prefixed), strings.Join(names, ", "))
+			idOrPath, len(prefixed), relNames(prefixed))
 	}
 	// A bare OKF concept ID for a concept at the bundle root.
 	if p := filepath.Join(cfg.RootPath, idOrPath+".md"); !IsReservedBase(idOrPath+".md") && fileExists(p) {
@@ -255,6 +292,25 @@ func fileExists(p string) bool {
 // compactID lowercases an id and drops its dashes, so prefixes compare the
 // same whether or not the caller typed them.
 func compactID(id string) string { return strings.ToLower(strings.ReplaceAll(id, "-", "")) }
+
+// The compact offsets at which each id layout places a dash: a UUID
+// (8-4-4-4-12), and the legacy YYYYMMDDHHmmss-UUIDv4.
+var (
+	uuidDashes     = []int{8, 12, 16, 20}
+	legacyIDDashes = []int{14, 22, 26, 30, 34}
+)
+
+// dashed renders a compact id, or a prefix of one, with dashes at cuts.
+func dashed(compact string, cuts []int) string {
+	var b strings.Builder
+	for i := 0; i < len(compact); i++ {
+		if slices.Contains(cuts, i) {
+			b.WriteByte('-')
+		}
+		b.WriteByte(compact[i])
+	}
+	return b.String()
+}
 
 func isHex(s string) bool {
 	for _, c := range s {

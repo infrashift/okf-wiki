@@ -160,8 +160,10 @@ okfw validate --all                 # strict check of the discovered wiki
 okfw validate --all path/to/.okfw/  # ...or an explicit path
 ```
 
-The same strict check over the whole bundle, reporting each failure. Exits
-non-zero if any concept is invalid.
+The same strict check over the whole bundle, reporting each failure. It also
+reports any `id` declared by more than one concept — a concept copied as a
+template keeps its `id` — naming every file that declares it. Exits non-zero if
+any concept is invalid or any `id` is duplicated.
 
 ### Validate OKF conformance
 ```bash
@@ -516,7 +518,9 @@ searches the whole wiki, so a concept is found regardless of which folder it
 lives in. A concept can be named by its full `id`, a unique id prefix of at
 least 8 hex digits (`019f0494`), its OKF concept ID
 (`infra/my-note--019f049400a8`, optionally with `.md` or a leading `/`), or a
-file path.
+file path. An `id` that more than one concept declares is refused, with the
+paths of every copy, rather than resolved to whichever is found first: give
+the path of the one you mean, and see `okfw validate --all`.
 
 ### Find backlinks by file path
 ```bash

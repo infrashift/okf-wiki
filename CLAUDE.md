@@ -186,6 +186,13 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   `okfw search --type` that returns the rest.
   Small directories still enumerate: for a hand-written `knowledge/` of 18
   concepts, naming them all is the more useful listing.
+- `bundle.ResolveConceptPath` walks the **whole** bundle for an id, never
+  stopping at the first match, and refuses an id more than one file declares
+  (a copied concept keeps its id; first-match edited whichever copy the walk
+  reached). The walk stays cheap because a file is YAML-parsed only if its
+  bytes contain the reference as typed or re-dashed in either id layout — not
+  the first eight hex digits alone, which are a UUIDv7's timestamp and shared
+  by every concept written the same day. `validate --all` reports duplicates.
 - `bundle.DeleteConceptFile` is `DeleteConcept` without the `index.md` refresh,
   for callers deleting in bulk — `WriteIndexFiles` walks the whole bundle, so
   running it per deletion turns a sweep into quadratic work. Every such caller
