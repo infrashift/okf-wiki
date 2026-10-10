@@ -83,7 +83,7 @@ OKF spec §5.2–5.3. Both are optional; a concept with no trust metadata is per
 | `generated` | `{by, at}` | Who produced the content and when. `by` is required within the block. `at` mirrors `timestamp` — okfw keeps them equal and rejects a disagreement, since both record the same event. Set `by` with `okfw set-generated`. |
 | `verified` | List of `{by, at}` | Verification events. Multiple entries capture independent checks; "how recently" is the latest `at`. Append with `okfw verify`. |
 
-Actors follow the OKF convention (§7): `human:<id>` for a person, `process:<id>` for an automated process, `<producer>/<version>` for an agent or tool.
+Actors follow the OKF convention (§7): `human:<id>` for a person, `process:<id>` for an automated process, `<producer>/<version>` for an agent or tool. `okfw validate` holds `generated.by` and every `verified[].by` to exactly those three forms, prefix in lowercase, and `verify`/`set-generated` refuse anything else. The trust tier below keys on the exact prefix `human:`, so `Human:ryan` or `humna:ryan` would otherwise record a human review that reads back as machine-confirmed. `sources[].author` is not checked: the spec's own examples use `team:` there, and it does not feed the trust tier.
 
 ```yaml
 generated:
@@ -106,7 +106,7 @@ A single verifier may be written as a bare mapping without the list dash; okfw r
 | only non-`human:` actors | `machine-confirmed` |
 | any `human:<id>` actor | `human-reviewed` |
 
-Note that `team:data-platform` is *not* a `human:` actor, so it yields `machine-confirmed`.
+A concept from another tool may carry an actor outside the convention, such as `team:data-platform`. okfw still reads it, and it is *not* a `human:` actor, so it yields `machine-confirmed`; `okfw validate` reports it.
 
 ## Provenance fields
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,6 +219,40 @@ func TestVerifyCmdDefaultsToAHumanActor(t *testing.T) {
 	}
 	if !strings.HasPrefix(z.Verified[0].By, config.HumanActorPrefix) {
 		t.Errorf("default actor = %q, want a human: prefix", z.Verified[0].By)
+	}
+}
+
+// TestActorWritersRefuseAMalformedActor: humna:alice would have been written
+// and read back as machine-confirmed. The writers refuse it even on an
+// already-invalid concept, where the write guard lets any edit through.
+func TestActorWritersRefuseAMalformedActor(t *testing.T) {
+	cfg := bundleAt(t)
+	id := seedConcept(t, cfg)
+	matches, _ := filepath.Glob(filepath.Join(cfg.RootPath, "*--*.md"))
+	if len(matches) != 1 {
+		t.Fatalf("expected exactly 1 concept, got %v", matches)
+	}
+	pristine, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken := append(append([]byte{}, pristine...), []byte("\nUncited.[^nowhere]\n")...)
+
+	for _, content := range [][]byte{pristine, broken} {
+		if err := os.WriteFile(matches[0], content, 0644); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			name string
+			cmd  *cobra.Command
+		}{{"verify", newVerifyCmd()}, {"set-generated", newSetGeneratedCmd()}} {
+			if _, err := runCmd(t, tc.cmd, id, "--by", "humna:alice"); err == nil || !strings.Contains(err.Error(), "OKF section 7") {
+				t.Errorf("%s --by humna:alice: err = %v, want a refusal", tc.name, err)
+			}
+		}
+		if got, _ := os.ReadFile(matches[0]); !bytes.Equal(got, content) {
+			t.Errorf("a refused write changed the file:\n%s", got)
+		}
 	}
 }
 

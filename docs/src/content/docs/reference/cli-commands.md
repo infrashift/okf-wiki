@@ -605,6 +605,11 @@ from it: no entries means `unverified`, non-human actors mean
 `machine-confirmed`, and any `human:` actor means `human-reviewed`. Running
 `verify` by hand is a human confirmation, hence the default actor.
 
+`--by` on both commands must be `human:<id>`, `process:<id>` or
+`<producer>/<version>`, with the prefix in lowercase; anything else is refused,
+because the tier keys on the exact prefix `human:` and a misspelt one would
+silently record a human review as machine-confirmed.
+
 `generated.at` is not set directly — it mirrors `timestamp`, and okfw keeps the
 two equal.
 
@@ -872,7 +877,7 @@ Usage: `okfw set-generated <id_or_file>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--by` | - | `human:<login>` | Actor that produced the content |
+| `--by` | - | `human:<login>` | Actor that produced the content: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw add-source`

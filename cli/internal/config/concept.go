@@ -382,6 +382,13 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 		return nil, err
 	}
 
+	// Before the schema, which reports a bad actor inside verified's
+	// mapping-or-list disjunction only as "empty disjunction", and one in
+	// generated.by by printing the regular expression it failed.
+	if err := checkActors(frontmatter); err != nil {
+		return nil, err
+	}
+
 	// Validate raw YAML against schema
 	if err := ValidateConceptYAML(frontmatter); err != nil {
 		return nil, err

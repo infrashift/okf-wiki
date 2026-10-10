@@ -33,7 +33,11 @@
 // knowledge format instead of a task tracker. `okfw migrate` strips those
 // fields from concepts written before the removal.
 
-#Actor: string & !="" // "<producer>/<version>", "human:<id>", or "process:<id>"
+// OKF section 7, for generated.by and verified[].by: "human:<id>",
+// "process:<id>", or "<producer>/<version>". The trust tier keys on the exact
+// prefix "human:", so a misspelt one silently demoted a human review. Keep in
+// step with actorRe in actor.go.
+#Actor: =~"^(human|process):\\S(.*\\S)?$|^[^\\s/:]+/\\S(.*\\S)?$"
 
 // OKF section 5: every timestamp is an ISO 8601 datetime with an explicit UTC
 // offset. Keep in step with dateTimeRe in timestamps.go.
@@ -62,7 +66,7 @@
 	resource:       string & !="" // a path/URL, or a scope descriptor
 	id?:            string & !="" // join key for [^id] body footnotes
 	title?:         string & !=""
-	author?:        #Actor
+	author?:        string & !="" // free-form: the spec's own examples use team:
 	usage_count?:   int & >=0
 	last_modified?: #DateTime
 	usage_window?:  #UsageWindow // overrides the concept-level window

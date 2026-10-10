@@ -197,11 +197,14 @@ func TestTrustTier(t *testing.T) {
 		{"machine only", "verified:\n  - by: \"process:nightly\"\n    at: \"2026-07-20T10:00:00Z\"\n", TrustMachineConfirmed},
 		{"agent only", "verified:\n  - by: \"reference_agent/gemini\"\n    at: \"2026-07-20T10:00:00Z\"\n", TrustMachineConfirmed},
 		{"human anywhere", "verified:\n  - by: \"process:nightly\"\n    at: \"2026-07-19T10:00:00Z\"\n  - by: \"human:ryan\"\n    at: \"2026-07-20T10:00:00Z\"\n", TrustHumanReviewed},
-		// The reference bundles use team:, which is deliberately NOT human.
+		// Not an actor okfw will write or validate, but a third-party concept
+		// may carry one, and reading it must not promote it to human.
 		{"team is not human", "verified:\n  - by: \"team:data-platform\"\n    at: \"2026-07-20T10:00:00Z\"\n", TrustMachineConfirmed},
+		{"capitalised Human is not human", "verified:\n  - by: \"Human:ryan\"\n    at: \"2026-07-20T10:00:00Z\"\n", TrustMachineConfirmed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			z, err := ParseAndValidate(concept(tc.raw))
+			// Lenient, as every read is: trust tier is a read-side derivation.
+			z, err := ParseFrontmatter(concept(tc.raw))
 			if err != nil {
 				t.Fatalf("%v", err)
 			}

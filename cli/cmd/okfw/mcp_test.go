@@ -300,6 +300,25 @@ func TestMCPCitationsMustResolve(t *testing.T) {
 	}
 }
 
+// TestMCPRefusesAMalformedActor: an agent passing Human:alice would have
+// recorded a review that reads back as machine-confirmed.
+func TestMCPRefusesAMalformedActor(t *testing.T) {
+	s, _ := mcpTestServer(t)
+	text, isErr := callTool(t, s, "create", `{"title":"Reviewed","body":"Checked."}`)
+	if isErr {
+		t.Fatalf("create failed: %s", text)
+	}
+	var created struct{ Path string }
+	_ = json.Unmarshal([]byte(text), &created)
+	for _, action := range []string{"verify", "set_generated"} {
+		text, isErr := callTool(t, s, "update",
+			fmt.Sprintf(`{"ref":%q,"action":%q,"value":"Human:alice"}`, created.Path, action))
+		if !isErr || !strings.Contains(text, "lowercase prefix human:") {
+			t.Errorf("%s Human:alice: isErr=%v %s; want a refusal with the hint", action, isErr, text)
+		}
+	}
+}
+
 // TestMCPSearchFiltersByKindAndType: kind and type are the agent's levers for
 // narrowing a mixed bundle, and each hit must say what it is so a mixed result
 // set stays legible after the fact.

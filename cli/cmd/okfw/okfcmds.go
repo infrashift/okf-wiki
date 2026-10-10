@@ -358,6 +358,11 @@ func okfFamilyCommands() []*cobra.Command {
 // verifyMutator appends a verification entry (OKF section 5.2).
 func verifyMutator(actor, stamp string) func(*yaml.Node) error {
 	return func(m *yaml.Node) error {
+		// Checked here, not left to the write guard, which lets any edit
+		// through to an already-invalid concept.
+		if err := config.ValidateActor(actor); err != nil {
+			return err
+		}
 		entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		bundle.MapSet(entry, "by", bundle.QuotedScalar(actor))
 		bundle.MapSet(entry, "at", bundle.QuotedScalar(stamp))
@@ -443,6 +448,9 @@ func setResourceMutator(uri string) func(*yaml.Node) error {
 // generated.at is kept equal to timestamp by editConcept, not set here.
 func setGeneratedMutator(actor string) func(*yaml.Node) error {
 	return func(m *yaml.Node) error {
+		if err := config.ValidateActor(actor); err != nil {
+			return err
+		}
 		return bundle.SetPath(m, "generated.by", actor)
 	}
 }

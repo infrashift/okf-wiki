@@ -86,6 +86,11 @@ it, and that is the mistake to avoid repeating:
   `verified` mapping MUST normalize to a one-element list — done in
   `VerifiedList.UnmarshalYAML`, pinned by a test. Trust tier keys **strictly** on
   the `human:` actor prefix, so `team:` is machine-confirmed, not human-reviewed.
+  Because of that, `generated.by`/`verified[].by` must follow §7 exactly
+  (`actorRe` in Go, `#Actor` in CUE — one test table runs both): a misspelt
+  `Humna:`/`Human:` demoted a review without a word. Reads stay lenient, so a
+  third-party `team:` still loads. `sources[].author` is free-form, since the
+  spec's own examples use `team:` there.
   Writers: `verify`, `set-generated`. `generated.at` mirrors `timestamp`; one code
   path writes both (`syncGeneratedAt`) and validation rejects a disagreement.
 - **Provenance** (§5.1): `sources[]` (`resource` required in-entry) plus a sibling
