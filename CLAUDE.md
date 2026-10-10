@@ -201,6 +201,10 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   rule about the cache, and all of them are gone with it. Scanning is linear in
   bundle size, so this is the first design choice to revisit past roughly tens
   of thousands of concepts.
+- Graph output is a function of the files, so it must not vary between runs.
+  `graph.Graph` keys nodes in a map; anything whose result depends on visit
+  order goes through `sortedIDs`, never `range g.nodes`. A capped `cluster`
+  returned a different subset of a hub's neighbours on every run.
 - Ranking is deliberately kept. The dominant agent pattern is search then read
   under a small result cap, so the caller needs the *best* few hits rather than
   the first few in directory order. `scoreConcept` weights title over tags over

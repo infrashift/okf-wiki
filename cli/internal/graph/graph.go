@@ -48,24 +48,39 @@ func (g *Graph) NodeCount() int {
 	return len(g.nodes)
 }
 
-// AllNodes returns all nodes in the graph.
+// AllNodes returns all nodes in the graph, in id order.
 func (g *Graph) AllNodes() []*Node {
 	nodes := make([]*Node, 0, len(g.nodes))
-	for _, n := range g.nodes {
-		nodes = append(nodes, n)
+	for _, id := range g.sortedIDs() {
+		nodes = append(nodes, g.nodes[id])
 	}
 	return nodes
 }
 
+// sortedIDs returns every node id in order. Anything whose output depends on
+// the order nodes are visited in goes through it rather than ranging over the
+// map, whose order Go randomises on every range: a capped query reached a
+// different subset of a hub's neighbours on every run.
+func (g *Graph) sortedIDs() []string {
+	ids := make([]string, 0, len(g.nodes))
+	for id := range g.nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
 // BuildRelationships processes parent fields and builds bidirectional
 // relationships, including the reverse-link index used by FindConnected.
-// Idempotent: safe to call again after adding nodes.
+// Idempotent: safe to call again after adding nodes. Children and backlinks
+// are recorded in id order, which is the order FindConnected visits them in.
 func (g *Graph) BuildRelationships() {
 	for _, node := range g.nodes {
 		node.Children = nil
 	}
 	g.backlinks = make(map[string][]string, len(g.nodes))
-	for _, node := range g.nodes {
+	for _, id := range g.sortedIDs() {
+		node := g.nodes[id]
 		// Add this node as a child of its parent
 		if node.Parent != "" {
 			if parent, ok := g.nodes[node.Parent]; ok {
@@ -172,10 +187,12 @@ func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 		return nil
 	}
 
-	// Start from the node with the most connections for a meaningful graph
+	// Start from the node with the most connections for a meaningful graph;
+	// among equals, the lowest id.
 	var startID string
 	maxConns := -1
-	for id, node := range g.nodes {
+	for _, id := range g.sortedIDs() {
+		node := g.nodes[id]
 		conns := len(node.Links) + len(node.Children)
 		if node.Parent != "" {
 			conns++
@@ -308,8 +325,10 @@ func GenerateASCIITree(nodes []*Node, edges []Edge, startNodeID string) string {
 			}
 		}
 
-		// Sort by ID for deterministic output
-		sort.Slice(neighbours, func(i, j int) bool {
+		// Sort by ID for deterministic output. Stable, so a neighbour that is
+		// both linked to and linking back keeps its forward entry, which comes
+		// first and wins below: the link lives in the tree parent.
+		sort.SliceStable(neighbours, func(i, j int) bool {
 			return neighbours[i].id < neighbours[j].id
 		})
 
