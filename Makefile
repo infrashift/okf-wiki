@@ -49,11 +49,14 @@ install: build
 
 ui-check:
 	@echo "Checking Lua syntax..."
-	luacheck lua/ plugin/
+	luacheck lua/ plugin/ test/
 
+# Re-clone when plenary.job is missing, not only when the directory is: an
+# emptied or half-cloned checkout passed `test -d` and failed the suite.
+PLENARY_DIR := /tmp/nvim-test-plugins/plenary.nvim
 integration-test: build
 	@echo "Running NeoVim plugin integration tests..."
-	@test -d /tmp/nvim-test-plugins/plenary.nvim || git clone --depth 1 https://github.com/nvim-lua/plenary.nvim /tmp/nvim-test-plugins/plenary.nvim
+	@test -f $(PLENARY_DIR)/lua/plenary/job.lua || { rm -rf $(PLENARY_DIR) && git clone --depth 1 https://github.com/nvim-lua/plenary.nvim $(PLENARY_DIR); }
 	nvim --headless -u NONE -l test/integration_test.lua
 
 # The e2e image runs its tests as build steps, so a failed assertion fails the

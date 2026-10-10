@@ -88,7 +88,7 @@ jobs:
       # The Neovim plugin is a first-class surface: it shells out to the same
       # commands, so a stale reference there is a real break.
       - name: Luacheck
-        run: luacheck lua/ plugin/
+        run: luacheck lua/ plugin/ test/
 
   # The Lua suite drives the real okfw binary through the plugin, so it catches
   # a plugin calling a command or flag the CLI no longer has — which luacheck

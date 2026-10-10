@@ -239,6 +239,13 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   without revisiting the "computed from the files" rule above
 - Reserved bundle filenames carry no concept frontmatter: `index.md` (directory listing; okfw maintains the ones it marked on every note change; root copy carries `okf_version`) and `log.md` (update history, generated from git)
 - The Neovim plugin uses snacks.nvim for pickers (not telescope), and needs `plenary.job` at **runtime**, not only for tests
+- The plugin's public API is checked by contract, not by a list: Test 6 of
+  `test/integration_test.lua` reads every `okfw.x(` / `require("okfw").x` in
+  `doc/okfw.txt`, the site, the README, `plugin/okfw.lua` and `lua/`, and
+  requires each to exist. Do not reintroduce per-function
+  `type(okfw.x) == "function"` checks — they never noticed a documented
+  function that was gone. The suite stops at Test 4 when plenary is missing,
+  so each test body is a plain `do … end` block
 - `okfw mcp` serves an MCP stdio server (cli/cmd/okfw/mcp.go): five consolidated
   tools, advertised as `okfw_search`/`okfw_create`/`okfw_read`/`okfw_update`/
   `okfw_graph` (`read` and `search` are not distinctive names in a client that

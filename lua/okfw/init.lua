@@ -1204,7 +1204,7 @@ M.link_picker = function(opts)
 
     local has_snacks, Snacks = pcall(require, "snacks")
     if not has_snacks then
-        print("snacks.nvim required for link picker. Use insert_link_prompt() instead.")
+        print('snacks.nvim required for link picker. Use :lua require("okfw").insert_link_prompt() instead.')
         return
     end
 

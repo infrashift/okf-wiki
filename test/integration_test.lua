@@ -31,10 +31,9 @@ local function assert_true(condition, msg)
 end
 
 -- Setup runtime path
-local plugin_path = vim.fn.getcwd() .. "/lua"
-local plenary_path = "/tmp/nvim-test-plugins/plenary.nvim/lua"
+local plenary_dir = "/tmp/nvim-test-plugins/plenary.nvim"
 vim.opt.runtimepath:append(vim.fn.getcwd())
-vim.opt.runtimepath:append("/tmp/nvim-test-plugins/plenary.nvim")
+vim.opt.runtimepath:append(plenary_dir)
 
 -- `nvim -u NONE` implies --noplugin, so plugin/okfw.lua is not sourced and the
 -- :Okfw* user commands would be invisible to this suite. Source it explicitly
@@ -50,9 +49,9 @@ log("")
 
 -- Test 1: Plugin loads successfully
 log("Test 1: Plugin loads")
-local ok, okfw = pcall(require, "okfw")
-assert_true(ok, "Plugin loads without error")
-if not ok then
+local load_ok, okfw = pcall(require, "okfw")
+assert_true(load_ok, "Plugin loads without error")
+if not load_ok then
     log("Error: " .. tostring(okfw))
     vim.cmd("cq 1")
 end
@@ -74,13 +73,18 @@ log("")
 log("Test 3: Config values")
 assert_eq(okfw.config.bin, okfw_bin, "Binary path is set correctly")
 
--- Test 4: Plenary.job is available
+-- Test 4: Plenary.job is available. Every CLI check below needs it, so a
+-- missing plenary stops the suite here with the fix, rather than reporting one
+-- failure while two thirds of the suite silently never ran.
 log("")
 log("Test 4: Plenary dependency")
-local plenary_ok, plenary_job = pcall(function()
-    return require("plenary.job")
-end)
+local plenary_ok = pcall(require, "plenary.job")
 assert_true(plenary_ok, "Plenary.job loads successfully")
+if not plenary_ok then
+    log("plenary.nvim is not loadable from " .. plenary_dir .. " - the CLI checks cannot run.")
+    log("Re-clone it: rm -rf " .. plenary_dir .. " && make integration-test")
+    vim.cmd("cq 1")
+end
 
 -- CLI test setup: wikis are per-project (.okfw/), so CLI tests run inside a
 -- dedicated temp project initialized with `okfw init`. In-process plugin
@@ -95,7 +99,7 @@ vim.cmd("cd " .. test_project)
 log("")
 log("Test 5: okfw init")
 
-if plenary_ok then
+do
     local Job = require("plenary.job")
 
     local init_code = nil
@@ -134,7 +138,7 @@ end
 log("")
 log("Test 5b: CLI integration via plenary.job")
 
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local job_output = {}
     local job_code = nil
@@ -161,20 +165,48 @@ if plenary_ok then
     end
 end
 
--- Test 6: Verify create_note function exists and is callable
+-- Test 6: every name the docs and the plugin call exists. This replaces 33
+-- hand-listed `type(okfw.x) == "function"` checks, which could not notice a
+-- function the docs promise but the module dropped, or one added and never
+-- listed. Read from the sources users copy from: the help file, the site, the
+-- README, the :Okfw* commands and the plugin's own string references
+-- (v:lua.require'okfw'.omnifunc). A name followed by "(" must be a function;
+-- a bare field (require("okfw").templates) must merely exist.
 log("")
-log("Test 6: create_note function")
-assert_true(type(okfw.create_note) == "function", "create_note is a function")
-
--- Test 7: Verify set_project function exists
-log("")
-log("Test 7: set_project function")
-assert_true(type(okfw.set_project) == "function", "set_project is a function")
+log("Test 6: documented API exists")
+do
+    local sources = { repo_root .. "/doc/okfw.txt", repo_root .. "/plugin/okfw.lua", repo_root .. "/README.md" }
+    vim.list_extend(sources, vim.fn.globpath(repo_root .. "/docs/src/content/docs", "**/*.md", false, true))
+    vim.list_extend(sources, vim.fn.globpath(repo_root .. "/lua", "**/*.lua", false, true))
+    local called, fields = {}, {}
+    for _, f in ipairs(sources) do
+        for _, l in ipairs(vim.fn.readfile(f)) do
+            for name, paren in l:gmatch([[require%s*%(?%s*["']okfw["']%s*%)?%.([%a_][%w_]*)(%(?)]]) do
+                (paren == "(" and called or fields)[name] = f
+            end
+            for name in l:gmatch("okfw%.([%a_][%w_]*)%s*%(") do
+                called[name] = f
+            end
+        end
+    end
+    local function rel(f) return f:sub(#repo_root + 2) end
+    local n = vim.tbl_count(called)
+    assert_true(n >= 30, "found the documented API (" .. n .. " functions)")
+    for _, name in ipairs(vim.fn.sort(vim.tbl_keys(called))) do
+        local msg = "okfw." .. name .. "() exists (called in " .. rel(called[name]) .. ")"
+        assert_true(type(okfw[name]) == "function", msg)
+    end
+    for _, name in ipairs(vim.fn.sort(vim.tbl_keys(fields))) do
+        if not called[name] then
+            assert_true(okfw[name] ~= nil, "okfw." .. name .. " exists (read in " .. rel(fields[name]) .. ")")
+        end
+    end
+end
 
 -- Test 8: Test set-project command via CLI
 log("")
 log("Test 8: CLI set-project command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local function set_project(path)
         local out, code = {}, nil
@@ -213,7 +245,7 @@ end
 -- Test 9: Test search command via CLI
 log("")
 log("Test 9: CLI search command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
 
     local search_output = {}
@@ -246,54 +278,10 @@ if plenary_ok then
     end
 end
 
--- Test 10: Verify search and index functions exist
-log("")
-log("Test 10: search and index functions")
-assert_true(type(okfw.search) == "function", "search is a function")
-assert_true(type(okfw.index) == "function", "index is a function")
-
--- Test 11: Verify graph function exists
-log("")
-log("Test 11: graph function")
-assert_true(type(okfw.graph) == "function", "graph is a function")
-
--- Test 12: Verify preview functions exist
-log("")
-log("Test 12: preview functions")
-assert_true(type(okfw.preview_note) == "function", "preview_note is a function")
-assert_true(type(okfw.preview_by_id) == "function", "preview_by_id is a function")
-
--- Test 13: Verify link functions exist
-log("")
-log("Test 13: link functions")
-assert_true(type(okfw.insert_link) == "function", "insert_link is a function")
-assert_true(type(okfw.insert_link_prompt) == "function", "insert_link_prompt is a function")
-assert_true(type(okfw.link_picker) == "function", "link_picker is a function")
-
--- Test 14: Verify tag completion functions exist
-log("")
-log("Test 14: tag completion functions")
-assert_true(type(okfw.get_tags) == "function", "get_tags is a function")
-assert_true(type(okfw.get_tags_sync) == "function", "get_tags_sync is a function")
-assert_true(type(okfw.refresh_tags) == "function", "refresh_tags is a function")
-assert_true(type(okfw.complete_tags) == "function", "complete_tags is a function")
-assert_true(type(okfw.setup_tag_completion) == "function", "setup_tag_completion is a function")
-assert_true(type(okfw.setup_cmp) == "function", "setup_cmp is a function")
-assert_true(type(okfw.omnifunc) == "function", "omnifunc is a function")
-
--- Test 15: Verify backlinks functions exist
-log("")
-log("Test 15: backlinks functions")
-assert_true(type(okfw.get_backlinks) == "function", "get_backlinks is a function")
-assert_true(type(okfw.get_backlinks_sync) == "function", "get_backlinks_sync is a function")
-assert_true(type(okfw.backlinks_panel) == "function", "backlinks_panel is a function")
-assert_true(type(okfw.backlinks_split) == "function", "backlinks_split is a function")
-assert_true(type(okfw.toggle_backlinks) == "function", "toggle_backlinks is a function")
-
 -- Test 16: CLI backlinks command
 log("")
 log("Test 16: CLI backlinks command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local backlinks_output = {}
     local backlinks_code = nil
@@ -324,18 +312,10 @@ if plenary_ok then
     end
 end
 
--- Test 17: Verify template functions exist
-log("")
-log("Test 17: template functions")
-assert_true(type(okfw.templates) == "table", "templates is a table")
-assert_true(type(okfw.get_template) == "function", "get_template is a function")
-assert_true(type(okfw.create_from_template) == "function", "create_from_template is a function")
-assert_true(type(okfw.template_picker) == "function", "template_picker is a function")
-
 -- Test 18: CLI templates command
 log("")
 log("Test 18: CLI templates command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local templates_output = {}
     local templates_code = nil
@@ -366,7 +346,7 @@ end
 -- Test 19: CLI create with template
 log("")
 log("Test 19: CLI create with template")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local create_tmpl_output = {}
     local create_tmpl_code = nil
@@ -392,18 +372,10 @@ if plenary_ok then
     end
 end
 
--- Test 20: Verify daily notes functions exist
-log("")
-log("Test 20: daily notes functions")
-assert_true(type(okfw.daily) == "function", "daily is a function")
-assert_true(type(okfw.list_daily) == "function", "list_daily is a function")
-assert_true(type(okfw.list_daily_sync) == "function", "list_daily_sync is a function")
-assert_true(type(okfw.daily_picker) == "function", "daily_picker is a function")
-
 -- Test 21: CLI daily command
 log("")
 log("Test 21: CLI daily command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local daily_output = {}
     local daily_code = nil
@@ -433,7 +405,7 @@ end
 -- Test 22: CLI daily --list command
 log("")
 log("Test 22: CLI daily --list command")
-if plenary_ok then
+do
     local Job = require("plenary.job")
     local daily_list_output = {}
     local daily_list_code = nil
@@ -480,18 +452,11 @@ local function run_okfw(args)
     return code, table.concat(out, "\n")
 end
 
--- Test 23: new link/navigation functions exist
-log("")
-log("Test 23: OKF link/navigation functions")
-assert_true(type(okfw.bundle_root) == "function", "bundle_root is a function")
-assert_true(type(okfw.bundle_rel) == "function", "bundle_rel is a function")
-assert_true(type(okfw.follow_link) == "function", "follow_link is a function")
-
 -- Test 24: CLI root prints the isolated bundle path
 log("")
 log("Test 24: CLI root")
 local linked_target = nil
-if plenary_ok then
+do
     local code, out = run_okfw({ "root" })
     assert_eq(code, 0, "okfw root exits 0")
     assert_true(out:find("okfw", 1, true) ~= nil, "okfw root prints bundle path")
@@ -500,7 +465,7 @@ end
 -- Test 25: create --path places a concept in a subdir with slug filename + OKF frontmatter
 log("")
 log("Test 25: create --path + frontmatter")
-if plenary_ok then
+do
     local code, out = run_okfw({ "create", "Link Target Note", "--path", "projects/itest" })
     assert_eq(code, 0, "okfw create --path exits 0")
     local path = out:match("Created: ([^\n]+)")
@@ -548,7 +513,7 @@ end
 -- Test 28: CLI validate --okf passes on a conformant bundle
 log("")
 log("Test 28: validate --okf")
-if plenary_ok then
+do
     local code, _ = run_okfw({ "validate", "--okf" })
     assert_eq(code, 0, "okfw validate --okf exits 0 on a conformant bundle")
 end
@@ -556,7 +521,7 @@ end
 -- Test 29: CLI index-md writes a root index.md with okf_version
 log("")
 log("Test 29: index-md")
-if plenary_ok then
+do
     local code, _ = run_okfw({ "index-md" })
     assert_eq(code, 0, "okfw index-md exits 0")
     local root_index = test_project .. "/.okfw/index.md"
@@ -569,7 +534,7 @@ end
 -- Test 30: CLI search --kind filter
 log("")
 log("Test 30: search --kind")
-if plenary_ok then
+do
     local code, out = run_okfw({ "search", "--kind", "note", "--json" })
     assert_eq(code, 0, "okfw search --kind note exits 0")
     local ok2, _ = pcall(vim.json.decode, out)
@@ -593,7 +558,7 @@ end
 -- repairs the inbound link in another concept.
 log("")
 log("Test 32: OkfwMove")
-if plenary_ok then
+do
     local code = run_okfw({ "create", "Movable Subject", "--path", "notes" })
     assert_eq(code, 0, "created a concept to move")
     local matches = vim.fn.glob(test_project .. "/.okfw/notes/movable-subject--*.md", false, true)
@@ -628,7 +593,7 @@ end
 -- Test 33: :OkfwDelete confirms first, then removes the concept and its buffer.
 log("")
 log("Test 33: OkfwDelete")
-if plenary_ok then
+do
     local code = run_okfw({ "create", "Deletable Subject" })
     assert_eq(code, 0, "created a concept to delete")
     local matches = vim.fn.glob(test_project .. "/.okfw/deletable-subject--*.md", false, true)
@@ -667,7 +632,7 @@ end
 -- hook used to run the removed `okfw index`, which failed on every :w.
 log("")
 log("Test 34: index_file refreshes listings after a hand edit")
-if plenary_ok then
+do
     local code = run_okfw({ "create", "Hand Edited" })
     assert_eq(code, 0, "created a concept to edit")
     local matches = vim.fn.glob(test_project .. "/.okfw/hand-edited--*.md", false, true)
@@ -700,7 +665,7 @@ end
 -- after their functions had been deleted, so the keys threw.
 log("")
 log("Test 35: add_tags and validate")
-if plenary_ok then
+do
     local code = run_okfw({ "create", "Taggable" })
     assert_eq(code, 0, "created a concept to tag")
     local matches = vim.fn.glob(test_project .. "/.okfw/taggable--*.md", false, true)
@@ -736,7 +701,7 @@ end
 -- one-result search and look for the id inside it.
 log("")
 log("Test 36: resolve_concept")
-if plenary_ok then
+do
     local matches = vim.fn.glob(test_project .. "/.okfw/taggable--*.md", false, true)
     if #matches == 1 then
         local id
@@ -764,7 +729,7 @@ local fmt = require("okfw.picker")._format_concept_display
 assert_eq(fmt({ title = "Plain", trust = "unverified" }), "Plain", "an unremarkable hit carries no badge")
 assert_eq(fmt({ title = "Old", trust = "machine-confirmed", status = "deprecated", stale = true }),
     "Old (deprecated, stale)", "deprecated and stale are badged")
-if plenary_ok then
+do
     local code = run_okfw({ "create", "Badged Ledger" })
     assert_eq(code, 0, "created a concept to badge")
     local matches = vim.fn.glob(test_project .. "/.okfw/badged-ledger--*.md", false, true)
