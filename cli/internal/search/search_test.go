@@ -3,6 +3,7 @@ package search
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -159,5 +160,71 @@ func TestSearchFindsConceptsOkfwWouldReject(t *testing.T) {
 	}
 	if hits, _, _ := Search(root, Options{Type: "Metric"}); len(hits) != 1 {
 		t.Errorf("--type Metric found %d, want 1", len(hits))
+	}
+}
+
+// TestResultsSayHowFarToTrustThem: a stale, deprecated or never-reviewed hit
+// looked exactly like the reviewed, current answer until it was opened.
+func TestResultsSayHowFarToTrustThem(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "a--0001.md", concept("019680f0-7e00-7abc-8def-100000000000",
+		"Ledger reviewed", "d", "ledger\n",
+		"verified:\n  - by: \"process:nightly\"\n  - by: \"human:ryan\"\n"))
+	write(t, root, "b--0002.md", concept("019680f0-7e00-7abc-8def-200000000000",
+		"Ledger checked", "d", "ledger\n",
+		"status: \"draft\"\nverified:\n  by: \"process:nightly\"\n"))
+	write(t, root, "c--0003.md", concept("019680f0-7e00-7abc-8def-300000000000",
+		"Ledger old", "d", "ledger\n",
+		"status: \"deprecated\"\nstale_after: \"2020-01-01T00:00:00Z\"\n"))
+	write(t, root, "d--0004.md", concept("019680f0-7e00-7abc-8def-400000000000",
+		"Ledger fresh", "d", "ledger\n",
+		"stale_after: \"2999-01-01T00:00:00Z\"\n"))
+
+	hits, total, err := Search(root, Options{Query: "ledger"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]Result{}
+	for _, h := range hits {
+		got[h.Title] = h
+	}
+	for _, want := range []struct {
+		title, trust, lifecycle string
+		stale                   bool
+	}{
+		{"Ledger reviewed", "human-reviewed", "stable", false},
+		{"Ledger checked", "machine-confirmed", "draft", false},
+		{"Ledger old", "unverified", "deprecated", true},
+		{"Ledger fresh", "unverified", "stable", false},
+	} {
+		h := got[want.title]
+		if h.Trust != want.trust || h.Lifecycle() != want.lifecycle || h.Stale != want.stale {
+			t.Errorf("%s: trust=%q lifecycle=%q stale=%v, want %q %q %v",
+				want.title, h.Trust, h.Lifecycle(), h.Stale, want.trust, want.lifecycle, want.stale)
+		}
+	}
+
+	text := FormatResultsFrom(hits, total, 0)
+	for _, line := range []string{
+		"Trust: human-reviewed\n",
+		"Trust: machine-confirmed | draft\n",
+		"Trust: unverified | deprecated | stale since 2020-01-01T00:00:00Z\n",
+	} {
+		if !strings.Contains(text, line) {
+			t.Errorf("text output lacks %q:\n%s", line, text)
+		}
+	}
+	if strings.Contains(text, "| stable") {
+		t.Errorf("the default lifecycle should not be spelled out:\n%s", text)
+	}
+
+	js, err := ResultsToJSON(hits[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"trust":`, `"stale":`} {
+		if !strings.Contains(js, key) {
+			t.Errorf("--json lacks %s:\n%s", key, js)
+		}
 	}
 }

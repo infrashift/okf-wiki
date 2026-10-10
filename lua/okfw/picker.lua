@@ -3,6 +3,51 @@
 
 local M = {}
 
+-- Badges for the states worth noticing before opening a concept. A stale,
+-- deprecated or draft hit looked exactly like the current answer, and a
+-- human-reviewed one like an unchecked note. Unverified and stable are the
+-- common case and get no badge, so the list stays quiet.
+local function concept_badges(entry)
+    local badges = {}
+    if entry.trust == "human-reviewed" then
+        table.insert(badges, "reviewed")
+    end
+    if entry.status == "draft" or entry.status == "deprecated" then
+        table.insert(badges, entry.status)
+    end
+    if entry.stale == true then
+        table.insert(badges, "stale")
+    end
+    return badges
+end
+
+-- Format a concept entry for display
+local function format_concept_display(entry)
+    local title = entry.title or entry.id or ""
+    local project = (entry.project and entry.project ~= "") and entry.project or ""
+
+    local display = title
+    if project ~= "" then
+        display = display .. " [" .. project .. "]"
+    end
+    local badges = concept_badges(entry)
+    if #badges > 0 then
+        display = display .. " (" .. table.concat(badges, ", ") .. ")"
+    end
+    return display
+end
+
+-- Build the ordinal string for fuzzy matching
+local function format_concept_ordinal(entry)
+    local title = entry.title or ""
+    local project = (entry.project and entry.project ~= "") and entry.project or ""
+    local tags = (type(entry.tags) == "table") and entry.tags or {}
+    return title .. " " .. project .. " " .. table.concat(tags, " ")
+end
+
+-- Pure, so exposed for the integration suite, which runs without snacks.
+M._format_concept_display = format_concept_display
+
 local has_snacks, Snacks = pcall(require, "snacks")
 if not has_snacks then
     return M
@@ -67,26 +112,6 @@ local function build_search_args(opts, query)
     end
 
     return args
-end
-
--- Format a concept entry for display
-local function format_concept_display(entry)
-    local title = entry.title or entry.id or ""
-    local project = (entry.project and entry.project ~= "") and entry.project or ""
-
-    local display = title
-    if project ~= "" then
-        display = display .. " [" .. project .. "]"
-    end
-    return display
-end
-
--- Build the ordinal string for fuzzy matching
-local function format_concept_ordinal(entry)
-    local title = entry.title or ""
-    local project = (entry.project and entry.project ~= "") and entry.project or ""
-    local tags = (type(entry.tags) == "table") and entry.tags or {}
-    return title .. " " .. project .. " " .. table.concat(tags, " ")
 end
 
 -- Shared keymap actions for search pickers

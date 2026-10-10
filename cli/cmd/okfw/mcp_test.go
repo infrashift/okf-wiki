@@ -322,6 +322,52 @@ func TestMCPRefusesAMalformedActor(t *testing.T) {
 // TestMCPSearchFiltersByKindAndType: kind and type are the agent's levers for
 // narrowing a mixed bundle, and each hit must say what it is so a mixed result
 // set stays legible after the fact.
+// TestMCPSearchHitsSayHowFarToTrustThem: trust on every hit, status and stale
+// only when they are the exception, so a current stable hit costs nothing.
+func TestMCPSearchHitsSayHowFarToTrustThem(t *testing.T) {
+	s, project := mcpTestServer(t)
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ file, title, extra string }{
+		{"a--0001.md", "Ledger Reviewed", "verified:\n  by: \"human:ryan\"\n"},
+		{"b--0002.md", "Ledger Retired", "status: \"deprecated\"\nstale_after: \"2020-01-01T00:00:00Z\"\n"},
+	} {
+		writeConceptFile(t, cfg.RootPath, c.file, "---\nid: \"019680f0-7e00-7abc-8def-"+
+			strings.Repeat(c.file[:1], 12)+"\"\ntitle: \""+c.title+"\"\ntype: \"note\"\ntags: []\n"+
+			"created: \"2026-02-13T11:00:00Z\"\ntimestamp: \"2026-02-13T11:00:00Z\"\n"+c.extra+"---\n\nledger\n")
+	}
+	text, isErr := callTool(t, s, "search", `{"q":"ledger"}`)
+	if isErr {
+		t.Fatalf("search failed: %s", text)
+	}
+	var out struct{ Results []map[string]interface{} }
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	byTitle := map[string]map[string]interface{}{}
+	for _, h := range out.Results {
+		byTitle[h["title"].(string)] = h
+	}
+	reviewed, retired := byTitle["Ledger Reviewed"], byTitle["Ledger Retired"]
+	if reviewed == nil || retired == nil {
+		t.Fatalf("missing hits: %s", text)
+	}
+	if reviewed["trust"] != "human-reviewed" || retired["trust"] != "unverified" {
+		t.Errorf("trust = %v / %v, want human-reviewed / unverified", reviewed["trust"], retired["trust"])
+	}
+	if _, has := reviewed["status"]; has {
+		t.Errorf("a stable hit carries status: %v", reviewed)
+	}
+	if _, has := reviewed["stale"]; has {
+		t.Errorf("a current hit carries stale: %v", reviewed)
+	}
+	if retired["status"] != "deprecated" || retired["stale"] != true {
+		t.Errorf("retired hit = %v, want status deprecated and stale true", retired)
+	}
+}
+
 func TestMCPSearchFiltersByKindAndType(t *testing.T) {
 	s, project := mcpTestServer(t)
 	cfg, err := config.Discover(project)

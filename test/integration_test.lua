@@ -756,6 +756,28 @@ if plenary_ok then
     end
 end
 
+-- Test 37: the picker badges a hit worth noticing before it is opened. Driven
+-- through the real `search --json`, so a renamed JSON field fails here.
+log("")
+log("Test 37: picker trust and lifecycle badges")
+local fmt = require("okfw.picker")._format_concept_display
+assert_eq(fmt({ title = "Plain", trust = "unverified" }), "Plain", "an unremarkable hit carries no badge")
+assert_eq(fmt({ title = "Old", trust = "machine-confirmed", status = "deprecated", stale = true }),
+    "Old (deprecated, stale)", "deprecated and stale are badged")
+if plenary_ok then
+    local code = run_okfw({ "create", "Badged Ledger" })
+    assert_eq(code, 0, "created a concept to badge")
+    local matches = vim.fn.glob(test_project .. "/.okfw/badged-ledger--*.md", false, true)
+    if #matches == 1 then
+        assert_eq(run_okfw({ "verify", matches[1], "--by", "human:tester" }), 0, "verified it")
+        assert_eq(run_okfw({ "set-lifecycle", matches[1], "draft" }), 0, "marked it draft")
+        local _, out = run_okfw({ "search", "--json", "Badged Ledger" })
+        local okj, hits = pcall(vim.json.decode, out)
+        local hit = okj and type(hits) == "table" and hits[1] or {}
+        assert_eq(fmt(hit), "Badged Ledger (reviewed, draft)", "search --json feeds the badges")
+    end
+end
+
 -- Summary
 log("")
 log("=== Test Summary ===")

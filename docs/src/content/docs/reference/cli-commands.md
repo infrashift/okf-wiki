@@ -357,11 +357,31 @@ okfw search "auth" --limit 10 --offset 10   # second page
 Results are ranked (title over tags over description over body). Search scans
 the files on every call, so there is no index to build or keep in sync.
 
+### How far to trust a hit
+Every hit says how far to trust it, so a stale or never-reviewed concept no
+longer looks like the reviewed, current answer:
+
+```
+1. Ledger reconciliation
+   ID: 019f0494-... | Project: finance
+   Trust: human-reviewed | draft | stale since 2026-06-30T00:00:00Z
+```
+
+`Trust` is the OKF trust tier (`unverified`, `machine-confirmed` or
+`human-reviewed`, from `verified`). The lifecycle status follows only when it is
+`draft` or `deprecated`, and `stale since` only once `stale_after` has passed.
+
 ### JSON output (for scripting/tooling)
 ```bash
 okfw search --json
 okfw search "query" --json | jq '.[] | .title'
+okfw search --json | jq '.[] | select(.trust == "human-reviewed" and (.stale | not)) | .title'
 ```
+
+Each result carries `trust` and `stale` (a boolean) alongside the raw `status`
+and `stale_after`. The MCP `okfw_search` tool returns the same `trust` on every
+hit, and `status` and `stale` only when they are the exception: `draft` or
+`deprecated`, and `true`.
 
 ### Combined filters
 ```bash

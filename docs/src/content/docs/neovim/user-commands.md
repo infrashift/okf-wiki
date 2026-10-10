@@ -106,6 +106,11 @@ Use the bang (`!`) variant for live search that updates as you type.
 | `--stale` | - | Only concepts whose `stale_after` has passed |
 | `--tag` | any string | Filter by tag (can repeat) |
 
+Hits worth noticing before you open them are badged after the title:
+`(reviewed)` for a human-reviewed concept, `(draft)` or `(deprecated)`, and
+`(stale)` once `stale_after` has passed. An unverified, stable, current concept
+carries no badge.
+
 **Picker keymaps (when available):**
 
 | Key | Action |

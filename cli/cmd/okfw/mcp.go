@@ -108,7 +108,7 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "okfw_search",
-			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet}]}; path is wiki-relative (use with read).",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only for draft or deprecated, stale only when stale_after has passed. Prefer a current, reviewed hit over a stale or deprecated one.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
@@ -293,6 +293,12 @@ type mcpHit struct {
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Snippet string   `json:"snippet,omitempty"`
+	// Trust is always present: an agent cannot tell an omitted tier from
+	// "unverified". Status and stale appear only when they are the exception,
+	// so a current, stable hit costs nothing extra.
+	Trust  string `json:"trust"`
+	Status string `json:"status,omitempty"` // draft or deprecated; absent means stable
+	Stale  bool   `json:"stale,omitempty"`
 }
 
 // maxSearchLimit bounds a single search page. The caller can page past it
@@ -340,7 +346,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 
 	hits := make([]mcpHit, 0, len(results))
 	for _, r := range results {
-		hits = append(hits, mcpHit{
+		hit := mcpHit{
 			ID:      r.ID,
 			Title:   r.Title,
 			Path:    relPath(cfg, r.FilePath),
@@ -349,7 +355,13 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			Project: r.Project,
 			Tags:    r.Tags,
 			Snippet: r.Snippet,
-		})
+			Trust:   r.Trust,
+			Stale:   r.Stale,
+		}
+		if lc := r.Lifecycle(); lc != "stable" {
+			hit.Status = lc
+		}
+		hits = append(hits, hit)
 	}
 	out := map[string]interface{}{"total": total, "results": hits}
 	// A bare total the caller has to compare against len(results) is not an

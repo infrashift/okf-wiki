@@ -248,7 +248,9 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   `TestUpdateToolMatchesTheCLIWriters` now pins it, and the actions share the
   CLI's frontmatter mutators rather than reimplementing them. `read` takes
   `section`/`offset`/`limit` and caps at 200 lines rather than dumping a whole
-  concept; `search` takes `kind`, `type`, `status`, `stale` and `offset`.
+  concept; `search` takes `kind`, `type`, `status`, `stale` and `offset`, and every
+  hit carries `trust` (with `status`/`stale` only when they are the exception)
+  so an agent can weigh it without opening it.
   Every tool result is capped and says so (`truncated`, `next_offset`, `… N
   more`); `TestEveryMCPToolIsCappedAndSaysSo` is driven from the tool list so a
   tool added later cannot escape it, and exists because every other MCP test

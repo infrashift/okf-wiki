@@ -37,6 +37,12 @@ Search before you:
   the false positives and the ranking that a fresh scan will not;
 - write an **orientation** to unfamiliar code.
 
+Each hit carries `trust` (`unverified`, `machine-confirmed`,
+`human-reviewed`), plus `status` when it is `draft` or `deprecated` and `stale`
+when its `stale_after` has passed. Weigh a hit by them: prefer a reviewed,
+current concept, and treat a stale or deprecated one as a lead to check rather
+than as the answer.
+
 If the search returns nothing relevant, derive the answer normally — and
 consider capturing what you learned.
 

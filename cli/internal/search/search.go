@@ -67,7 +67,16 @@ type Result struct {
 
 	Status     string `json:"status,omitempty"`
 	StaleAfter string `json:"stale_after,omitempty"`
+
+	// Derived, so a caller can weigh a hit without opening it: a search that
+	// returned a deprecated, stale or never-reviewed concept looked exactly like
+	// one that returned the reviewed, current answer.
+	Trust string `json:"trust"` // OKF section 5.3: unverified, machine-confirmed or human-reviewed
+	Stale bool   `json:"stale"` // stale_after has passed (config.IsStale)
 }
+
+// Lifecycle is the hit's OKF lifecycle status, with absent read as stable.
+func (r Result) Lifecycle() string { return lifecycleOf(r.Status) }
 
 // Field weights. Title outranks description outranks body because a concept
 // whose *title* is the query is almost always the one meant, and okfw's own
@@ -133,8 +142,10 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 			FilePath:    abs,
 			Status:      fm.Status,
 			StaleAfter:  fm.StaleAfter,
+			Trust:       fm.TrustTier(),
+			Stale:       config.IsStale(fm.StaleAfter, now),
 		}
-		if !matches(r, opts, now) {
+		if !matches(r, opts) {
 			return nil
 		}
 		body := config.ExtractBody(content)
@@ -177,7 +188,6 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	return all[opts.Offset:end], total, nil
 }
 
-// matches applies every non-query filter.
 func lifecycleOf(s string) string {
 	// OKF section 5.4: an absent status means stable.
 	switch s {
@@ -187,7 +197,8 @@ func lifecycleOf(s string) string {
 	return "stable"
 }
 
-func matches(r Result, opts Options, now time.Time) bool {
+// matches applies every non-query filter.
+func matches(r Result, opts Options) bool {
 	if opts.Project != "" && r.Project != opts.Project {
 		return false
 	}
@@ -200,7 +211,7 @@ func matches(r Result, opts Options, now time.Time) bool {
 	if opts.Status != "" && lifecycleOf(r.Status) != opts.Status {
 		return false
 	}
-	if opts.Stale && !config.IsStale(r.StaleAfter, now) {
+	if opts.Stale && !r.Stale {
 		return false
 	}
 	for _, want := range opts.Tags {
@@ -380,6 +391,14 @@ func FormatResultsFrom(results []Result, total, offset int) string {
 		if len(r.Tags) > 0 {
 			fmt.Fprintf(&b, "   Tags: %s\n", strings.Join(r.Tags, ", "))
 		}
+		fmt.Fprintf(&b, "   Trust: %s", r.Trust)
+		if lc := r.Lifecycle(); lc != "stable" {
+			fmt.Fprintf(&b, " | %s", lc)
+		}
+		if r.Stale {
+			fmt.Fprintf(&b, " | stale since %s", r.StaleAfter)
+		}
+		b.WriteString("\n")
 		fmt.Fprintf(&b, "   File: %s\n", r.FilePath)
 		if r.Snippet != "" {
 			// snippetFor marks its own cuts with "...", so none are added here.
