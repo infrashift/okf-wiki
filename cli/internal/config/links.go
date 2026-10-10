@@ -37,8 +37,8 @@ func ReadConceptKey(bundleRoot, bundleRel string) string {
 
 // ResolveBodyLinks resolves the internal markdown links in body to concept
 // keys. fromDir is the linking file's bundle-relative directory; keyOf maps a
-// bundle-relative target path to its concept key, "" for none. Links to nothing
-// are skipped (OKF tolerates them). Results are deduplicated, in order.
+// bundle-relative target path to its concept key, or "" to skip the link; what
+// a missing target maps to is keyOf's call. Results are deduplicated, in order.
 //
 // keyOf is a parameter so a caller that has already read the bundle answers
 // from memory: resolving by reading each target's file cost a graph query six

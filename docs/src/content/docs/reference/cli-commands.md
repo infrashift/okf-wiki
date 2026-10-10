@@ -98,7 +98,7 @@ stops rather than deleting.
 Concepts that still link to the deleted one are **reported, not repaired**. OKF
 requires consumers to tolerate a link whose target does not exist, so a dangling
 link is not malformed; rewriting someone's prose to tidy one would destroy
-authored content.
+authored content. `okfw graph-query dangling` finds them later.
 
 ### Move or rename a concept
 ```bash
@@ -455,6 +455,12 @@ okfw graph-query tag golang --json
 okfw graph-query dangling
 okfw graph-query dangling --json
 ```
+
+Reports body links to `.md` files that do not exist — typically left behind by
+`okfw delete` — and `parent` references to ids no concept declares. A missing
+link target is named by its OKF concept ID (its path minus `.md`), and
+`okfw graph-query backlinks <that path>` lists everything still pointing at it.
+A link to a file that exists but is not a concept is not dangling.
 
 `--json` emits the graph's node records with Go field names (`ID`, `Title`,
 `FilePath`, `Project`, `Parent`, `Children`, `Links`, `Tags`); `cluster` wraps

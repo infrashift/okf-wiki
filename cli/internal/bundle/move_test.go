@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -520,6 +522,58 @@ func TestLoadGraphKeysConceptsWithoutIDsByPath(t *testing.T) {
 	for _, ref := range []string{"computations/profit", "computations/profit.md", "/computations/profit.md"} {
 		if key, err := ConceptKeyOf(cfg, ref); err != nil || key != "computations/profit" {
 			t.Errorf("ConceptKeyOf(%q) = %q, %v", ref, key, err)
+		}
+	}
+}
+
+// A link left behind by `okfw delete` is the dangling link okfw produces, and
+// `graph-query dangling` could not see it: a link to a missing file was
+// dropped before it became an edge. It is now an edge to the target's OKF
+// concept ID, so dangling reports it by path and backlinks finds it.
+func TestDeletedConceptLeavesReportableDanglingLinks(t *testing.T) {
+	cfg, _ := testCfg(t)
+	gone := concept(t, cfg, "notes/gone.md", "Gone", "# Gone\n")
+	concept(t, cfg, "a.md", "A", "# A\n\n[Gone](/notes/gone.md), [readme](/README.md), [again](./notes/gone.md)\n")
+	concept(t, cfg, "notes/b.md", "B", "# B\n\n[Gone](./gone.md) and [Never](../never.md)\n")
+	// A file that exists but is no concept is not a missing target.
+	if err := os.WriteFile(filepath.Join(cfg.RootPath, "README.md"), []byte("# Readme\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DeleteConcept(cfg, gone); err != nil {
+		t.Fatal(err)
+	}
+
+	g, err := LoadGraph(cfg.RootPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyA, _ := ConceptKeyOf(cfg, "a.md")
+	keyB, _ := ConceptKeyOf(cfg, "notes/b.md")
+	var got []string
+	for _, e := range g.Dangling() {
+		got = append(got, e.From+" -> "+e.To)
+	}
+	want := []string{keyA + " -> notes/gone", keyB + " -> never", keyB + " -> notes/gone"}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Dangling =\n%v\nwant\n%v", got, want)
+	}
+
+	for _, ref := range []string{"notes/gone", "/notes/gone.md", "notes/gone.md"} {
+		key, err := ConceptKeyOf(cfg, ref)
+		if err != nil {
+			t.Fatalf("ConceptKeyOf(%q): %v", ref, err)
+		}
+		if back := g.Backlinks(key); len(back) != 2 {
+			t.Errorf("backlinks of deleted %q = %d, want 2 (A and B)", ref, len(back))
+		}
+	}
+
+	// Edges to nothing must not reach the rendered graph.
+	nodes := g.FindConnected(keyA, 10, 0)
+	for _, e := range g.GetEdges(nodes) {
+		if g.GetNode(e.To) == nil {
+			t.Errorf("rendered an edge to missing %q", e.To)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package bundle
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -100,11 +101,23 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 
 	// Resolve links from what the walk already read; only a target outside a
 	// subtree walk needs reading.
+	//
+	// A link to a file that does not exist keeps an edge, keyed by the
+	// target's OKF concept ID — the key that concept would have had without an
+	// id. Dropping it, as this once did, left `graph-query dangling` blind to
+	// the one kind of dangling link okfw produces: body links left behind by
+	// `okfw delete`. A link to a file that exists but is no concept (a README
+	// with no frontmatter, an index.md) names nothing missing and stays out.
 	keyOf := func(rel string) string {
 		if k, ok := keyByRel[rel]; ok {
 			return k
 		}
 		k := config.ReadConceptKey(bundleRoot, rel)
+		if k == "" {
+			if _, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(rel))); errors.Is(err, fs.ErrNotExist) {
+				k = strings.TrimSuffix(rel, ".md")
+			}
+		}
 		keyByRel[rel] = k
 		return k
 	}
@@ -122,13 +135,14 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 
 // ConceptKeyOf resolves any concept reference a command accepts — frontmatter
 // id, OKF concept ID, or file path — to the concept key the link graph uses. A
-// bare id that resolves to no file is returned as given, so a query about a
-// deleted concept still finds the links left pointing at it.
+// reference that resolves to no file is returned as the key it would have —
+// an id as given, a path as its OKF concept ID — so a query about a deleted
+// concept still finds the links left pointing at it (see LoadGraphFrom).
 func ConceptKeyOf(cfg *config.Config, ref string) (string, error) {
 	p, err := ResolveConceptPath(cfg, ref)
 	if err != nil {
-		if errors.Is(err, ErrConceptNotFound) && !strings.HasSuffix(ref, ".md") && !strings.Contains(ref, "/") {
-			return ref, nil
+		if errors.Is(err, ErrConceptNotFound) {
+			return strings.TrimSuffix(strings.TrimPrefix(ref, "/"), ".md"), nil
 		}
 		return "", err
 	}

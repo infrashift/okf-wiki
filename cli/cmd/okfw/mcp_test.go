@@ -494,12 +494,8 @@ Points at [Target](/target--00ff.md) and at [Nowhere](/gone-`+fmt.Sprint(i)+`.md
 				t.Errorf("%s returned %d rows for limit 5", tc.name, len(rows))
 			}
 			// cluster capped inside the walk, so it reported the capped count
-			// as its total and never said truncated. dangling is exempt: a
-			// link to a missing file never becomes a graph edge, so it has
-			// no rows here to withhold.
-			if tc.name == "dangling" {
-				return
-			}
+			// as its total and never said truncated. dangling returned no rows
+			// at all: a link to a missing file never became a graph edge.
 			var total int
 			if err := json.Unmarshal(got["total"], &total); err != nil || total < 15 {
 				t.Errorf("%s total = %s, want the uncapped count (15+)", tc.name, got["total"])

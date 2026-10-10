@@ -1049,7 +1049,15 @@ Examples:
 					fmt.Println("No dangling edges found")
 				} else {
 					for _, e := range edges {
-						fmt.Printf("  %s -[%s]-> %s (target not found)\n", e.From, e.Label, e.To)
+						// The source's path, so the link can be opened and fixed;
+						// its id says nothing about where it lives.
+						from := e.From
+						if n := g.GetNode(e.From); n != nil {
+							if rel, err := filepath.Rel(cfg.RootPath, n.FilePath); err == nil {
+								from = filepath.ToSlash(rel)
+							}
+						}
+						fmt.Printf("  %s -[%s]-> %s (target not found)\n", from, e.Label, e.To)
 					}
 					fmt.Printf("\nFound %d dangling edge(s)\n", len(edges))
 				}

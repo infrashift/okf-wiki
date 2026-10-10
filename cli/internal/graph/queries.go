@@ -38,7 +38,8 @@ func (g *Graph) ByTag(tag string) []*Node {
 }
 
 // Dangling returns links and parent references pointing at ids no concept
-// declares.
+// declares. A body link to a missing file arrives here keyed by the target's
+// OKF concept ID (see bundle.LoadGraphFrom), so it is reported by path.
 //
 // Reported, never repaired: OKF section 6.1 requires consumers to tolerate a
 // link whose target does not exist, and `okfw delete` leaves them on purpose.

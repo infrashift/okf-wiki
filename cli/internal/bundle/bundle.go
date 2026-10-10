@@ -227,7 +227,7 @@ func resolvePathRef(cfg *config.Config, ref string) (string, error) {
 	if outside {
 		return "", fmt.Errorf("%s is outside the wiki at %s", ref, cfg.RootPath)
 	}
-	return "", fmt.Errorf("file not found: %s", ref)
+	return "", fmt.Errorf("%w: no file %s", ErrConceptNotFound, ref)
 }
 
 // Within reports whether path p lies inside root once symlinks are resolved.

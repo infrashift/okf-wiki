@@ -16,7 +16,7 @@ type Node struct {
 	Project  string
 	Parent   string   // Optional parent concept ID
 	Children []string // Child concept IDs
-	Links    []string // Target concept IDs resolved from markdown links in the body
+	Links    []string // Concept keys of the body's link targets; a missing target has no node
 	Tags     []string // Frontmatter tags, for tag queries
 }
 
@@ -193,7 +193,13 @@ func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 	maxConns := -1
 	for _, id := range g.sortedIDs() {
 		node := g.nodes[id]
-		conns := len(node.Links) + len(node.Children)
+		// Live links only: a link to a missing concept connects nothing.
+		conns := len(node.Children)
+		for _, l := range node.Links {
+			if g.nodes[l] != nil {
+				conns++
+			}
+		}
 		if node.Parent != "" {
 			conns++
 		}
