@@ -34,7 +34,9 @@ plugin/okfw.lua              — Neovim plugin auto-load
 make build           # Builds bin/okfw (CGO_ENABLED=0 — keep okfw pure Go)
 make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works because okfw is pure Go)
 make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
-make dist            # dist/okfw-<version>-linux-{amd64,arm64}.tar.gz + SHA256SUMS
+make dist            # dist/: okfw-<version>-linux-{amd64,arm64}.tar.gz, SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
+make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
+make sign            # make dist, then a cosign .sigstore.json bundle per file; offline, never logged to Rekor
 make test            # Runs Go tests + CUE schema validation
 make test-race       # Go tests under the race detector
 make install         # Installs okfw to $GOPATH/bin

@@ -1,4 +1,4 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 dist test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
+.PHONY: build build-linux-amd64 build-linux-arm64 dist signing-key sign verify-signatures test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
@@ -8,6 +8,17 @@ LINUX_ARCHES=amd64 arm64
 # Names the dist tarballs: the tag when HEAD has one, else the commit.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
+
+# Signing (optional: `make dist` never signs). The default key lives outside
+# the repository so no build context or `git add -f` can pick it up. Supply
+# your own with COSIGN_KEY= (a key file or a KMS URI) and COSIGN_PUB= (a file).
+COSIGN_KEY_PREFIX ?= $(HOME)/.config/cosign/okfw
+COSIGN_KEY ?= $(COSIGN_KEY_PREFIX).key
+COSIGN_PUB ?= $(COSIGN_KEY_PREFIX).pub
+# A signing config naming no transparency log or timestamp authority: signing
+# stays offline and never publishes to the public Rekor log, which cosign v3
+# does by default.
+COSIGN_SIGNING_CONFIG=release/cosign-offline-signing-config.json
 
 # Container settings
 CONTAINER_ENGINE=podman
@@ -29,8 +40,12 @@ build-linux-amd64 build-linux-arm64: build-linux-%:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -o $(BIN_DIR)/$(BINARY_NAME)-linux-$* $(CMD_PATH)
 
 # One tarball per Linux architecture, each unpacking to a directory holding
-# okfw, LICENSE and README.md, plus SHA256SUMS over the tarballs.
+# okfw, LICENSE and README.md, plus SHA256SUMS over the tarballs. Each tarball
+# gets an SPDX SBOM made by syft from the binary it ships (Go records its
+# modules in the binary, so this is what was linked, not what go.mod lists),
+# with SHA256SUMS.sbom over the SBOMs.
 dist: $(addprefix build-linux-,$(LINUX_ARCHES))
+	@command -v syft >/dev/null || { echo "make dist needs syft for the SBOMs: https://github.com/anchore/syft#installation" >&2; exit 1; }
 	rm -rf $(DIST_DIR) && mkdir -p $(DIST_DIR)
 	@for arch in $(LINUX_ARCHES); do \
 		name=$(BINARY_NAME)-$(VERSION)-linux-$$arch; \
@@ -39,9 +54,49 @@ dist: $(addprefix build-linux-,$(LINUX_ARCHES))
 		cp LICENSE README.md $(DIST_DIR)/$$name/ && \
 		tar -C $(DIST_DIR) -czf $(DIST_DIR)/$$name.tar.gz $$name && \
 		rm -rf $(DIST_DIR)/$$name && \
-		echo "$(DIST_DIR)/$$name.tar.gz" || exit 1; \
+		SYFT_CHECK_FOR_APP_UPDATE=false syft scan -q file:$(BIN_DIR)/$(BINARY_NAME)-linux-$$arch \
+			-o spdx-json=$(DIST_DIR)/$$name.spdx.json && \
+		echo "$(DIST_DIR)/$$name.tar.gz $(DIST_DIR)/$$name.spdx.json" || exit 1; \
 	done
 	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
+	cd $(DIST_DIR) && $(SHA256SUM) *.spdx.json > SHA256SUMS.sbom
+
+# An ECDSA P-256 key pair: what `cosign generate-key-pair` makes, and cosign's
+# default signing algorithm. (cosign imports an Ed25519 key but cannot sign a
+# blob with one.) cosign asks for a password to encrypt the private key.
+signing-key:
+	@test ! -e $(COSIGN_KEY) || { echo "$(COSIGN_KEY) already exists; not overwriting it" >&2; exit 1; }
+	@mkdir -p $(dir $(COSIGN_KEY_PREFIX)) && chmod 700 $(dir $(COSIGN_KEY_PREFIX))
+	cosign generate-key-pair --output-key-prefix $(COSIGN_KEY_PREFIX)
+
+# Signs everything `make dist` writes, each file getting a <file>.sigstore.json
+# bundle, and copies the public key in as cosign.pub. The key password is read
+# once (or from COSIGN_PASSWORD) rather than once per file.
+sign: dist
+	@command -v cosign >/dev/null || { echo "make sign needs cosign: https://docs.sigstore.dev/cosign/system_config/installation/" >&2; exit 1; }
+	@case "$(COSIGN_KEY)" in *://*) ;; *) test -f $(COSIGN_KEY) || { echo "no signing key at $(COSIGN_KEY): run 'make signing-key' or set COSIGN_KEY=" >&2; exit 1; } ;; esac
+	@if [ -z "$${COSIGN_PASSWORD+set}" ]; then \
+		printf 'Password for $(COSIGN_KEY): ' >&2; \
+		stty -echo 2>/dev/null; read -r COSIGN_PASSWORD; stty echo 2>/dev/null; echo >&2; \
+	fi; \
+	export COSIGN_PASSWORD; \
+	for f in $(DIST_DIR)/*.tar.gz $(DIST_DIR)/SHA256SUMS $(DIST_DIR)/*.spdx.json $(DIST_DIR)/SHA256SUMS.sbom; do \
+		if out=$$(cosign sign-blob -y --key $(COSIGN_KEY) --signing-config $(COSIGN_SIGNING_CONFIG) \
+			--bundle $$f.sigstore.json $$f 2>&1); \
+		then echo "$$f.sigstore.json"; else echo "$$out" >&2; exit 1; fi; \
+	done
+	cp $(COSIGN_PUB) $(DIST_DIR)/cosign.pub
+	@$(MAKE) --no-print-directory verify-signatures COSIGN_PUB=$(DIST_DIR)/cosign.pub
+
+# Checks every bundle in dist/ against COSIGN_PUB. --insecure-ignore-tlog is
+# needed because `make sign` deliberately writes no transparency-log entry.
+verify-signatures:
+	@ls $(DIST_DIR)/*.sigstore.json >/dev/null 2>&1 || { echo "no signatures in $(DIST_DIR)/: run 'make sign'" >&2; exit 1; }
+	@for b in $(DIST_DIR)/*.sigstore.json; do \
+		f=$${b%.sigstore.json}; \
+		if out=$$(cosign verify-blob --key $(COSIGN_PUB) --bundle $$b --insecure-ignore-tlog=true $$f 2>&1); \
+		then echo "verified $$f"; else echo "$$out" >&2; echo "FAILED $$f" >&2; exit 1; fi; \
+	done
 
 # -count=1 disables the test cache: a cached pass can otherwise hide a
 # regression in code the cache key did not notice.
