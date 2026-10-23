@@ -213,7 +213,7 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 		resp.Result = map[string]interface{}{
 			"protocolVersion": version,
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": "okfw", "version": config.Version},
+			"serverInfo":      map[string]interface{}{"name": "okfw", "version": config.Version()},
 		}
 	case "ping":
 		resp.Result = map[string]interface{}{}
