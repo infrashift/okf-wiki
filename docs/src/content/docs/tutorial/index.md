@@ -13,6 +13,7 @@ graphs, and recording OKF metadata.
 - [Podman](https://podman.io/) (or Docker, substituting `docker` for `podman`)
 - An SSH client
 - A terminal emulator (Ghostty recommended for full color support)
+- An x86_64 or arm64 (aarch64) host: the image builds natively on either
 
 ## 1. Build the Container
 
@@ -81,9 +82,13 @@ podman logs okfw-dev
 **With the test key:**
 
 ```bash
-ssh -p 2222 -i ./Containerfiles/config/test_ssh_key \
+ssh -p 2222 -i ./Containerfiles/config/test_ssh_key -o IdentitiesOnly=yes \
   -o StrictHostKeyChecking=no user@localhost
 ```
+
+`IdentitiesOnly=yes` makes ssh offer only the test key. Without it, ssh first
+offers every key in your ssh-agent, and with several loaded, sshd stops at its
+attempt limit with "Too many authentication failures".
 
 **With your own key:**
 
@@ -111,6 +116,19 @@ keybindings (`Ctrl-b` then arrow keys).
 If you disconnect and reconnect, SSH reattaches to the same tmux session
 automatically. Your editor state, shell history, and Claude conversation are
 preserved.
+
+Only an interactive login attaches to tmux. Give `ssh` a command and it runs
+that instead, so remote commands, `scp` and `sftp` work:
+
+```bash
+ssh -p 2222 user@localhost okfw --version
+scp -P 2222 notes.md user@localhost:my-project/
+scp -P 2222 user@localhost:my-project/.okfw/index.md .
+sftp -P 2222 user@localhost
+```
+
+`scp` takes the port as `-P`, capital, where `ssh` takes `-p`. With the test
+key, add `-i ./Containerfiles/config/test_ssh_key -o IdentitiesOnly=yes` to each.
 
 The CLI is on `PATH` in the container:
 
@@ -726,6 +744,10 @@ podman start okfw-dev
 
 # SSH reconnects to the same tmux session
 ssh -p 2222 user@localhost
+
+# Run one command, or copy files, without attaching
+ssh -p 2222 user@localhost okfw --version
+scp -P 2222 notes.md user@localhost:
 
 # Remove the container
 podman rm -f okfw-dev

@@ -43,9 +43,17 @@ RUN ssh-keygen -A && \
 COPY Containerfiles/config/sshd_config /etc/ssh/sshd_config
 
 # ── 3. NeoVim v0.11.4 ────────────────────────────────────────────────────
-RUN curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-x86_64.tar.gz \
+# Each release names the architecture its own way; `uname -m` is the image's
+# architecture, native or emulated, so one Containerfile builds x86_64 and arm64.
+RUN case "$(uname -m)" in \
+        x86_64) arch=x86_64 ;; \
+        aarch64) arch=arm64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-${arch}.tar.gz" \
         | tar xz -C /opt && \
-    ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+    ln -sf "/opt/nvim-linux-${arch}/bin/nvim" /usr/local/bin/nvim && \
+    nvim --version | head -1
 
 # ── 5. Switch to non-root user ───────────────────────────────────────────
 USER user
@@ -80,16 +88,23 @@ COPY --chown=user:0 plugin/okfw.lua         /home/user/okfw-plugin/plugin/okfw.l
 COPY --chown=user:0 after/ftplugin/markdown.lua /home/user/okfw-plugin/after/ftplugin/markdown.lua
 
 # ── 12. Install mason tools before Lazy sync (tree-sitter must exist first)
-RUN MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
+#     Asset names per architecture: shfmt amd64/arm64, tree-sitter x64/arm64,
+#     stylua x86_64/aarch64.
+RUN case "$(uname -m)" in \
+        x86_64) shfmt_arch=amd64 ts_arch=x64 stylua_arch=x86_64 ;; \
+        aarch64) shfmt_arch=arm64 ts_arch=arm64 stylua_arch=aarch64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac && \
+    MASON_BIN=/home/user/.local/share/nvim/mason/bin && \
     MASON_PKG=/home/user/.local/share/nvim/mason/packages && \
     mkdir -p "$MASON_BIN" "$MASON_PKG/shfmt" "$MASON_PKG/tree-sitter-cli" "$MASON_PKG/stylua" && \
-    curl -fsSL "https://github.com/mvdan/sh/releases/download/v3.12.0/shfmt_v3.12.0_linux_amd64" \
+    curl -fsSL "https://github.com/mvdan/sh/releases/download/v3.12.0/shfmt_v3.12.0_linux_${shfmt_arch}" \
         -o "$MASON_PKG/shfmt/shfmt" && chmod +x "$MASON_PKG/shfmt/shfmt" && \
     ln -sf ../packages/shfmt/shfmt "$MASON_BIN/shfmt" && \
-    curl -fsSL "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.5/tree-sitter-linux-x64.gz" \
+    curl -fsSL "https://github.com/tree-sitter/tree-sitter/releases/download/v0.26.5/tree-sitter-linux-${ts_arch}.gz" \
         | gunzip > "$MASON_PKG/tree-sitter-cli/tree-sitter" && chmod +x "$MASON_PKG/tree-sitter-cli/tree-sitter" && \
     ln -sf ../packages/tree-sitter-cli/tree-sitter "$MASON_BIN/tree-sitter" && \
-    curl -fsSL "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.1.0/stylua-linux-x86_64.zip" \
+    curl -fsSL "https://github.com/JohnnyMorganz/StyLua/releases/download/v2.1.0/stylua-linux-${stylua_arch}.zip" \
         -o /tmp/stylua.zip && unzip -o /tmp/stylua.zip -d "$MASON_PKG/stylua/" && \
     chmod +x "$MASON_PKG/stylua/stylua" && \
     ln -sf ../packages/stylua/stylua "$MASON_BIN/stylua" && \
