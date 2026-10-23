@@ -1,5 +1,6 @@
 # Binary
 /okfw
+/okfw-linux-arm64
 
 # Go
 *.exe

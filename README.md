@@ -81,6 +81,15 @@ make build
 make install  # Installs to $GOPATH/bin
 ```
 
+### Build for Linux aarch64
+
+okfw is pure Go, so it cross-compiles from any host. On an aarch64 machine,
+`make build` is already native; from anywhere else:
+
+```bash
+make build-linux-arm64   # Writes ./okfw-linux-arm64
+```
+
 ## Zero Configuration
 
 There is no config file. A wiki is a `.okfw/` directory at a project's root,
