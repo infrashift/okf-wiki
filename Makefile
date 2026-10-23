@@ -1,7 +1,13 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
+.PHONY: build build-linux-amd64 build-linux-arm64 dist test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
+BIN_DIR=bin
+DIST_DIR=dist
+LINUX_ARCHES=amd64 arm64
+# Names the dist tarballs: the tag when HEAD has one, else the commit.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
 # Container settings
 CONTAINER_ENGINE=podman
@@ -14,12 +20,28 @@ SSH_PUBKEY=$(HOME)/.ssh/id_ed25519.pub
 USER_UID=$(shell id -u)
 
 build:
-	CGO_ENABLED=0 go build -o $(BINARY_NAME) $(CMD_PATH)
+	CGO_ENABLED=0 go build -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
 
 # okfw is pure Go, so it cross-compiles from any host: each of these builds a
 # Linux binary for its architecture (x86_64, aarch64) whatever machine runs it.
+# -trimpath keeps the build machine's paths out of a binary meant to be shipped.
 build-linux-amd64 build-linux-arm64: build-linux-%:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -o $(BINARY_NAME)-linux-$* $(CMD_PATH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -o $(BIN_DIR)/$(BINARY_NAME)-linux-$* $(CMD_PATH)
+
+# One tarball per Linux architecture, each unpacking to a directory holding
+# okfw, LICENSE and README.md, plus SHA256SUMS over the tarballs.
+dist: $(addprefix build-linux-,$(LINUX_ARCHES))
+	rm -rf $(DIST_DIR) && mkdir -p $(DIST_DIR)
+	@for arch in $(LINUX_ARCHES); do \
+		name=$(BINARY_NAME)-$(VERSION)-linux-$$arch; \
+		mkdir -p $(DIST_DIR)/$$name && \
+		cp $(BIN_DIR)/$(BINARY_NAME)-linux-$$arch $(DIST_DIR)/$$name/$(BINARY_NAME) && \
+		cp LICENSE README.md $(DIST_DIR)/$$name/ && \
+		tar -C $(DIST_DIR) -czf $(DIST_DIR)/$$name.tar.gz $$name && \
+		rm -rf $(DIST_DIR)/$$name && \
+		echo "$(DIST_DIR)/$$name.tar.gz" || exit 1; \
+	done
+	cd $(DIST_DIR) && $(SHA256SUM) *.tar.gz > SHA256SUMS
 
 # -count=1 disables the test cache: a cached pass can otherwise hide a
 # regression in code the cache key did not notice.
@@ -50,7 +72,7 @@ fmt:
 	@command -v cue >/dev/null && cue fmt ./cli/internal/config/concept-schema.cue || true
 
 install: build
-	mv $(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
+	mv $(BIN_DIR)/$(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
 
 ui-check:
 	@echo "Checking Lua syntax..."
@@ -73,7 +95,7 @@ e2e:
 	@echo "e2e build succeeded — okfw CLI and the NeoVim plugin pass in-container."
 
 clean:
-	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-amd64 $(BINARY_NAME)-linux-arm64
+	rm -rf $(BIN_DIR) $(DIST_DIR)
 	
 tidy:
 	go mod tidy

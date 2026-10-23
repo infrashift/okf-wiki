@@ -31,9 +31,10 @@ plugin/okfw.lua              — Neovim plugin auto-load
 ## Build & Test
 
 ```bash
-make build           # Builds ./okfw (CGO_ENABLED=0 — keep okfw pure Go)
-make build-linux-amd64 # Cross-compiles ./okfw-linux-amd64 (x86_64; works because okfw is pure Go)
-make build-linux-arm64 # Cross-compiles ./okfw-linux-arm64 (aarch64)
+make build           # Builds bin/okfw (CGO_ENABLED=0 — keep okfw pure Go)
+make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works because okfw is pure Go)
+make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
+make dist            # dist/okfw-<version>-linux-{amd64,arm64}.tar.gz + SHA256SUMS
 make test            # Runs Go tests + CUE schema validation
 make test-race       # Go tests under the race detector
 make install         # Installs okfw to $GOPATH/bin

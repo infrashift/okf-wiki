@@ -1,7 +1,6 @@
-# Binary
-/okfw
-/okfw-linux-amd64
-/okfw-linux-arm64
+# Build output (make build / make dist)
+/bin/
+/dist/
 
 # Go
 *.exe

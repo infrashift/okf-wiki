@@ -87,9 +87,13 @@ okfw is pure Go, so it cross-compiles from any host. `make build` targets the
 machine you run it on; to build for Linux x86_64 or aarch64 from any machine:
 
 ```bash
-make build-linux-amd64   # Writes ./okfw-linux-amd64 (x86_64)
-make build-linux-arm64   # Writes ./okfw-linux-arm64 (aarch64)
+make build-linux-amd64   # Writes bin/okfw-linux-amd64 (x86_64)
+make build-linux-arm64   # Writes bin/okfw-linux-arm64 (aarch64)
+make dist                # Both, packaged as dist/okfw-<version>-linux-<arch>.tar.gz + SHA256SUMS
 ```
+
+`<version>` is the git tag on HEAD, or the short commit when there is none.
+Override it with `make dist VERSION=v1.2.3`.
 
 ## Zero Configuration
 

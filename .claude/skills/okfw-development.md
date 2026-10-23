@@ -11,7 +11,7 @@ globs:
 ## Build & Test
 
 ```bash
-make build                    # Build ./okfw binary
+make build                    # Build bin/okfw binary
 make test                     # Go tests + CUE schema validation
 go test ./cli/... -count=1    # All Go tests
 go test ./cli/internal/search/... -v  # Single package, verbose
