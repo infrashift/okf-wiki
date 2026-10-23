@@ -68,9 +68,11 @@ okfw create "Spec draft" --path projects/okf
 ```
 
 `--path <subdir>` places the new concept at an arbitrary path under the wiki
-root (here, `.okfw/projects/okf/`). It is sanitized to stay inside the wiki.
-With no `--path`, placement falls back to a top-level folder named after the
-project, or the wiki root when no project is set.
+root (here, `.okfw/projects/okf/`). A `--path` that would escape the wiki or
+name a dot-directory (`.hidden`, `../out`) is refused. With no `--path`,
+placement falls back to a top-level folder named after the project, or the wiki
+root when no project is set (or when the project name is not a usable folder
+name).
 
 ---
 
@@ -168,7 +170,7 @@ regex character class in prose as code.
 ### Validate every concept in the wiki
 ```bash
 okfw validate --all                 # strict check of the discovered wiki
-okfw validate --all path/to/.okfw/  # ...or an explicit path
+okfw validate --all path/to/.okfw   # ...or an explicit path
 ```
 
 The same strict check over the whole bundle, reporting each failure. It also
@@ -179,7 +181,7 @@ any concept is invalid or any `id` is duplicated.
 ### Validate OKF conformance
 ```bash
 okfw validate --okf                 # Validate the discovered wiki
-okfw validate --okf path/to/.okfw/  # Validate an explicit wiki path
+okfw validate --okf path/to/.okfw   # Validate an explicit wiki path
 ```
 
 Checks Open Knowledge Format conformance (spec §11) and nothing more: every
@@ -239,8 +241,19 @@ instead of one tool per CLI command. Concept bodies are writable
 through the tools (`create` takes `body`; `update` supports `append` and
 `set_body`), so filesystem-less MCP clients get full read/write access. Tool responses are compact
 JSON with wiki-relative paths, keeping agent token usage low (the full `tools/list`
-payload is about 3.9 KB). The wiki is discovered from the server's
-working directory, so launch it from inside the project.
+payload is about 4 KB). The wiki is discovered from the server's
+working directory on every call, so launch it from inside the project.
+
+| Tool | Parameters | Bounds |
+|------|------------|--------|
+| `okfw_search` | `q`, `project`, `tag`, `kind`, `type`, `status`, `stale`, `limit`, `offset` | 10 hits by default, at most 100 per page; `truncated` and `next_offset` say there are more |
+| `okfw_create` | `kind` (`note`/`daily`), `title`, `project`, `dir`, `tags`, `description`, `body`, `template`, `date` | Returns `{id,path}` (a daily note returns `{path}`) |
+| `okfw_read` | `ref` (required), `section`, `offset`, `limit` | 200 lines by default; narrow with `section` or page with `offset`/`limit` |
+| `okfw_update` | `ref`, `action`, `value` (all required; an empty `value` on `verify`/`set_generated` means `human:<login>`) | Actions: `set_project`, `set_lifecycle`, `set_stale_after`, `add_tags`, `append`, `set_body`, `verify`, `set_generated`, `set_resource`, `add_source` — the same writers as the CLI |
+| `okfw_graph` | `action` (`backlinks`/`cluster`/`tag`/`dangling`), `ref`, `depth`, `limit` | 10 nodes by default; `truncated` means more exist |
+
+Every search hit carries `trust`, plus `status` and `stale` when they are the
+exception (see [How far to trust a hit](#how-far-to-trust-a-hit)).
 
 Client registration (Claude Code):
 
@@ -282,6 +295,10 @@ adopts an unmarked `index.md` in a directory holding okfw concepts (that is how
 listings from before the marker come back under maintenance), but never deletes
 one. `--no-adopt` skips the adoption and refreshes only marked listings, which is
 what every okfw write does.
+
+A directory of up to 50 concepts is listed concept by concept. Past that, the
+listing groups the directory by `type`: each group gives its count, names up to
+10 concepts, and gives the `okfw search --type <type>` that returns the rest.
 
 ### Generate `log.md` from git history
 ```bash
@@ -398,27 +415,32 @@ okfw search --kind issue --status draft --project my-project
 
 ## Graph Visualization
 
-### Generate a graph from a directory
+### Generate a graph from the wiki or a directory
 ```bash
-okfw graph .okfw/
-okfw graph .
+okfw graph                       # the discovered wiki root
+okfw graph .okfw/infra/          # only the concepts in one directory
 ```
+
+A `path` argument is resolved from the current directory, like any file path,
+not from the wiki root.
 
 ### Limit the number of nodes
 ```bash
-okfw graph . --limit 20
-okfw graph . -l 5
+okfw graph --limit 20
+okfw graph -l 5
 ```
 
 ### Start from a specific note
 ```bash
-okfw graph . --start 019f0494                           # id prefix
-okfw graph . --start infra/my-first-idea--019f049400a8  # or OKF concept ID
+okfw graph --start 019f0494                           # id prefix
+okfw graph --start infra/my-first-idea--019f049400a8  # or OKF concept ID
 ```
+
+Without `--start`, the graph starts from the most connected concept.
 
 ### Control traversal depth
 ```bash
-okfw graph . --depth 3
+okfw graph --start 019f0494 --depth 3
 ```
 
 ### Render a plain-text tree
@@ -466,10 +488,11 @@ graph database to sync.
 
 An edge is a body link to another concept, or a path-valued frontmatter field
 that names one: `resource`, `sources[].resource`, `computation`,
-`executor.resource` and `attester.resource` (OKF §6.2). A path starting with `/`
-resolves from the wiki root and any other from the concept's own directory, as
-body links do. A URL, a scope descriptor (`all queries in project X`) or a file
-that is not markdown (an attester's `.py`) is not an edge.
+`executor.resource` and `attester.resource` (OKF §6.2). A frontmatter path
+starting with `./` or `../` resolves from the concept's own directory; any other
+path, including a bare `policies/refunds.md`, resolves from the wiki root. (Body
+links differ: there a bare path is relative.) A URL, a scope descriptor
+(`all queries in project X`) or a file that is not markdown (an attester's `.py`) is not an edge.
 
 ### Query backlinks
 ```bash
@@ -506,8 +529,9 @@ A link to a file that exists but is not a concept is not dangling.
 `FilePath`, `Project`, `Parent`, `Children`, `Links`, `Tags`); `cluster` wraps
 them as `{"nodes":[...],"edges":[{"From","To","Label"}],"total":N}`, adding
 `"truncated":true` when `--limit` withheld some of the `total` concepts in
-reach (the text output ends `… N more in reach — raise --limit`). An empty
-result is `null`.
+reach (the text output ends `… N more in reach — raise --limit`). `dangling`
+emits edges, `[{"From","To","Label"}]`, where `To` is the missing target. An
+empty result is `null`.
 
 ---
 
@@ -693,12 +717,32 @@ okfw create --help
 okfw search --help
 ```
 
+### Print the version
+```bash
+okfw --version
+okfw -v
+```
+
+Prints `okfw version <version>`. Releases are CalVer tags, `vYYYY.M.N`
+(`v2026.10.0`); a build from a commit past a tag reports
+`<tag>-<n>-g<commit>`, and one from an untagged repository the short commit.
+To check a downloaded release, see
+[Verifying Releases](/okf-wiki/reference/verifying-releases/).
+
 ---
 
 ## Flags Reference
 
-All commands (other than `okfw init`) require a discovered wiki; they exit
-non-zero with the `okfw init` advice when none is found.
+All commands other than `okfw init` and `okfw templates` require a discovered
+wiki; they exit non-zero with the `okfw init` advice when none is found.
+(`okfw mcp` starts without one and looks for it on every tool call.)
+
+### Global flags
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--version` | `-v` | Print the version and exit |
+| `--help` | `-h` | Show help |
 
 ### `okfw init`
 
@@ -823,8 +867,8 @@ Usage: `okfw root`
 |------|-------|---------|-------------|
 | `--ascii` | - | `false` | Render a plain-text tree instead of Mermaid |
 | `--limit` | `-l` | `10` | Maximum number of nodes to display |
-| `--start` | | - | Start tree from a specific note ID |
-| `--depth` | | `0` (unlimited) | Maximum tree depth |
+| `--start` | - | most connected | Start graph from a specific concept |
+| `--depth` | - | `0` (unlimited) | Maximum BFS depth (hops) from the start node |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw graph-query`
@@ -973,8 +1017,8 @@ project: "project-name" # optional
 tags:
   - "tag1"
   - "tag2"
-created: "YYYY-MM-DDTHH:MM:SSZ"
-timestamp: "YYYY-MM-DDTHH:MM:SSZ"   # OKF last meaningful change
+created: "YYYY-MM-DDTHH:MM:SS+HH:MM"     # ISO 8601 with an explicit offset
+timestamp: "YYYY-MM-DDTHH:MM:SS+HH:MM"   # OKF last meaningful change
 parent: "019f0312-4700-7def-9abc-ffffffffffff"  # optional; the parent's full id
 ---
 ```
@@ -1059,13 +1103,19 @@ okfw create "Sub-concept" -p my-project
 ## Makefile Targets
 
 ```bash
-make build            # Build binary
+make build            # Build bin/okfw (pure Go, CGO_ENABLED=0)
+make build-linux-amd64 # Build bin/okfw-linux-amd64
+make build-linux-arm64 # Build bin/okfw-linux-arm64
+make dist             # Release tarballs, SBOMs and checksums in dist/ (needs syft)
+make signing-key      # Generate a cosign key pair under ~/.config/cosign/
+make sign             # make dist, then sign everything in dist/ with cosign
+make verify-signatures # Check the signatures in dist/
 make test             # Run Go tests + CUE validation
 make test-race        # Go tests under the race detector
 make lint             # Run go vet + staticcheck + gofmt check
 make fmt              # Format Go + CUE files
 make install          # Install to $GOPATH/bin
-make clean            # Remove the binary
+make clean            # Remove bin/ and dist/
 make tidy             # Run go mod tidy
 make ui-check         # Lint Lua plugin
 make integration-test # Test NeoVim integration

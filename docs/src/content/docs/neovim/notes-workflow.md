@@ -69,7 +69,8 @@ Verify your setup:
 :OkfwTemplate
 ```
 
-You should see a picker with available templates.
+You should see a picker with available templates (the picker needs
+[snacks.nvim](https://github.com/folke/snacks.nvim)).
 
 ---
 
@@ -94,9 +95,9 @@ You'll be prompted for a title:
 Note Title: Interesting error handling pattern in auth module
 ```
 
-The plugin creates a new note and shows you the path. Files are named `slug--shortid.md`, where the short id is the first 12 hex digits of the concept's UUID:
+The plugin creates the note and opens it in the current window. Files are named `slug--shortid.md`, where the short id is the first 12 hex digits of the concept's UUID:
 ```
-Created: .okfw/interesting-error-handling-pattern-in-auth-module--019f049400a8.md
+.okfw/interesting-error-handling-pattern-in-auth-module--019f049400a8.md
 ```
 
 **What just happened:**
@@ -106,7 +107,7 @@ Created: .okfw/interesting-error-handling-pattern-in-auth-module--019f049400a8.m
 
 ### Step 2: View Your Note
 
-Open the note to add content:
+The new note is already open. To find it again later:
 ```vim
 :OkfwSearch
 ```
@@ -174,7 +175,8 @@ listings. If you edited concepts outside NeoVim, regenerate the listings with:
 
 A week later, you've used this pattern successfully. Time to refine the note: review the content, sharpen the writing, and add any context you were missing at capture time.
 
-You can also set a project with `\p`:
+You can also set a project with `\p` (`\` is NeoVim's default `<localleader>`;
+the mapping exists on plain notes, not daily notes or issues):
 ```
 \p  →  Project: _
 ```
@@ -193,9 +195,9 @@ project: "my-project"
 
 Later, you write another note about Go best practices. Link back to your error handling note.
 
-Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. By default it uses a wiki-relative absolute path — a leading `/` means the wiki root:
+Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. It uses a wiki-relative absolute path — a leading `/` means the wiki root — with the file name as the link text, which you can then reword:
 ```markdown
-See also [error wrapping](/interesting-error-handling-pattern-in-auth-module--019f049400a8.md) for the pattern.
+See also [interesting-error-handling-pattern-in-auth-module--019f049400a8](/interesting-error-handling-pattern-in-auth-module--019f049400a8.md) for the pattern.
 ```
 
 Or press `\L` to use the concept title as the link text:
@@ -291,6 +293,8 @@ Product wants a new feature. Capture it properly:
 
 Title: `Add password reset flow`
 
+Filled in (abridged), it reads:
+
 ```markdown
 ---
 id: "019f04b8-7e9a-7012-3456-789abcdef012"
@@ -346,10 +350,10 @@ You found a useful snippet you want to remember:
 Title: `Go context with timeout pattern`
 
 The template includes sections for:
-- The code itself
-- Language and context
-- When to use it
-- Related snippets
+- Language and source
+- Context: why the snippet is useful
+- The code itself, an explanation, and a usage example
+- Related notes and citations
 
 ### Using the Template Picker
 
@@ -490,7 +494,7 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Refresh index.
 | Live search | `:OkfwSearch!` | `<leader>z/` |
 | Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on concepts |
 | Toggle backlinks | `\b` (buffer-local) | Auto-mapped on concepts |
-| Set project | `\p` (buffer-local) | Auto-mapped on concept files |
+| Set project | `\p` (buffer-local) | Auto-mapped on plain notes |
 | Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
 | Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 | Generate graph | `:OkfwGraph` | `<leader>zg` |

@@ -48,8 +48,8 @@ If you previously saw a `type:` field holding `note`/`daily-note`/`issue`, that 
 | `resource` | No | URI | OKF reference to the underlying asset the concept describes. Set with `okfw set-resource`. |
 | `project` | No | Non-empty string | Optional project metadata (set with `--project`). Never derived from git. |
 | `tags` | Yes | List of non-empty strings | Categorization tags |
-| `created` | Yes | RFC3339 timestamp | Creation time |
-| `timestamp` | Yes | RFC3339 timestamp | OKF "last meaningful change". Updated by the CLI on every mutation. |
+| `created` | Yes | ISO 8601 datetime with offset | Creation time |
+| `timestamp` | Yes | ISO 8601 datetime with offset | OKF "last meaningful change". Updated by the CLI on every mutation. |
 | `parent` | No | Concept id (UUID) | Parent concept for hierarchies |
 | `x` | No | Mapping | Your own metadata. The only place custom keys are accepted — see [Custom fields](#custom-fields). |
 
@@ -67,9 +67,9 @@ status: "deprecated"
 stale_after: "2026-12-31T00:00:00Z"
 ```
 
-Every timestamp in OKF — `stale_after`, `generated.at`, `verified[].at`,
-`sources[].last_modified` and `usage_window` — is an ISO 8601 datetime with an
-explicit UTC offset. A bare `2026-12-31` names a different instant in every
+Every timestamp — `stale_after`, `generated.at`, `verified[].at`,
+`sources[].last_modified` and `usage_window`, as well as `created` and
+`timestamp` — is an ISO 8601 datetime with an explicit UTC offset. A bare `2026-12-31` names a different instant in every
 timezone, so `okfw validate` rejects it; the writers accept one and store it as
 midnight UTC, and `okfw migrate` upgrades the bare dates older okfw versions
 wrote.

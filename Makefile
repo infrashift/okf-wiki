@@ -166,7 +166,7 @@ docs-dev:
 	cd docs && bun --bun run dev
 
 build-image:
-	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
+	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) --build-arg VERSION=$(VERSION) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
 
 run-container:
 	$(CONTAINER_ENGINE) run -d --name $(CONTAINER_NAME) \

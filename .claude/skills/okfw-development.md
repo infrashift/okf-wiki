@@ -15,11 +15,33 @@ make build                    # Build bin/okfw binary
 make test                     # Go tests + CUE schema validation
 go test ./cli/... -count=1    # All Go tests
 go test ./cli/internal/search/... -v  # Single package, verbose
-go build ./cli/cmd/okfw/      # Just compile, no binary output
+go build -o /dev/null ./cli/cmd/okfw  # Just compile, no binary output
 make test-race                # Go tests under the race detector
 make lint                     # go vet + staticcheck + gofmt check + go mod tidy -diff
 make fmt                      # go fmt + cue fmt
-make integration-test         # NeoVim plugin suite
+make ui-check                 # luacheck lua/ plugin/ test/
+make integration-test         # NeoVim plugin suite (finds the binary at bin/okfw)
+make e2e                      # The NeoVim suite inside a container (podman)
+```
+
+CI (`.github/workflows/test.yaml`) runs the Go tests with `-race`, `go vet`,
+gofmt, `go mod tidy -diff`, staticcheck, a `CGO_ENABLED=0` build and `cue vet`;
+luacheck; and the NeoVim suite on v0.9.5 (the plugin's floor) and v0.11.4.
+
+## Versions & Releases
+
+`make` stamps the version from `git describe --tags` via
+`-ldflags -X okfw/cli/internal/config.version=$(VERSION)`; `okfw --version`
+prints it, and an unstamped `go build` falls back to Go's VCS build info.
+Releases are CalVer tags `vYYYY.M.N` (no leading zeros) cut locally — there is
+no release workflow:
+
+```bash
+make build-linux-amd64        # bin/okfw-linux-amd64 (also build-linux-arm64)
+make dist                     # dist/ tarballs + SPDX SBOMs (syft) + SHA256SUMS{,.sbom}
+make signing-key              # optional: offline cosign key pair, outside the repo
+make sign                     # optional: cosign-sign dist/, then verify-signatures
+make clean                    # removes bin/ and dist/
 ```
 
 ## Architecture
@@ -56,7 +78,8 @@ type Concept struct {
     Status, StaleAfter string        // OKF lifecycle
     Generated *Generated              // OKF trust
     Verified  VerifiedList
-    Runtime   string                  // OKF Attested Computation
+    Runtime, Computation string       // OKF Attested Computation
+    Executor, Attester *ResourceRef
     Sources     []Source              // OKF provenance
     UsageWindow *UsageWindow
     ID, Kind, Project, Parent string  // okfw extensions
@@ -75,7 +98,7 @@ type Node struct {
 
 - `cli/internal/config/concept-schema.cue` — #Concept
 
-Validation pattern: embed CUE file with `//go:embed`, compile with `cuecontext.New()`, unify with data, validate with `cue.Concrete(true)`.
+Validation pattern: embed CUE file with `//go:embed`, compile it once with `cuecontext.New()` (`LoadConceptSchema`, a process-wide `sync.Once`), unify with data under `schemaMu` (CUE v0.7 is not safe for concurrent unification), validate with `cue.Concrete(true)`.
 
 ## Dependencies
 

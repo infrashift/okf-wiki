@@ -52,6 +52,13 @@ semver), stamped by `make` into `config.version` with `-ldflags -X` from
 MCP `serverInfo`) and falls back to Go's VCS build info when unstamped. Go
 itself ignores a `v2026.*` tag for a module whose path has no `/v2026` suffix,
 so the stamp is what carries the version; do not rely on `go version -m`.
+Releases are cut locally, never in CI (no release workflow, by choice):
+tag, `make sign COSIGN_KEY=…`, `gh release create … dist/*` — the procedure is
+`docs/src/content/docs/reference/releasing.md`. Signing is offline through
+`release/cosign-offline-signing-config.json`, and the release key's public half
+is committed as `release/cosign.pub`, which `dist/cosign.pub` must match. Users
+verify against that copy and the fingerprint table in
+`reference/verifying-releases.md`, so a key rotation updates both.
 
 The repo once also incubated `graphy`, a CGo code-knowledge-graph binary that
 exported into okfw bundles. It was decommissioned; do not reintroduce its
@@ -179,7 +186,7 @@ okfw-owned keys inside `x:` (that block belongs to the user).
 - Concept markdown at the top level (subdirs via `--path` or an explicit `--project`); `daily/YYYY/MM/` for daily notes
 - `ephemeral/` (export scratch) is the only generated directory, gitignored via `.okfw/.gitignore` written by `okfw init`. There is no search index and no graph database: both were removed, and `okfw init` must not reintroduce them to the ignore list
 - `okfw connect` / `okfw root` verify or print the discovered wiki; commands error with "run `okfw init`" advice when none is found
-- `--path`/`--project` reject any segment starting with `.`: a concept written into a dot-directory would be invisible to every walk, since `SkipWalkDir` skips dot-directories
+- No concept is ever written into a dot-directory, where it would be invisible to every walk (`SkipWalkDir` skips dot-directories): `--path` refuses any segment starting with `.`, and a `--project` name that cannot be a folder (a leading `.`, for one) places the concept at the wiki root while still recording `project`
 
 ## Key Conventions
 

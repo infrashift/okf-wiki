@@ -63,9 +63,11 @@ The wiki is a `.okfw/` directory inside your project — notes travel with the c
 The CUE schema validation ensures every concept has:
 - A unique id (for reliable linking)
 - A title (forces you to crystallize the idea)
-- An optional project tag (explicit categorization)
+- A type (what kind of concept it is, in your own vocabulary)
 - Tags (flexible cross-cutting categorization)
-- Created timestamp (temporal context)
+- Created and last-changed timestamps (temporal context)
+
+A project is optional metadata on top of these.
 
 This structure isn't bureaucracy - it's the minimum viable metadata for a functioning knowledge network.
 

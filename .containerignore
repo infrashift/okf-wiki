@@ -1,0 +1,7 @@
+# Generated output the images never use. `COPY . .` sent them all (~320 MB) to
+# every build. .git stays: an unstamped build's version comes from it.
+bin/
+dist/
+docs/node_modules/
+docs/dist/
+docs/.astro/

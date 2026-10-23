@@ -54,6 +54,8 @@ export default defineConfig({
           items: [
             { label: 'CLI Commands', slug: 'reference/cli-commands' },
             { label: 'Project Structure', slug: 'reference/project-structure' },
+            { label: 'Verifying Releases', slug: 'reference/verifying-releases' },
+            { label: 'Releasing', slug: 'reference/releasing' },
           ],
         },
       ],

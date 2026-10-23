@@ -6,6 +6,9 @@ description: Development commands and source code layout for OKF Wiki.
 ## Development
 
 ```bash
+# Build (writes bin/okfw)
+make build
+
 # Run tests
 make test
 make test-race          # under the race detector
@@ -40,12 +43,18 @@ okf-wiki/
 │   │   ├── agentskill/  # Agent-skill installer (okfw install)
 │   │   ├── okfwskills/  # okfw's SKILL.md / CLAUDE.md-block templates
 │   │   ├── templates/   # Embedded note templates
-│   │   └── gitctx/      # Git project-context helper
+│   │   └── gitctx/      # Git root lookup (where okfw init places .okfw/)
 │   └── testdata/        # Test fixtures
 ├── lua/okfw/            # NeoVim plugin (snacks-based pickers)
 ├── plugin/okfw.lua      # NeoVim plugin auto-load
+├── after/ftplugin/      # NeoVim markdown ftplugin
 ├── doc/okfw.txt         # NeoVim help file
+├── test/                # NeoVim plugin integration suite
 ├── docs/                # Documentation site (Astro Starlight)
+├── Containerfiles/      # Devcontainer and e2e images
+├── release/             # cosign offline signing config
+├── bin/                 # make build output (gitignored)
+├── dist/                # make dist / make sign output (gitignored)
 ├── go.mod, go.sum       # Go module (stays at root)
 └── Makefile
 ```
