@@ -14,7 +14,8 @@ SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo
 
 # Signing (optional: `make dist` never signs). The default key lives outside
 # the repository so no build context or `git add -f` can pick it up. Supply
-# your own with COSIGN_KEY= (a key file or a KMS URI) and COSIGN_PUB= (a file).
+# your own with COSIGN_KEY= (a key file or a KMS URI) and, optionally,
+# COSIGN_PUB= (a file; derived from the key when absent).
 COSIGN_KEY_PREFIX ?= $(HOME)/.config/cosign/okfw
 COSIGN_KEY ?= $(COSIGN_KEY_PREFIX).key
 COSIGN_PUB ?= $(COSIGN_KEY_PREFIX).pub
@@ -73,7 +74,8 @@ signing-key:
 	cosign generate-key-pair --output-key-prefix $(COSIGN_KEY_PREFIX)
 
 # Signs everything `make dist` writes, each file getting a <file>.sigstore.json
-# bundle, and copies the public key in as cosign.pub. The key password is read
+# bundle, and copies the public key in as cosign.pub — COSIGN_PUB, or derived
+# from the private key when that file does not exist. The key password is read
 # once (or from COSIGN_PASSWORD) rather than once per file.
 sign: dist
 	@command -v cosign >/dev/null || { echo "make sign needs cosign: https://docs.sigstore.dev/cosign/system_config/installation/" >&2; exit 1; }
@@ -87,8 +89,10 @@ sign: dist
 		if out=$$(cosign sign-blob -y --key $(COSIGN_KEY) --signing-config $(COSIGN_SIGNING_CONFIG) \
 			--bundle $$f.sigstore.json $$f 2>&1); \
 		then echo "$$f.sigstore.json"; else echo "$$out" >&2; exit 1; fi; \
-	done
-	cp $(COSIGN_PUB) $(DIST_DIR)/cosign.pub
+	done; \
+	if [ -f "$(COSIGN_PUB)" ]; then cp $(COSIGN_PUB) $(DIST_DIR)/cosign.pub; \
+	else cosign public-key --key $(COSIGN_KEY) --outfile $(DIST_DIR)/cosign.pub 2>/dev/null || exit 1; fi; \
+	echo "$(DIST_DIR)/cosign.pub"
 	@$(MAKE) --no-print-directory verify-signatures COSIGN_PUB=$(DIST_DIR)/cosign.pub
 
 # Checks every bundle in dist/ against COSIGN_PUB. --insecure-ignore-tlog is
