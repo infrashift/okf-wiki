@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.10.1 — 2026-10-23
 
 ### Added
 - **The devcontainer and e2e image build on arm64 (aarch64) as well as x86_64.** Neovim, shfmt, tree-sitter and StyLua were downloaded as x86_64 binaries whatever the host. Each download now follows `uname -m` and maps it to the project's own asset name, and an unsupported architecture fails the build with a clear message. A CI job builds the image natively on an arm64 runner whenever something the image is built from changes, then runs its binaries and checks SSH, scp and sftp.
