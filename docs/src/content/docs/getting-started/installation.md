@@ -10,12 +10,12 @@ Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`), with no runtime
 dependencies:
 
 ```bash
-VERSION=v2026.10.0
+VERSION=v2026.10.1
 ARCH=amd64   # or arm64
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
 tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
 install okfw-$VERSION-linux-$ARCH/okfw ~/.local/bin/
-okfw --version   # okfw version v2026.10.0
+okfw --version   # okfw version v2026.10.1
 ```
 
 Every release is signed. Before installing, you can check that the tarball is
