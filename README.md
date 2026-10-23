@@ -96,7 +96,23 @@ make dist                # Both, packaged for distribution in dist/ (needs syft)
 (the binary, LICENSE and README) and an SPDX SBOM of the binary,
 `okfw-<version>-linux-<arch>.spdx.json`, plus `SHA256SUMS` over the tarballs and
 `SHA256SUMS.sbom` over the SBOMs. `<version>` is the git tag on HEAD, or the
-short commit when there is none; override it with `make dist VERSION=v1.2.3`.
+short commit when there is none; override it with `make dist VERSION=v2026.10.0`.
+
+### Versions
+
+`okfw --version` prints the version `make` stamped into the binary: the git tag
+on HEAD, `<tag>-<n>-g<commit>` for a build past one, or the short commit when
+the repository has no tags. A binary built with plain `go build` reports the
+pseudo-version Go recorded from git instead.
+
+Releases are tagged in CalVer, `vYYYY.M.N`: the year, the month, and a counter
+within the month, with no leading zeros (`v2026.1.0`, not `v2026.01.0`), which
+also keeps them valid semver. To cut one:
+
+```bash
+git tag v2026.10.0
+make sign                # or make dist, unsigned
+```
 
 ### Sign a distribution (optional)
 

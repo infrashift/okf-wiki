@@ -5,8 +5,11 @@ CMD_PATH=./cli/cmd/okfw
 BIN_DIR=bin
 DIST_DIR=dist
 LINUX_ARCHES=amd64 arm64
-# Names the dist tarballs: the tag when HEAD has one, else the commit.
+# Stamped into the binary (`okfw --version`) and naming the dist tarballs: the
+# tag when HEAD has one, else the commit. Releases are CalVer tags, vYYYY.M.N
+# with no leading zeros (v2026.1.0, not v2026.01.0), so they are also semver.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+LDFLAGS=-X okfw/cli/internal/config.version=$(VERSION)
 SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
 # Signing (optional: `make dist` never signs). The default key lives outside
@@ -31,13 +34,13 @@ SSH_PUBKEY=$(HOME)/.ssh/id_ed25519.pub
 USER_UID=$(shell id -u)
 
 build:
-	CGO_ENABLED=0 go build -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
+	CGO_ENABLED=0 go build -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY_NAME) $(CMD_PATH)
 
 # okfw is pure Go, so it cross-compiles from any host: each of these builds a
 # Linux binary for its architecture (x86_64, aarch64) whatever machine runs it.
 # -trimpath keeps the build machine's paths out of a binary meant to be shipped.
 build-linux-amd64 build-linux-arm64: build-linux-%:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -o $(BIN_DIR)/$(BINARY_NAME)-linux-$* $(CMD_PATH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN_DIR)/$(BINARY_NAME)-linux-$* $(CMD_PATH)
 
 # One tarball per Linux architecture, each unpacking to a directory holding
 # okfw, LICENSE and README.md, plus SHA256SUMS over the tarballs. Each tarball

@@ -34,6 +34,7 @@ plugin/okfw.lua              — Neovim plugin auto-load
 make build           # Builds bin/okfw (CGO_ENABLED=0 — keep okfw pure Go)
 make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works because okfw is pure Go)
 make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
+make build VERSION=v2026.10.0 # Overrides the stamped version (default: git describe --tags)
 make dist            # dist/: okfw-<version>-linux-{amd64,arm64}.tar.gz, SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
 make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
 make sign            # make dist, then a cosign .sigstore.json bundle per file; offline, never logged to Rekor
@@ -44,6 +45,13 @@ make integration-test # NeoVim plugin suite (sources plugin/okfw.lua for the :Ok
 make e2e             # The NeoVim suite against the okfw binary, inside a container
 go test ./cli/... -count=1   # Run all tests
 ```
+
+**Versions are CalVer tags, `vYYYY.M.N`** (no leading zeros, so also valid
+semver), stamped by `make` into `config.version` with `-ldflags -X` from
+`git describe --tags`; `config.Version()` is the one reader (`okfw --version`,
+MCP `serverInfo`) and falls back to Go's VCS build info when unstamped. Go
+itself ignores a `v2026.*` tag for a module whose path has no `/v2026` suffix,
+so the stamp is what carries the version; do not rely on `go version -m`.
 
 The repo once also incubated `graphy`, a CGo code-knowledge-graph binary that
 exported into okfw bundles. It was decommissioned; do not reintroduce its

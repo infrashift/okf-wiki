@@ -43,6 +43,7 @@ func rootCmd() *cobra.Command {
 
 	var rootCmd = &cobra.Command{
 		Use:          "okfw",
+		Version:      config.Version(),
 		SilenceUsage: true,
 		Short:        "Manage a per-project OKF wiki of linked markdown concepts",
 		Long: `okfw manages a local-first knowledge base — an Open Knowledge Format (OKF)
