@@ -29,8 +29,8 @@ RUN git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
 
 WORKDIR /src
 COPY . .
-COPY --from=builder /out/okfw /src/okfw
-ENV PATH="/src:${PATH}"
+COPY --from=builder /out/okfw /src/bin/okfw
+ENV PATH="/src/bin:${PATH}"
 RUN okfw --help >/dev/null
 
 # The integration test sources plugin/okfw.lua, drives the okfw CLI via

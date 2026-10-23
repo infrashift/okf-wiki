@@ -59,7 +59,7 @@ end
 -- Test 2: Setup function works
 log("")
 log("Test 2: Setup function")
-local okfw_bin = vim.fn.getcwd() .. "/okfw"
+local okfw_bin = vim.fn.getcwd() .. "/bin/okfw"
 local setup_ok, setup_err = pcall(function()
     okfw.setup({ bin = okfw_bin })
 end)

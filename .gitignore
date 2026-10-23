@@ -1,5 +1,6 @@
-# Binary
-/okfw
+# Build output (make build / make dist)
+/bin/
+/dist/
 
 # Go
 *.exe
