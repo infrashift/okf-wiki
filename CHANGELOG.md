@@ -9,6 +9,7 @@ All notable changes to this project are documented here.
 
 ### Added
 - **`make build-linux-amd64` and `make build-linux-arm64` build okfw for Linux x86_64 and aarch64 from any host, and `make dist` packages both.** okfw is pure Go, so cross-compiling needs no toolchain beyond Go. `make dist` writes `dist/okfw-<version>-linux-<arch>.tar.gz` (binary, LICENSE, README) and a `SHA256SUMS`; `<version>` is the tag on HEAD, else the short commit.
+- **`make dist` ships an SBOM, and `make sign` signs the distribution.** Each tarball gets an SPDX SBOM of the binary it carries, made by syft from the module list Go records in the binary, with `SHA256SUMS.sbom` over the SBOMs. `make sign` signs every file in `dist/` with cosign, writing a `.sigstore.json` bundle beside each, copying the public key in as `cosign.pub`, and verifying the result. Signing is optional and offline: it uses a signing config naming no transparency log, so nothing reaches the public Rekor log, which cosign v3 writes to by default. `make signing-key` makes an ECDSA P-256 key pair at `~/.config/cosign/okfw.{key,pub}`, outside the repository so no build context picks it up. `COSIGN_KEY`/`COSIGN_PUB` take your own key, and `make verify-signatures` re-checks `dist/`. Ed25519 is not offered: cosign imports such a key but cannot sign a blob with it.
 
 ### Changed
 - **Build output goes to `bin/`.** `make build` writes `bin/okfw` rather than `./okfw` in the repository root, and `make clean` removes `bin/` and `dist/`. Delete a stale `./okfw` left by an earlier build.
