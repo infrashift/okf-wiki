@@ -11,7 +11,11 @@ RUN go mod download
 COPY . .
 
 # okfw stays pure Go — CGO_ENABLED=0 is the guarantee, not an optimization.
-RUN CGO_ENABLED=0 go build -o okfw ./cli/cmd/okfw
+# VERSION is stamped the way `make build` stamps it (`make build-image` passes
+# the same `git describe` value); left empty, `okfw --version` falls back to
+# the VCS info Go records from the copied .git.
+ARG VERSION=
+RUN CGO_ENABLED=0 go build -ldflags "-X okfw/cli/internal/config.version=${VERSION}" -o okfw ./cli/cmd/okfw
 
 # --------------------------------------------------------------------------
 # Stage 2: Final image — headless devcontainer
@@ -96,7 +100,7 @@ RUN nvim --headless "+Lazy! sync" +qa 2>&1 || true
 
 # ── 14. Copy the binary from builder ─────────────────────────────────────
 COPY --from=builder --chown=user:0 /src/okfw /home/user/.local/bin/okfw
-RUN okfw --help >/dev/null
+RUN okfw --version
 
 # `okfw install` registers the skill and CLAUDE.md block *per project*, so it
 # is deliberately not run here — it belongs in whichever repository you open.

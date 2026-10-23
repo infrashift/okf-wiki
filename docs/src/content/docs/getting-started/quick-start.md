@@ -50,10 +50,11 @@ okfw search --json                        # JSON output for tooling
 
 # Generate graph visualization (search and the graph read the files directly;
 # there is no index to build)
-okfw graph path/to/notes/                 # Mermaid diagram
+okfw graph                                # Mermaid diagram of the wiki
+okfw graph .okfw/my-project/              # ...or of one directory
 okfw graph --ascii                        # Plain-text tree instead
-okfw graph . --limit 20                   # Custom node limit
-okfw graph . --start <note-id>            # Start from a specific note
+okfw graph --limit 20                     # Custom node limit
+okfw graph --start <note-id>              # Start from a specific note
 
 # Find backlinks (notes that link to a concept)
 okfw backlinks 202602131045               # By ID

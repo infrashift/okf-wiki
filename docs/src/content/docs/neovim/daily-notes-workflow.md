@@ -72,8 +72,8 @@ type: "daily-note"
 kind: "daily-note"
 tags:
   - "daily"
-created: "2026-02-13T00:00:00Z"
-timestamp: "2026-02-13T00:00:00Z"
+created: "2026-02-13T08:12:30-06:00"
+timestamp: "2026-02-13T08:12:30-06:00"
 ---
 
 # 2026-02-13 Friday
@@ -104,7 +104,7 @@ timestamp: "2026-02-13T00:00:00Z"
 | Section | Purpose |
 |---------|---------|
 | **Morning** | Intentions, priorities, energy level, gratitude |
-| **Tasks** | Today's action items (can sync with task manager) |
+| **Tasks** | Today's action items |
 | **Notes** | Free-form capture throughout the day |
 | **End of Day** | Reflection, wins, blockers, tomorrow's focus |
 | **Links Created** | Track concepts created today for review |
@@ -129,7 +129,7 @@ timestamp: "2026-02-13T00:00:00Z"
 ### Browse Daily Notes
 
 ```vim
-" Browse recent daily notes with picker
+" Browse the last 14 days of daily notes with picker
 :OkfwDailyList
 
 " Browse this week's notes only
@@ -174,7 +174,7 @@ local notes = require("okfw").list_daily_sync({ week = true })
 
 2. **Review yesterday (in a split):**
    ```vim
-   :OkfwDaily yesterday
+   :vsplit | OkfwDaily yesterday
    ```
    Or use the picker to see this week:
    ```vim
@@ -213,8 +213,10 @@ A daily note is where a thought lands first; it is not where it should stay. Whe
 something in today's note turns out to matter, promote it:
 
 ```vim
-:OkfwNote Authentication token lifetime
+:OkfwNote
 ```
+
+and enter the title at the prompt (`Note Title: Authentication token lifetime`).
 
 Then link the two directions — the concept back to the daily note it came from,
 and the daily note out to the concept — so the origin of an idea stays

@@ -22,20 +22,35 @@ Clone the repository and build the image:
 git clone https://github.com/infrashift/okf-wiki.git
 cd okf-wiki
 
-podman build -f Containerfiles/Containerfile -t okfw-devcontainer:latest .
+make build-image
+```
+
+That runs:
+
+```bash
+podman build --build-arg USER_UID=$(id -u) \
+  --build-arg VERSION=$(git describe --tags --always --dirty) \
+  -f Containerfiles/Containerfile -t okfw-devcontainer:latest .
 ```
 
 The build compiles the `okfw` Go binary, installs NeoVim, Claude Code, tmux, and
-all plugins. It takes a few minutes the first time.
+all plugins. It takes a few minutes the first time. `USER_UID` gives the
+container's `user` your UID, so under `--userns=keep-id` the `authorized_keys`
+file you mount below is owned by that user — sshd refuses a key file owned by
+anyone else. `VERSION` is what `okfw --version` prints, stamped the way
+`make build` stamps it.
 
 ## 2. Start the Container
 
 The container runs an SSH server on port 2222. You need to mount an
 `authorized_keys` file so you can authenticate.
 
-**Using the included test key** (for local development only):
+**Using the included test key** (for local development only). git does not
+keep the private key's permissions, and ssh refuses a key others can read, so
+restrict it first:
 
 ```bash
+chmod 600 Containerfiles/config/test_ssh_key
 podman run -d --name okfw-dev \
   --userns=keep-id \
   -p 2222:2222 \
@@ -43,7 +58,7 @@ podman run -d --name okfw-dev \
   okfw-devcontainer:latest
 ```
 
-**Using your own SSH key** (recommended):
+**Using your own SSH key** (recommended; this is what `make run-container` runs):
 
 ```bash
 podman run -d --name okfw-dev \
@@ -100,6 +115,7 @@ preserved.
 The CLI is on `PATH` in the container:
 
 ```bash
+okfw --version
 okfw --help
 ```
 
@@ -319,7 +335,7 @@ Method` and press Enter. A markdown link is inserted at your cursor. By default
 it uses a wiki-relative absolute path (a leading `/` means the wiki root):
 
 ```markdown
-[linked-note-taking-method--019f049400a8](/infra/linked-note-taking-method--019f049400a8.md)
+[linked-note-taking-method--019f049400a8](/linked-note-taking-method--019f049400a8.md)
 ```
 
 To insert a link that uses the title as link text (more readable):
@@ -331,7 +347,7 @@ To insert a link that uses the title as link text (more readable):
 This inserts:
 
 ```markdown
-[Linked Note-Taking Method](/infra/linked-note-taking-method--019f049400a8.md)
+[Linked Note-Taking Method](/linked-note-taking-method--019f049400a8.md)
 ```
 
 You can also write relative links by hand, e.g. `[text](./other-note--019f04a10000.md)`.
@@ -404,24 +420,9 @@ Toggle the panel on and off with `\b`.
 
 ## 12. Preview a Note
 
-### Rendered Markdown with Glow
-
-The devcontainer includes [Glow](https://github.com/charmbracelet/glow), a
-terminal-based Markdown renderer. With a note open, run:
-
-```vim
-:Glow
-```
-
-Glow renders the current buffer as styled Markdown in a floating window —
-headings, bullet lists, code blocks, and links are all formatted for the
-terminal. Press `q` to close the Glow preview.
-
-### Quick preview floating window
-
 To peek at a note's raw content without leaving your current file, press
-`Ctrl-p` on a note in any picker (`:OkfwSearch`, `:OkfwDailyList`), or preview
-the current buffer:
+`Ctrl-p` on a note in the `:OkfwSearch` picker (the `:OkfwDailyList` picker
+shows a preview pane beside the list instead), or preview the current buffer:
 
 ```vim
 :lua require("okfw").preview_note()
@@ -506,7 +507,7 @@ okfw graph --limit 20
 You can also start the graph from a specific note and control depth:
 
 ```bash
-okfw graph --start infra/linked-note-taking-method--019f049400a8 --depth 3
+okfw graph --start linked-note-taking-method--019f049400a8 --depth 3
 ```
 
 ## 16. Record OKF Metadata
@@ -655,7 +656,6 @@ okfw index-md
 | `:OkfwTemplate [name]` | Create from template |
 | `:OkfwSearch [query]` | Search notes |
 | `:OkfwSearch!` | Live search (updates as you type) |
-| `:Glow` | Render current note as styled Markdown |
 | `:OkfwGraph [limit]` | Show Mermaid graph |
 | `:OkfwIndex` | Regenerate `index.md` listings (`okfw index-md`) |
 | `:OkfwRefreshTags` | Refresh tag cache |
@@ -678,8 +678,8 @@ okfw index-md
 | Key | Action |
 |---|---|
 | `Enter` | Open selected note |
-| `Ctrl-p` | Preview selected note |
-| `Ctrl-l` | Insert link to selected note |
+| `Ctrl-p` | Preview selected note (`:OkfwSearch`) |
+| `Ctrl-l` | Insert link to selected note (`:OkfwSearch`) |
 
 ### CLI Commands
 
@@ -705,6 +705,8 @@ okfw index-md
 | `okfw verify <ref>` | Record a verification event |
 | `okfw add-source <ref> --resource <uri>` | Append a provenance source |
 | `okfw set-resource <ref> <uri>` | Set the described asset's URI |
+| `okfw set-generated <ref>` | Record who generated a concept |
+| `okfw graph-query <query>` | Query the link graph (`backlinks`, `cluster`, `tag`, `dangling`) |
 | `okfw export [path]` | Export a portable subset to `ephemeral/` |
 | `okfw index-md [path]` | Generate OKF `index.md` directory listings |
 | `okfw log [path]` | Generate OKF `log.md` from git history |

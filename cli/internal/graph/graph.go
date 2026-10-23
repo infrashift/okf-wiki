@@ -216,7 +216,7 @@ func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 type Edge struct {
 	From  string
 	To    string
-	Label string // "parent", "child", "link"
+	Label string // "parent" (a parent reference) or "link" (a body link or a §6.2 path field)
 }
 
 // GetEdges returns all edges for the given nodes.

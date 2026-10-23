@@ -1,21 +1,41 @@
 ---
 title: Installation
-description: How to install OKF Wiki from source.
+description: How to install okfw, from a signed release or from source.
 ---
 
-## Prerequisites
+## Download a release
 
-- Go 1.24+
-- CUE (for schema validation)
+Each [release](https://github.com/infrashift/okf-wiki/releases) carries static
+Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`), with no runtime
+dependencies:
+
+```bash
+VERSION=v2026.10.0
+ARCH=amd64   # or arm64
+curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
+tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
+install okfw-$VERSION-linux-$ARCH/okfw ~/.local/bin/
+okfw --version   # okfw version v2026.10.0
+```
+
+Every release is signed. Before installing, you can check that the tarball is
+the one the project published; see
+[Verifying Releases](/okf-wiki/reference/verifying-releases/).
 
 ## Build from source
+
+Requires Go 1.24+. The concept schema is compiled into the binary, so nothing
+else is needed at runtime.
 
 ```bash
 git clone https://github.com/infrashift/okf-wiki.git
 cd okf-wiki
-make build
-make install  # Installs to $GOPATH/bin
+make build    # Writes bin/okfw
+make install  # Moves bin/okfw to $GOPATH/bin
 ```
+
+`make test` additionally needs the [CUE](https://cuelang.org/docs/introduction/installation/)
+CLI, for its schema syntax check.
 
 ## Build for a specific Linux architecture
 
@@ -31,48 +51,20 @@ make dist                # Both, packaged for distribution in dist/ (needs syft)
 `make dist` writes, for each architecture, `okfw-<version>-linux-<arch>.tar.gz`
 (the binary, LICENSE and README) and an SPDX SBOM of the binary,
 `okfw-<version>-linux-<arch>.spdx.json`, plus `SHA256SUMS` over the tarballs and
-`SHA256SUMS.sbom` over the SBOMs. `<version>` is the git tag on HEAD, or the
-short commit when there is none; override it with `make dist VERSION=v2026.10.0`.
+`SHA256SUMS.sbom` over the SBOMs. Signing them is covered in
+[Releasing](/okf-wiki/reference/releasing/).
 
 ## Versions
 
 `okfw --version` prints the version `make` stamped into the binary: the git tag
 on HEAD, `<tag>-<n>-g<commit>` for a build past one, or the short commit when
-the repository has no tags. A binary built with plain `go build` reports the
-pseudo-version Go recorded from git instead.
+the repository has no tags. Override it with `make build VERSION=...`. A binary
+built with plain `go build` reports the pseudo-version Go recorded from git
+instead.
 
 Releases are tagged in CalVer, `vYYYY.M.N`: the year, the month, and a counter
 within the month, with no leading zeros (`v2026.1.0`, not `v2026.01.0`), which
-also keeps them valid semver. To cut one:
-
-```bash
-git tag v2026.10.0
-make sign                # or make dist, unsigned
-```
-
-## Sign a distribution (optional)
-
-`make sign` runs `make dist` and signs every file it wrote with
-[cosign](https://docs.sigstore.dev/cosign/system_config/installation/), writing a
-`<file>.sigstore.json` bundle beside each one and the public key as
-`dist/cosign.pub`, then verifies them. Signing is offline: nothing is uploaded to
-the public Rekor transparency log.
-
-```bash
-make signing-key         # Optional: makes ~/.config/cosign/okfw.{key,pub} (ECDSA P-256)
-make sign                # Asks for the key's password once (or set COSIGN_PASSWORD)
-make sign COSIGN_KEY=path/to/cosign.key   # Your own key; COSIGN_PUB= too, else it is derived
-```
-
-To verify a download against the published key:
-
-```bash
-cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
-  --bundle okfw-<version>-linux-amd64.tar.gz.sigstore.json okfw-<version>-linux-amd64.tar.gz
-```
-
-`--insecure-ignore-tlog` is needed because the signature was deliberately never
-logged; trust rests on obtaining `cosign.pub` from a source you trust.
+also keeps them valid semver.
 
 ## Initialize a wiki
 

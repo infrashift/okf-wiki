@@ -767,6 +767,53 @@ do
     end
 end
 
+-- Test 38: :OkfwMove and :OkfwDelete take an id, as the CLI does. They expanded
+-- the argument as a file path, so an id named a file that did not exist.
+log("")
+log("Test 38: OkfwMove / OkfwDelete by id")
+do
+    local code = run_okfw({ "create", "Id Addressed" })
+    assert_eq(code, 0, "created a concept to address by id")
+    local matches = vim.fn.glob(test_project .. "/.okfw/id-addressed--*.md", false, true)
+    if #matches == 1 then
+        local id
+        for _, l in ipairs(vim.fn.readfile(matches[1], "", 20)) do
+            id = id or l:match('^id:%s*"([^"]+)"')
+        end
+        local moved = test_project .. "/.okfw/by-id/" .. vim.fn.fnamemodify(matches[1], ":t")
+        vim.cmd("OkfwMove " .. id .. " by-id/")
+        vim.wait(8000, function() return vim.fn.filereadable(moved) == 1 end)
+        assert_eq(vim.fn.filereadable(moved), 1, ":OkfwMove <id> moved the concept")
+
+        local real_confirm = vim.fn.confirm
+        vim.fn.confirm = function() return 2 end -- "&Yes"
+        vim.cmd("OkfwDelete " .. id)
+        vim.wait(8000, function() return vim.fn.filereadable(moved) == 0 end)
+        vim.fn.confirm = real_confirm
+        assert_eq(vim.fn.filereadable(moved), 0, ":OkfwDelete <id> deleted the concept")
+    end
+end
+
+-- Test 39: okfw.search, what :OkfwSearch falls back to without snacks, applies
+-- the CLI's filters. It passed only --project and --tag, so a --status search
+-- returned every match.
+log("")
+log("Test 39: okfw.search applies filters")
+do
+    local code = run_okfw({ "create", "Retired Subject" })
+    assert_eq(code, 0, "created a concept to filter on")
+    local matches = vim.fn.glob(test_project .. "/.okfw/retired-subject--*.md", false, true)
+    if #matches == 1 then
+        assert_eq(run_okfw({ "set-lifecycle", matches[1], "deprecated" }), 0, "marked it deprecated")
+        local got
+        okfw.search("", { status = "deprecated", on_results = function(r) got = r end })
+        vim.wait(8000, function() return got ~= nil end)
+        local titles = {}
+        for _, h in ipairs(got or {}) do table.insert(titles, h.title) end
+        assert_eq(table.concat(titles, ","), "Retired Subject", "--status keeps only the deprecated concept")
+    end
+end
+
 -- Summary
 log("")
 log("=== Test Summary ===")

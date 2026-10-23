@@ -33,10 +33,10 @@ Before diving into the code, understand the "why" behind the workflow:
 
 ### 2. Quick Start
 
-1. **Install the CLI:**
+1. **Install the CLI** from a [release](https://github.com/infrashift/okf-wiki/releases) (see [Installation](#installation)), or from source:
 ```bash
 git clone https://github.com/infrashift/okf-wiki.git && cd okf-wiki
-make install  # Installs okfw to $GOPATH/bin
+make install  # Builds bin/okfw and moves it to $GOPATH/bin
 ```
 
 2. **Initialize a wiki in your project:**
@@ -60,83 +60,55 @@ tutorial.
 ---
 
 > [!TIP]
-> **The Default Workspace:** > The container launches a `tmux` session partitioned into three panes: **LazyVim**, a standard **Terminal**, and **Claude Code**.
+> **The Default Workspace:** The container launches a `tmux` session partitioned into three panes: **LazyVim**, a standard **Terminal**, and **Claude Code**.
 > To ease the transition from IDEs like VSCode, mouse support is enabled by default in LazyVim. While this helps you get moving immediately, the true power of this stack is unlocked through **Vim motions**—it's worth the investment to learn them!
 
 ---
 
 ## Installation
 
-### Prerequisites
+### Download a release
 
-- Go 1.24+
-- CUE (for schema validation)
+Each [release](https://github.com/infrashift/okf-wiki/releases) carries signed,
+static Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`):
+
+```bash
+VERSION=v2026.10.0
+ARCH=amd64   # or arm64
+curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
+tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
+install okfw-$VERSION-linux-$ARCH/okfw ~/.local/bin/
+okfw --version
+```
+
+To check a download against the project's release key, signatures and
+checksums before installing it, follow
+[Verifying Releases](https://infrashift.github.io/okf-wiki/reference/verifying-releases/).
+The release key's public half is committed as [`release/cosign.pub`](release/cosign.pub).
 
 ### Build from source
+
+Requires Go 1.24+ (`make test` also needs the [CUE](https://cuelang.org/) CLI).
 
 ```bash
 git clone https://github.com/infrashift/okf-wiki.git
 cd okf-wiki
-make build
-make install  # Installs to $GOPATH/bin
+make build    # Writes bin/okfw
+make install  # Moves bin/okfw to $GOPATH/bin
 ```
 
-### Build for a specific Linux architecture
-
-okfw is pure Go, so it cross-compiles from any host. `make build` targets the
-machine you run it on; to build for Linux x86_64 or aarch64 from any machine:
+okfw is pure Go, so it cross-compiles from any host:
 
 ```bash
 make build-linux-amd64   # Writes bin/okfw-linux-amd64 (x86_64)
 make build-linux-arm64   # Writes bin/okfw-linux-arm64 (aarch64)
-make dist                # Both, packaged for distribution in dist/ (needs syft)
+make dist                # Both, as tarballs + SPDX SBOMs + SHA256SUMS in dist/ (needs syft)
 ```
 
-`make dist` writes, for each architecture, `okfw-<version>-linux-<arch>.tar.gz`
-(the binary, LICENSE and README) and an SPDX SBOM of the binary,
-`okfw-<version>-linux-<arch>.spdx.json`, plus `SHA256SUMS` over the tarballs and
-`SHA256SUMS.sbom` over the SBOMs. `<version>` is the git tag on HEAD, or the
-short commit when there is none; override it with `make dist VERSION=v2026.10.0`.
-
-### Versions
-
-`okfw --version` prints the version `make` stamped into the binary: the git tag
-on HEAD, `<tag>-<n>-g<commit>` for a build past one, or the short commit when
-the repository has no tags. A binary built with plain `go build` reports the
-pseudo-version Go recorded from git instead.
-
-Releases are tagged in CalVer, `vYYYY.M.N`: the year, the month, and a counter
-within the month, with no leading zeros (`v2026.1.0`, not `v2026.01.0`), which
-also keeps them valid semver. To cut one:
-
-```bash
-git tag v2026.10.0
-make sign                # or make dist, unsigned
-```
-
-### Sign a distribution (optional)
-
-`make sign` runs `make dist` and signs every file it wrote with
-[cosign](https://docs.sigstore.dev/cosign/system_config/installation/), writing a
-`<file>.sigstore.json` bundle beside each one and the public key as
-`dist/cosign.pub`, then verifies them. Signing is offline: nothing is uploaded to
-the public Rekor transparency log.
-
-```bash
-make signing-key         # Optional: makes ~/.config/cosign/okfw.{key,pub} (ECDSA P-256)
-make sign                # Asks for the key's password once (or set COSIGN_PASSWORD)
-make sign COSIGN_KEY=path/to/cosign.key   # Your own key; COSIGN_PUB= too, else it is derived
-```
-
-To verify a download against the published key:
-
-```bash
-cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
-  --bundle okfw-<version>-linux-amd64.tar.gz.sigstore.json okfw-<version>-linux-amd64.tar.gz
-```
-
-`--insecure-ignore-tlog` is needed because the signature was deliberately never
-logged; trust rests on obtaining `cosign.pub` from a source you trust.
+`okfw --version` prints the version `make` stamped in: the git tag on HEAD,
+`<tag>-<n>-g<commit>` past one, or the short commit. Releases are CalVer tags,
+`vYYYY.M.N` with no leading zeros. Cutting and signing one (`make sign`) is
+covered in [Releasing](https://infrashift.github.io/okf-wiki/reference/releasing/).
 
 ## Zero Configuration
 
@@ -166,7 +138,7 @@ Two complementary integration points:
 
 - **MCP server** — `okfw mcp` serves five consolidated tools (`okfw_search`,
   `okfw_create`, `okfw_read`, `okfw_update`, `okfw_graph`) over stdio with
-  compact JSON responses (about 3.9 KB of tool schemas). Register with
+  compact JSON responses (about 4 KB of tool schemas). Register with
   `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
   unprefixed names still dispatch, for configurations that predate the prefix.
 - **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
@@ -213,12 +185,18 @@ okf-wiki/
 │   │   ├── agentskill/  # Agent-skill installer (okfw install)
 │   │   ├── okfwskills/  # okfw's SKILL.md / CLAUDE.md-block templates
 │   │   ├── templates/   # Embedded note templates
-│   │   └── gitctx/      # Git project-context helper
+│   │   └── gitctx/      # Git root lookup (where okfw init places .okfw/)
 │   └── testdata/        # Test fixtures
 ├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload
 ├── doc/                 # NeoVim help
 ├── after/               # NeoVim ftplugin
+├── test/                # NeoVim plugin integration suite
+├── docs/                # Documentation site (Astro Starlight)
+├── Containerfiles/      # Devcontainer and e2e images
+├── release/             # cosign offline signing config
+├── bin/                 # make build output (gitignored)
+├── dist/                # make dist / make sign output (gitignored)
 ├── go.mod, go.sum       # Go module (stays at root)
 └── Makefile
 ```

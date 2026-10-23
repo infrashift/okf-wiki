@@ -7,7 +7,7 @@ globs:
 
 # Skill: OKF Wiki Concept Management
 
-Use the `okfw` CLI to create, search, and manage concepts. The binary must be built first: `go build -o okfw ./cli/cmd/okfw`
+Use the `okfw` CLI to create, search, and manage concepts. The binary must be built first: `make build` (writes `bin/okfw`)
 
 ## Wiki Location
 
@@ -16,9 +16,9 @@ with `okfw init` (no-op if it already exists). There is no config file. Every
 command discovers the wiki by searching upward from the current working
 directory (like git finds `.git`) and errors with init advice when none is
 found. `okfw connect` verifies the wiki and prints its concept count; `okfw root`
-prints the discovered `.okfw` path. Generated artifacts inside `.okfw/`:
-`ephemeral/` (exports) — the only generated directory
-— all gitignored; concept markdown is committed with the project.
+prints the discovered `.okfw` path. The only generated directory inside
+`.okfw/` is `ephemeral/` (exports), which is gitignored; concept markdown is
+committed with the project.
 
 ## Concept Format
 

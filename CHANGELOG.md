@@ -2,6 +2,27 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **Releases can be verified end to end.** The release key's public half is committed as `release/cosign.pub`, and the documentation site has a [Verifying Releases](https://infrashift.github.io/okf-wiki/reference/verifying-releases/) page. It shows how to check the downloaded key against that copy and a published fingerprint, then the signatures, the checksums and the binary's recorded commit. A [Releasing](https://infrashift.github.io/okf-wiki/reference/releasing/) page records how a release is cut, signed and published. The installation docs lead with downloading a release.
+
+### Fixed
+- **`okfw validate --all`/`--okf` judge a path the same however it is spelled.** With a trailing slash (`validate --okf .okfw/`), the bundle root went unrecognised, so `ephemeral/` was walked, and every export copy there was reported as a duplicate id. The root `index.md` was also refused the `okf_version` frontmatter only it may carry. Checking a subdirectory (`validate --okf .okfw/projects`) resolved links from that directory instead of the bundle root, so a valid bare frontmatter path such as `resource: archive/x.md` was reported broken; a relative path argument lost relative body-link resolution the same way. Links and the root `index.md` are now judged against the bundle the path belongs to.
+- **Neovim: `:OkfwSearch! <query>` starts the live search from the query.** It opened an empty prompt.
+- **Neovim: `:OkfwSearch` without snacks.nvim applies `--type`, `--kind`, `--status` and `--stale`.** `okfw.search()` passed only `--project` and `--tag`, so a filtered search returned every match. It now takes `type`, `kind`, `status` and `stale` options.
+- **Neovim: `:OkfwTemplate --project X` with no template name keeps the project,** and without snacks.nvim it prompts for a template name instead of failing.
+- **Neovim: `:OkfwDelete` and `:OkfwMove` take an id or OKF concept ID, as the CLI does.** They expanded the argument as a file path, so an id named a file that did not exist.
+- **Neovim: `:OkfwSearch --type` no longer completes kind values.** `type` is free-form, and OKF registers no values to offer. `:OkfwGraph`'s description says it shows Mermaid, not a tree. The `okfw.telescope` stub, which pointed at a module that never existed, is gone.
+- **The documentation matches the implementation again.** The CLI reference, quick start, note format, project structure, Neovim pages, `:help okfw`, the tutorial and the agent skills were checked against the binary, the plugin and the Makefile, and corrected where they had drifted. Corrections include:
+  - Frontmatter paths: a bare path resolves from the bundle root.
+  - `okfw graph`: `okfw graph .` fails from the project root.
+  - `:OkfwNote`: it prompts for its title.
+  - `:OkfwDailyList`: it shows the last 14 days.
+  - `bin/okfw`: the build output path.
+  - `okfw --version`: now documented.
+  - MCP: the tool parameters and limits.
+
 ## v2026.10.0 — 2026-10-23
 
 The first tagged release. Versions are CalVer from here on (`vYYYY.M.N`); the dated sections below predate tagging.
