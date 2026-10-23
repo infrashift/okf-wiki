@@ -12,7 +12,8 @@ AllowUsers user
 PubkeyAuthentication yes
 AuthorizedKeysFile .ssh/authorized_keys
 
-# ForceCommand — SSH login auto-attaches to tmux dev session
+# ForceCommand — an interactive login attaches to the tmux dev session; a
+# command (ssh host cmd, scp, sftp) runs as given. See ssh-login.sh.
 ForceCommand /home/user/.local/bin/ssh-login.sh
 
 # Environment

@@ -1,0 +1,92 @@
+name: Devcontainer
+
+# The devcontainer downloads a binary per architecture (Neovim, shfmt,
+# tree-sitter, StyLua, Claude Code), and nothing else in CI builds on arm64, so
+# this is where an arm64 regression shows up. It is path-filtered to what the
+# image is built from, so it is not a required check: a required check that
+# does not run on a PR would block it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Containerfiles/**'
+      - '.containerignore'
+      - '.github/workflows/devcontainer.yaml'
+      - 'Makefile'
+      - 'go.mod'
+      - 'go.sum'
+      - 'lua/**'
+      - 'plugin/**'
+      - 'after/**'
+  pull_request:
+    paths:
+      - 'Containerfiles/**'
+      - '.containerignore'
+      - '.github/workflows/devcontainer.yaml'
+      - 'Makefile'
+      - 'go.mod'
+      - 'go.sum'
+      - 'lua/**'
+      - 'plugin/**'
+      - 'after/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  arm64:
+    name: devcontainer (arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    env:
+      IMAGE: okfw-devcontainer:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # `git describe --tags` stamps the version
+
+      # The same target a user runs, with docker for podman.
+      - name: Build the image natively on arm64
+        run: make build-image CONTAINER_ENGINE=docker
+
+      - name: The binaries inside run on arm64
+        run: |
+          run() { docker run --rm --user user -e HOME=/home/user --entrypoint "$@"; }
+          test "$(run uname "$IMAGE" -m)" = aarch64
+          run okfw "$IMAGE" --version
+          run nvim "$IMAGE" --version
+          # Command substitution, not `| grep -q`: under pipefail, grep exiting
+          # early could fail the step through nvim's SIGPIPE.
+          loaded=$(run nvim "$IMAGE" --headless "+lua io.write(tostring(require('okfw') ~= nil))" +qa)
+          [[ "$loaded" == *true* ]]
+          # A wrong-architecture binary fails here with "exec format error".
+          for tool in shfmt tree-sitter stylua; do
+            run "/home/user/.local/share/nvim/mason/bin/$tool" "$IMAGE" --version
+          done
+
+      # An interactive login attaches to tmux; a command, scp and sftp must run
+      # as given rather than being forced into it.
+      - name: SSH runs commands, scp and sftp
+        run: |
+          key=Containerfiles/config/test_ssh_key
+          chmod 600 "$key"
+          docker run -d --name okfw-dev -p 2222:2222 \
+            -v "$PWD/$key.pub:/home/user/.ssh/authorized_keys:ro" "$IMAGE"
+          opts=(-i "$key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes -o LogLevel=ERROR)
+          for _ in $(seq 30); do ssh "${opts[@]}" -p 2222 user@localhost true && break; sleep 1; done
+          test "$(ssh "${opts[@]}" -p 2222 user@localhost okfw --version | cut -d' ' -f1-2)" = "okfw version"
+          head -c 100000 /dev/urandom > up.bin
+          scp "${opts[@]}" -P 2222 up.bin user@localhost:up.bin
+          scp "${opts[@]}" -P 2222 user@localhost:up.bin down.bin
+          cmp up.bin down.bin
+          listing=$(printf 'ls -1 up.bin\n' | sftp "${opts[@]}" -P 2222 -b - user@localhost)
+          grep -qx up.bin <<<"$listing"
+
+      - name: Container log on failure
+        if: failure()
+        run: docker logs okfw-dev 2>&1 | tail -50 || true

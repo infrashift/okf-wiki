@@ -19,9 +19,17 @@ RUN dnf install -y --setopt=tsflags=nodocs git curl tar gzip ncurses findutils &
     dnf clean all
 
 # NeoVim (matches the devcontainer version)
-RUN curl -fsSL https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-x86_64.tar.gz \
+# Each release names the architecture its own way; `uname -m` is the image's
+# architecture, native or emulated, so one Containerfile builds x86_64 and arm64.
+RUN case "$(uname -m)" in \
+        x86_64) arch=x86_64 ;; \
+        aarch64) arch=arm64 ;; \
+        *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v0.11.4/nvim-linux-${arch}.tar.gz" \
         | tar xz -C /opt && \
-    ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
+    ln -sf "/opt/nvim-linux-${arch}/bin/nvim" /usr/local/bin/nvim && \
+    nvim --version | head -1
 
 # plenary.nvim at the path the integration test expects
 RUN git clone --depth 1 https://github.com/nvim-lua/plenary.nvim \
