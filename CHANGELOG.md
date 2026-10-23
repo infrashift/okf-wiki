@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **CI builds the devcontainer on x86_64 as well as arm64.** The devcontainer workflow ran only on an arm64 runner. It now builds natively on both, with the same checks on each: the binaries run, and ssh commands, scp and sftp work.
+
 ## v2026.10.1 — 2026-10-23
 
 ### Added
