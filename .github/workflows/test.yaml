@@ -94,8 +94,11 @@ jobs:
   # a plugin calling a command or flag the CLI no longer has — which luacheck
   # cannot. Run at the plugin's floor (plugin/okfw.lua requires 0.9) and at the
   # version the e2e image and devcontainer use.
+  #
+  # Pinned to 24.04: on the Ubuntu 26 ubuntu-latest image, action-setup-vim's
+  # rename from /tmp into $HOME fails with EXDEV (cross-device link).
   neovim:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       fail-fast: false
