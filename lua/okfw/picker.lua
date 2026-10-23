@@ -227,6 +227,9 @@ M.live_search = function(opts)
         source = "okfw_live",
         title = opts.prompt_title or "Search Concepts",
         live = true,
+        -- The initial search string a live finder receives as ctx.filter.search:
+        -- without it, `:OkfwSearch! auth` opened an empty prompt.
+        search = opts.default_text or opts.query,
         finder = function(fopts, ctx)
             local query = ctx.filter.search or ""
             if query == "" then

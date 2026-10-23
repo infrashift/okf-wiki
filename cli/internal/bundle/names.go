@@ -170,8 +170,12 @@ func RelDir(rel string) string {
 // ephemeral/ is okfw's own directory at the walk root only; a "ephemeral"
 // directory deeper down is an ordinary part of the bundle, and skipping it at
 // any depth hid its concepts from every command, validate --okf included.
+//
+// Paths are compared clean, so a root given as ".okfw/" still matches the
+// ".okfw/ephemeral" that filepath.Walk joins beneath it.
 func SkipWalkDir(root, p, name string) bool {
-	if p == root {
+	root = filepath.Clean(root)
+	if filepath.Clean(p) == root {
 		return false
 	}
 	return strings.HasPrefix(name, ".") || (name == "ephemeral" && filepath.Dir(p) == root)

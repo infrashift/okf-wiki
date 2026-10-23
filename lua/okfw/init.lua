@@ -579,6 +579,18 @@ M.search = function(query, opts)
         end
     end
 
+    -- The same filters the snacks picker passes; :OkfwSearch falls back here
+    -- without snacks, and dropped all four.
+    for _, flag in ipairs({ "type", "kind", "status" }) do
+        if opts[flag] and opts[flag] ~= "" then
+            table.insert(args, "--" .. flag)
+            table.insert(args, opts[flag])
+        end
+    end
+    if opts.stale then
+        table.insert(args, "--stale")
+    end
+
     if opts.limit then
         table.insert(args, "--limit")
         table.insert(args, tostring(opts.limit))
@@ -1905,18 +1917,5 @@ M.toggle_backlinks = function(opts)
         M.backlinks_panel(opts)
     end
 end
-
--- Telescope integration (lazy loaded)
-M.telescope = setmetatable({}, {
-    __index = function(_, key)
-        local ok, telescope_ext = pcall(require, "okfw.telescope")
-        if ok then
-            return telescope_ext[key]
-        end
-        return function()
-            print("Telescope not available. Install telescope.nvim for this feature.")
-        end
-    end,
-})
 
 return M

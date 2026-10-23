@@ -417,7 +417,9 @@ Examples:
 		Short: "Find all notes that link to a concept",
 		Long: `Find all concepts that contain links to the specified concept.
 
-Links are vanilla markdown links to bundle-relative or relative paths.
+A link is a markdown link in the body, to a bundle-relative or relative path,
+or a path-valued frontmatter field naming the concept (resource,
+sources[].resource, computation, executor.resource, attester.resource).
 
 Examples:
   okfw backlinks 202602131045           # Find backlinks by ID
@@ -1284,17 +1286,21 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 // It also reports ids declared by more than one concept — a concept copied as
 // a template keeps its id — which no per-file check can see. Lookup by such
 // an id refuses rather than guessing, so the copies have to be told apart.
-func runValidateAll(cfg *config.Config, root string) error {
+func runValidateAll(cfg *config.Config, path string) error {
 	var concepts, invalid int
 	var problems []string
 	pathsByID := map[string][]string{}
 
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+	root, bundleRoot, err := validateScope(cfg, path)
+	if err != nil {
+		return err
+	}
+	err = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if fi.IsDir() {
-			if bundle.SkipWalkDir(root, p, fi.Name()) {
+			if p != root && bundle.SkipWalkDir(bundleRoot, p, fi.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1355,16 +1361,20 @@ func runValidateAll(cfg *config.Config, root string) error {
 // parseable frontmatter with a non-empty `type`. Unresolved links are reported as
 // warnings (OKF tolerates broken links). Returns an error if any hard violation
 // is found.
-func runValidateOKF(cfg *config.Config, root string) error {
+func runValidateOKF(cfg *config.Config, path string) error {
 	var concepts, violations, brokenLinks, warnings int
 	var problems []string
 
-	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
+	root, bundleRoot, err := validateScope(cfg, path)
+	if err != nil {
+		return err
+	}
+	err = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
 		if fi.IsDir() {
-			if bundle.SkipWalkDir(root, p, fi.Name()) {
+			if p != root && bundle.SkipWalkDir(bundleRoot, p, fi.Name()) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1380,7 +1390,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 		// Section 11.3: reserved files must follow sections 8 and 9.
 		switch fi.Name() {
 		case "index.md":
-			v, w := bundle.CheckIndexFile(content, filepath.Dir(p) == root)
+			v, w := bundle.CheckIndexFile(content, filepath.Dir(p) == bundleRoot)
 			for _, m := range v {
 				violations++
 				problems = append(problems, fmt.Sprintf("  ✗ %s: %s", rel, m))
@@ -1410,11 +1420,11 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			violations++
 			problems = append(problems, fmt.Sprintf("  ✗ %s: missing required non-empty `type`", rel))
 		}
-		// Warn on unresolved internal links.
-		absP, _ := filepath.Abs(p)
+		// Warn on unresolved internal links. They resolve against the bundle
+		// root, not the directory being checked, as in every other command.
 		body := config.ExtractBody(content)
 		fromDir := ""
-		if rd, err := filepath.Rel(root, filepath.Dir(absP)); err == nil {
+		if rd, err := filepath.Rel(bundleRoot, filepath.Dir(p)); err == nil {
 			fromDir = filepath.ToSlash(rd)
 			if fromDir == "." {
 				fromDir = ""
@@ -1425,7 +1435,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			if tr == "" {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(tr))); err != nil {
+			if _, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(tr))); err != nil {
 				brokenLinks++
 				problems = append(problems, fmt.Sprintf("  ⚠ %s: link target not found: %s", rel, href))
 			}
@@ -1436,7 +1446,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 			if tr == "" {
 				continue
 			}
-			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(tr))); err != nil {
+			if _, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(tr))); err != nil {
 				brokenLinks++
 				problems = append(problems, fmt.Sprintf("  ⚠ %s: %s target not found: %s", rel, r.Field, r.Value))
 			}
@@ -1449,7 +1459,7 @@ func runValidateOKF(cfg *config.Config, root string) error {
 
 	// Section 12: a version okfw does not implement is checked best-effort,
 	// not refused.
-	if data, err := os.ReadFile(filepath.Join(root, "index.md")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(bundleRoot, "index.md")); err == nil {
 		if v := bundle.DeclaredOKFVersion(data); v != "" && v != config.OKFVersion {
 			warnings++
 			problems = append(problems, fmt.Sprintf(
@@ -1466,6 +1476,28 @@ func runValidateOKF(cfg *config.Config, root string) error {
 		return fmt.Errorf("%d conformance violation(s)", violations)
 	}
 	return nil
+}
+
+// validateScope resolves the path given to validate --all/--okf. root is the
+// directory to check; bundleRoot is the bundle it belongs to: the discovered
+// wiki when the path lies inside it, else the path itself, taken as a bundle of
+// its own. Links and the root index.md are judged against bundleRoot, so
+// checking a subdirectory reads a bare frontmatter path from the bundle root,
+// as every other command does. Both are absolute and clean: a trailing slash
+// once made the root unrecognisable, so ephemeral/ was walked and the root
+// index.md was held to the rules for every other listing.
+func validateScope(cfg *config.Config, path string) (root, bundleRoot string, err error) {
+	if root, err = filepath.Abs(path); err != nil {
+		return "", "", err
+	}
+	wiki, err := filepath.Abs(cfg.RootPath)
+	if err != nil {
+		return "", "", err
+	}
+	if root == wiki || strings.HasPrefix(root, wiki+string(filepath.Separator)) {
+		return root, wiki, nil
+	}
+	return root, root, nil
 }
 
 // safeExportName reports whether a concept id can name a file directly inside

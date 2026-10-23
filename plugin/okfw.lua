@@ -13,6 +13,17 @@ if vim.fn.has("nvim-0.9") ~= 1 then
     return
 end
 
+-- A concept argument is a file path (what completion offers) or, as for the
+-- CLI, an id or OKF concept ID. Resolve it to the file, so the commands can
+-- find the concept's buffer; anything unresolvable goes to the CLI as typed,
+-- which reports why.
+local function concept_file(arg)
+    if vim.fn.filereadable(arg) == 1 then
+        return vim.fn.fnamemodify(arg, ":p")
+    end
+    return require("okfw").resolve_concept(arg) or arg
+end
+
 -- User commands
 local function create_commands()
     -- Initialize the project wiki (.okfw/); noop when it already exists
@@ -117,11 +128,9 @@ local function create_commands()
             end
         end
 
-        if args_parsed.template then
-            okfw.create_from_template(args_parsed)
-        else
-            okfw.template_picker()
-        end
+        -- Without a template name this opens the picker (or, without snacks,
+        -- prompts for one), keeping --project either way.
+        okfw.create_from_template(args_parsed)
     end, {
         nargs = "*",
         complete = function(_, line)
@@ -221,16 +230,14 @@ local function create_commands()
             local prev = args[#args - 1] or ""
 
             -- Complete values after flags
-            if prev == "--type" then
-                return { "note", "daily-note", "issue" }
-            end
             if prev == "--status" then
                 return { "draft", "stable", "deprecated" }
             end
             if prev == "--kind" then
                 return { "note", "daily-note", "issue" }
             end
-            if prev == "--project" or prev == "--tag" then
+            -- --type is free-form: OKF registers no type values to offer.
+            if prev == "--project" or prev == "--tag" or prev == "--type" then
                 return {}
             end
 
@@ -306,7 +313,7 @@ local function create_commands()
             end
             return completions
         end,
-        desc = "Show graph tree (--depth N, --start ID, --limit N)",
+        desc = "Show the link graph as Mermaid (--depth N, --start ID, --limit N)",
     })
 
     -- Export
@@ -379,11 +386,11 @@ local function create_commands()
     vim.api.nvim_create_user_command("OkfwDelete", function(opts)
         local okfw = require("okfw")
         -- No argument means the concept in the current buffer.
-        okfw.delete_note(opts.args ~= "" and vim.fn.fnamemodify(opts.args, ":p") or nil)
+        okfw.delete_note(opts.args ~= "" and concept_file(vim.trim(opts.args)) or nil)
     end, {
         nargs = "?",
         complete = "file",
-        desc = "Delete the current concept (asks first) and its index.md entry",
+        desc = "Delete a concept (current buffer, file, or id; asks first) and its index.md entry",
     })
 
     vim.api.nvim_create_user_command("OkfwMove", function(opts)
@@ -396,12 +403,12 @@ local function create_commands()
             -- One argument is the destination; the source is the current buffer.
             okfw.move_note(nil, args[1])
         else
-            okfw.move_note(vim.fn.fnamemodify(args[1], ":p"), args[2])
+            okfw.move_note(concept_file(args[1]), args[2])
         end
     end, {
         nargs = "*",
         complete = "file",
-        desc = "Move/rename the current concept, repairing links (:OkfwMove [src] dest)",
+        desc = "Move/rename a concept, repairing links (:OkfwMove [file|id] dest)",
     })
 
     -- Tags

@@ -69,6 +69,49 @@ func TestRunValidateOKF(t *testing.T) {
 	}
 }
 
+// A path argument names the same bundle however it is spelled. A trailing slash
+// once left the root unrecognised, so ephemeral/ was walked (each export copy a
+// duplicate id) and the root index.md was refused its okf_version frontmatter.
+func TestValidateBundlePathSpelling(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.2\"\n---\n\n# Index\n")
+	alpha := conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha")
+	writeConceptFile(t, root, "notes/alpha--0001.md", alpha)
+	writeConceptFile(t, root, "ephemeral/alpha--0001.md", alpha) // an export copy
+
+	t.Chdir(filepath.Dir(root))
+	for _, path := range []string{root, root + "/", filepath.Base(root), filepath.Base(root) + "/", "./" + filepath.Base(root) + "/"} {
+		if out, err := captureStdout(t, func() error { return runValidateOKF(cfg, path) }); err != nil {
+			t.Errorf("validate --okf %q: %v\n%s", path, err, out)
+		}
+		if out, err := captureStdout(t, func() error { return runValidateAll(cfg, path) }); err != nil {
+			t.Errorf("validate --all %q: %v\n%s", path, err, out)
+		}
+	}
+}
+
+// Checking a subdirectory judges links against the bundle it is part of: a bare
+// frontmatter path resolves from the bundle root, and only the bundle root's
+// index.md may carry frontmatter.
+func TestValidateOKFSubdirectoryResolvesFromTheBundleRoot(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "archive/old--0001.md", conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Old", "note", "# Old"))
+	writeConceptFile(t, root, "projects/spec--0002.md", strings.Replace(
+		conceptContent("01968109-4700-7def-9abc-ffffffffffff", "Spec", "note", "See [old](../archive/old--0001.md)."),
+		"tags: []\n", "tags: []\nresource: \"archive/old--0001.md\"\n", 1))
+	writeConceptFile(t, root, "projects/index.md", "---\nokf_version: \"0.2\"\n---\n\n# Projects\n")
+
+	out, err := captureStdout(t, func() error { return runValidateOKF(cfg, filepath.Join(root, "projects")) })
+	if strings.Contains(out, "not found") {
+		t.Errorf("links valid from the bundle root were reported broken:\n%s", out)
+	}
+	if err == nil || !strings.Contains(out, "index.md: frontmatter is only permitted") {
+		t.Errorf("a subdirectory's index.md carrying frontmatter should be a violation, got err=%v:\n%s", err, out)
+	}
+}
+
 // --- runIndexMd ---
 
 func TestRunIndexMd(t *testing.T) {
