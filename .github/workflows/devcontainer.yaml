@@ -1,8 +1,8 @@
 name: Devcontainer
 
 # The devcontainer downloads a binary per architecture (Neovim, shfmt,
-# tree-sitter, StyLua, Claude Code), and nothing else in CI builds on arm64, so
-# this is where an arm64 regression shows up. It is path-filtered to what the
+# tree-sitter, StyLua, Claude Code), so it is built natively on both x86_64 and
+# arm64; nothing else in CI builds on arm64. It is path-filtered to what the
 # image is built from, so it is not a required check: a required check that
 # does not run on a PR would block it.
 on:
@@ -39,10 +39,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  arm64:
-    name: devcontainer (arm64)
-    runs-on: ubuntu-24.04-arm
+  build:
+    name: devcontainer (${{ matrix.arch }})
+    # Pinned, not ubuntu-latest: the Ubuntu 26 image broke the neovim jobs.
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            uname: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            uname: aarch64
     env:
       IMAGE: okfw-devcontainer:latest
     steps:
@@ -51,13 +62,13 @@ jobs:
           fetch-depth: 0 # `git describe --tags` stamps the version
 
       # The same target a user runs, with docker for podman.
-      - name: Build the image natively on arm64
+      - name: Build the image natively on ${{ matrix.arch }}
         run: make build-image CONTAINER_ENGINE=docker
 
-      - name: The binaries inside run on arm64
+      - name: The binaries inside run on ${{ matrix.arch }}
         run: |
           run() { docker run --rm --user user -e HOME=/home/user --entrypoint "$@"; }
-          test "$(run uname "$IMAGE" -m)" = aarch64
+          test "$(run uname "$IMAGE" -m)" = ${{ matrix.uname }}
           run okfw "$IMAGE" --version
           run nvim "$IMAGE" --version
           # Command substitution, not `| grep -q`: under pipefail, grep exiting

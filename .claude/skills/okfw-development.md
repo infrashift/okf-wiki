@@ -28,8 +28,8 @@ CI (`.github/workflows/test.yaml`) runs the Go tests with `-race`, `go vet`,
 gofmt, `go mod tidy -diff`, staticcheck, a `CGO_ENABLED=0` build and `cue vet`;
 luacheck; and the NeoVim suite on v0.9.5 (the plugin's floor) and v0.11.4.
 `.github/workflows/devcontainer.yaml` builds the devcontainer natively on
-arm64 (`make build-image CONTAINER_ENGINE=docker`), runs its binaries and
-checks SSH commands, scp and sftp. It is path-filtered to what the image is
+x86_64 and arm64 (`make build-image CONTAINER_ENGINE=docker`), runs its
+binaries and checks SSH commands, scp and sftp. It is path-filtered to what the image is
 built from, so it is not a required check.
 
 ## Versions & Releases
