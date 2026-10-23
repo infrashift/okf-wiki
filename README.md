@@ -81,13 +81,14 @@ make build
 make install  # Installs to $GOPATH/bin
 ```
 
-### Build for Linux aarch64
+### Build for a specific Linux architecture
 
-okfw is pure Go, so it cross-compiles from any host. On an aarch64 machine,
-`make build` is already native; from anywhere else:
+okfw is pure Go, so it cross-compiles from any host. `make build` targets the
+machine you run it on; to build for Linux x86_64 or aarch64 from any machine:
 
 ```bash
-make build-linux-arm64   # Writes ./okfw-linux-arm64
+make build-linux-amd64   # Writes ./okfw-linux-amd64 (x86_64)
+make build-linux-arm64   # Writes ./okfw-linux-arm64 (aarch64)
 ```
 
 ## Zero Configuration

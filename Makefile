@@ -1,4 +1,4 @@
-.PHONY: build build-linux-arm64 test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
+.PHONY: build build-linux-amd64 build-linux-arm64 test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
@@ -16,10 +16,10 @@ USER_UID=$(shell id -u)
 build:
 	CGO_ENABLED=0 go build -o $(BINARY_NAME) $(CMD_PATH)
 
-# okfw is pure Go, so it cross-compiles from any host. `make build` on an
-# aarch64 machine is already native; this builds Linux aarch64 from elsewhere.
-build-linux-arm64:
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o $(BINARY_NAME)-linux-arm64 $(CMD_PATH)
+# okfw is pure Go, so it cross-compiles from any host: each of these builds a
+# Linux binary for its architecture (x86_64, aarch64) whatever machine runs it.
+build-linux-amd64 build-linux-arm64: build-linux-%:
+	CGO_ENABLED=0 GOOS=linux GOARCH=$* go build -o $(BINARY_NAME)-linux-$* $(CMD_PATH)
 
 # -count=1 disables the test cache: a cached pass can otherwise hide a
 # regression in code the cache key did not notice.
@@ -73,7 +73,7 @@ e2e:
 	@echo "e2e build succeeded — okfw CLI and the NeoVim plugin pass in-container."
 
 clean:
-	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-arm64
+	rm -f $(BINARY_NAME) $(BINARY_NAME)-linux-amd64 $(BINARY_NAME)-linux-arm64
 	
 tidy:
 	go mod tidy
