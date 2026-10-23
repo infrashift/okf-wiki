@@ -61,7 +61,7 @@ the public Rekor transparency log.
 ```bash
 make signing-key         # Optional: makes ~/.config/cosign/okfw.{key,pub} (ECDSA P-256)
 make sign                # Asks for the key's password once (or set COSIGN_PASSWORD)
-make sign COSIGN_KEY=path/to/cosign.key COSIGN_PUB=path/to/cosign.pub   # Your own key
+make sign COSIGN_KEY=path/to/cosign.key   # Your own key; COSIGN_PUB= too, else it is derived
 ```
 
 To verify a download against the published key:
