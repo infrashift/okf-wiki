@@ -153,6 +153,18 @@ func MapSet(m *yaml.Node, key string, val *yaml.Node) {
 		val)
 }
 
+// mapSetAfter sets key to val. A new key goes directly after the key `after`,
+// where the house layout puts it, or at the end when `after` is absent.
+func mapSetAfter(m *yaml.Node, key, after string, val *yaml.Node) {
+	_, i := mapEntry(m, after)
+	if _, cur := mapEntry(m, key); cur >= 0 || i < 0 {
+		MapSet(m, key, val)
+		return
+	}
+	k := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	m.Content = append(m.Content[:i+2], append([]*yaml.Node{k, val}, m.Content[i+2:]...)...)
+}
+
 // MapSetString sets key to a string value. An existing scalar keeps its quoting
 // style; a new key gets okfw's double-quoted house style.
 func MapSetString(m *yaml.Node, key, value string) {

@@ -42,6 +42,7 @@ type Options struct {
 	Type    string   // OKF free-form type
 	Kind    string   // structured kind: note/daily-note/issue
 	Tags    []string // all must be present
+	Dir     string   // bundle subdirectory to search, recursively; empty = all
 	Limit   int      // max results (0 → DefaultLimit)
 	Offset  int      // pagination offset
 
@@ -105,8 +106,13 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	terms := tokenize(opts.Query)
 	now := time.Now()
 
+	start, err := scopeDir(bundleRoot, opts.Dir)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	var all []Result
-	err := filepath.Walk(bundleRoot, func(p string, fi os.FileInfo, err error) error {
+	err = filepath.Walk(start, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
@@ -186,6 +192,27 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	}
 	end := min(opts.Offset+limit, total)
 	return all[opts.Offset:end], total, nil
+}
+
+// scopeDir resolves Options.Dir to the directory the walk starts from. The
+// walk starting there, rather than filtering every path afterwards, is what
+// makes a scoped search cost the scope and not the bundle. The dir comes from
+// an MCP client unvetted, so it must stay inside the bundle.
+func scopeDir(bundleRoot, dir string) (string, error) {
+	dir = strings.Trim(filepath.ToSlash(dir), "/")
+	if dir == "" {
+		return bundleRoot, nil
+	}
+	for _, seg := range strings.Split(dir, "/") {
+		if seg == ".." || seg == "." || strings.HasPrefix(seg, ".") {
+			return "", fmt.Errorf("invalid dir %q: must be a directory inside the wiki", dir)
+		}
+	}
+	start := filepath.Join(bundleRoot, filepath.FromSlash(dir))
+	if fi, err := os.Stat(start); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("no directory %q in the wiki", dir)
+	}
+	return start, nil
 }
 
 func lifecycleOf(s string) string {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 
 	"okfw/cli/internal/config"
 	"okfw/cli/internal/templates"
@@ -25,6 +26,17 @@ type Spec struct {
 	Description string
 	Template    string
 	Body        string // markdown appended after the generated content
+
+	// Type overrides the free-form OKF type, which otherwise follows the kind.
+	Type string
+	// Kind sets the structured kind: "note" or "issue". Empty keeps what the
+	// template (or a plain note) writes. Daily notes have their own writer.
+	Kind string
+	// Frontmatter, when set, edits the frontmatter before the concept is
+	// validated and written, so metadata set at creation lands in the same
+	// single write as the concept. A create used to be followed by one write
+	// per field, and a failure part-way left a half-described concept behind.
+	Frontmatter func(m *yaml.Node) error
 }
 
 // CreateConcept writes a new concept (optionally from a template) and returns
@@ -66,6 +78,22 @@ func CreateConcept(cfg *config.Config, spec Spec) (string, string, error) {
 		content = strings.TrimRight(content, "\n") + "\n\n" + strings.TrimRight(spec.Body, "\n") + "\n"
 	}
 
+	if spec.Type != "" || spec.Kind != "" || spec.Frontmatter != nil {
+		updated, ferr := Edit([]byte(content), func(m *yaml.Node) error {
+			if err := setKindAndType(m, spec); err != nil {
+				return err
+			}
+			if spec.Frontmatter != nil {
+				return spec.Frontmatter(m)
+			}
+			return nil
+		})
+		if ferr != nil {
+			return "", "", ferr
+		}
+		content = string(updated)
+	}
+
 	if err := ValidateGenerated([]byte(content)); err != nil {
 		return "", "", err
 	}
@@ -75,6 +103,29 @@ func CreateConcept(cfg *config.Config, spec Spec) (string, string, error) {
 		return "", "", err
 	}
 	return filePath, id, nil
+}
+
+// setKindAndType applies a Spec's kind and type. An issue with no explicit
+// type is written as type "issue", as the issue template does, so the two ways
+// of creating one agree.
+func setKindAndType(m *yaml.Node, spec Spec) error {
+	switch spec.Kind {
+	case "":
+	case "note":
+		// The default kind is never written; see GenerateNote.
+		MapDelete(m, "kind")
+	case "issue":
+		mapSetAfter(m, "kind", "type", QuotedScalar("issue"))
+		if spec.Type == "" {
+			MapSetString(m, "type", "issue")
+		}
+	default:
+		return fmt.Errorf("invalid kind %q: want note or issue", spec.Kind)
+	}
+	if spec.Type != "" {
+		MapSetString(m, "type", spec.Type)
+	}
+	return nil
 }
 
 // GenerateBasicNote renders minimal, OKF-valid concept markdown.

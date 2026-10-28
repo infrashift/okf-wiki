@@ -54,10 +54,14 @@ use whichever surface you have.
 | do this | CLI | MCP |
 |---|---|---|
 | find concepts | `okfw search "query" --json` | `okfw_search {"q":"query"}` |
+| search one directory | `okfw search --path <dir> --json` | `okfw_search {"dir":"<dir>"}` |
+| list a directory | read `.okfw/<dir>/index.md` | `okfw_read {"ref":"<dir>/"}` (`"/"` for the root) |
 | read one | — | `okfw_read {"ref":"<id or path>"}` |
 | create one | `okfw create "Title" --body "..." --json` | `okfw_create {"title":"Title","body":"..."}` |
+| create an issue | `okfw create "Title" --kind issue --json` | `okfw_create {"kind":"issue","title":"Title"}` |
 | today's journal | `okfw daily` | `okfw_create {"kind":"daily"}` |
 | edit metadata or body | `okfw set-lifecycle` / `verify` / `add-source` / … | `okfw_update {"ref":…,"action":…,"value":…}` |
+| swap a tag | `okfw remove-tags <ref> open` then `okfw add-tags <ref> resolved` | `okfw_update` actions `remove_tags`, `add_tags` |
 | what links here | `okfw backlinks <ref> --json` | `okfw_graph {"action":"backlinks","ref":…}` |
 
 CLI only: `okfw init`, `okfw move`, `okfw delete`, `okfw validate --all`,
@@ -121,12 +125,16 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
 
 ## Workflow
 
-**Retrieving.** Search → read the hits worth reading (`okfw_read` with a
+**Retrieving.** Start from a listing when you do not know the wiki yet
+(`okfw_read {"ref":"/"}`, then a directory): each entry shows the concept's
+description, so you open only what fits. Search → read the hits worth reading (`okfw_read` with a
 `section` beats reading whole concepts) → follow their links and `backlinks`,
 since a relevant concept usually neighbours others → *then* fall back to source
 or fresh analysis for whatever the wiki did not cover.
 
-**Capturing.** Capture quickly → refine → link. Before creating, search to
+**Capturing.** Capture quickly → refine → link. Over MCP, set `type`,
+`status`, `stale_after`, `resource` and `generated_by` in the `okfw_create`
+call itself: one write, no follow-up updates. Before creating, search to
 avoid duplicates and to find concepts the new note should link to. Edits made
 outside okfw need no follow-up command — search and the graph read the files
 directly. Only the `index.md` listings are generated, and every okfw mutation

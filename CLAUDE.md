@@ -294,7 +294,16 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   `section`/`offset`/`limit` and caps at 200 lines rather than dumping a whole
   concept; `search` takes `kind`, `type`, `status`, `stale` and `offset`, and every
   hit carries `trust` (with `status`/`stale` only when they are the exception)
-  so an agent can weigh it without opening it.
+  so an agent can weigh it without opening it. `read` also takes a directory
+  (`/`, `dir/`, `dir/index.md`, or a bare `dir` no concept answers to) and
+  returns its `index.md`, contained by `bundleDirOf` against `..`, symlinks and
+  dot-directories; `search` takes `dir` (`search.Options.Dir`, which starts the
+  walk there) and a `tags` list. `create` sets `kind: issue`, `type`, `status`,
+  `stale_after`, `resource` and `generated_by` through `bundle.Spec`'s `Type`,
+  `Kind` and `Frontmatter` hook, inside the one write, after validating every
+  value. `initialize` returns `mcpInstructions` plus the top-level directories;
+  `TestMCPInstructionsStayShort` holds it to a byte budget, since it rides in
+  the agent's context all session.
   Every tool result is capped and says so (`truncated`, `next_offset`, `… N
   more`); `TestEveryMCPToolIsCappedAndSaysSo` is driven from the tool list so a
   tool added later cannot escape it, and exists because every other MCP test

@@ -5,6 +5,11 @@ All notable changes to this project are documented here.
 ## Unreleased
 
 ### Added
+- **The MCP server sends the wiki's conventions on connect.** `initialize` now returns MCP `instructions`: search before deriving, browse listings top-down, one idea per concept with a description and a link, `status` is lifecycle, never edit `index.md`. They end with the wiki's top-level directories. Every MCP client gets them, including one that `okfw install` never set up.
+- **`okfw_read` opens directory listings.** `{"ref":"/"}` returns the root `index.md`, and `{"ref":"issues/"}` that directory's listing, with `section`, `offset` and `limit` as for a concept. OKF section 8's progressive-disclosure layer was out of reach over MCP: every ref had to name a concept. A ref cannot leave the bundle through `..` or a symlink.
+- **`okfw_create` writes a concept's metadata in the same write.** New fields: `kind: issue`, `type`, `status`, `stale_after`, `resource` and `generated_by`. An issue with its lifecycle and author took one create and four updates, and a failure part-way left a half-described concept on disk. Every value is now checked before anything is written. The CLI gains `okfw create --kind issue` and `--type`. `--kind issue` writes an issue without the template's body.
+- **`okfw remove-tags` and the MCP `remove_tags` action.** Nothing could remove a tag except a hand edit, so closing an issue (`open` → `resolved`) meant editing YAML.
+- **Search can be held to one directory.** `okfw search --path issues` and the MCP `dir` parameter walk only that subdirectory. The MCP search also takes `tags`, a list that must all match, as the CLI's repeatable `--tag` does.
 - **CI builds the devcontainer on x86_64 as well as arm64.** The devcontainer workflow ran only on an arm64 runner. It now builds natively on both, with the same checks on each: the binaries run, and ssh commands, scp and sftp work.
 
 ## v2026.10.1 — 2026-10-23
