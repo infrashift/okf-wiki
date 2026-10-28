@@ -62,6 +62,17 @@ okfw create "OAuth notes" -d "How our OAuth flow works"
 The `-d/--description` value is written to the optional OKF `description`
 frontmatter field (a one-sentence summary of the concept).
 
+### Create an issue, or set the OKF type
+```bash
+okfw create "Login fails" --kind issue --path issues   # kind and type "issue"
+okfw create "Q3 revenue" --type Metric                 # free-form OKF type
+```
+
+`--kind issue` writes `kind: issue` (and `type: issue` unless `--type` says
+otherwise) without the issue template's body, so `--body` holds the whole
+issue. `--type` overrides the free-form OKF `type`, which otherwise follows the
+kind.
+
 ### Place a note in a specific wiki subdirectory
 ```bash
 okfw create "Spec draft" --path projects/okf
@@ -144,6 +155,16 @@ okfw add-tags path/to/note.md golang api security
 ```
 
 Tags are appended to the existing `tags:` list in the concept's YAML frontmatter. Duplicate tags are ignored.
+
+### Remove tags from a concept
+```bash
+okfw remove-tags path/to/note.md open
+okfw remove-tags 019f0494 open triage
+```
+
+Tags that are not present are ignored. The `tags:` list stays, as `tags: []`
+when the last one goes, since `tags` is a required field. Use it to swap a
+state tag, for example `open` for `resolved` when an issue closes.
 
 ---
 
@@ -241,15 +262,34 @@ instead of one tool per CLI command. Concept bodies are writable
 through the tools (`create` takes `body`; `update` supports `append` and
 `set_body`), so filesystem-less MCP clients get full read/write access. Tool responses are compact
 JSON with wiki-relative paths, keeping agent token usage low (the full `tools/list`
-payload is about 4 KB). The wiki is discovered from the server's
+payload is about 5 KB). The wiki is discovered from the server's
 working directory on every call, so launch it from inside the project.
+
+**Conventions on connect.** The `initialize` result carries `instructions`
+(about 1 KB, sent once): search before deriving, browse listings top-down,
+one idea per concept with a description and a link, `status` is lifecycle,
+never edit `index.md`. They end with the wiki's top-level directories, so an
+agent's first listing is chosen rather than guessed. Every MCP client gets
+these, including one that `okfw install` never set up.
+
+**Progressive disclosure.** `okfw_read` takes a directory as well as a
+concept: `{"ref":"/"}` returns the root `index.md`, and `{"ref":"issues/"}`
+(or `issues/index.md`, or a bare `issues` when no concept answers to it) that
+directory's listing, with each concept's description. `section`, `offset` and
+`limit` work on a listing as on a concept. A ref cannot leave the bundle,
+through `..` or a symlink, or name a dot-directory.
+
+**One write per concept.** `okfw_create` sets the kind, type, lifecycle,
+staleness, resource and author in the same write that creates the concept, so
+an issue with its metadata is one call rather than five. Every value is
+checked before anything is written: a refused create leaves nothing behind.
 
 | Tool | Parameters | Bounds |
 |------|------------|--------|
-| `okfw_search` | `q`, `project`, `tag`, `kind`, `type`, `status`, `stale`, `limit`, `offset` | 10 hits by default, at most 100 per page; `truncated` and `next_offset` say there are more |
-| `okfw_create` | `kind` (`note`/`daily`), `title`, `project`, `dir`, `tags`, `description`, `body`, `template`, `date` | Returns `{id,path}` (a daily note returns `{path}`) |
-| `okfw_read` | `ref` (required), `section`, `offset`, `limit` | 200 lines by default; narrow with `section` or page with `offset`/`limit` |
-| `okfw_update` | `ref`, `action`, `value` (all required; an empty `value` on `verify`/`set_generated` means `human:<login>`) | Actions: `set_project`, `set_lifecycle`, `set_stale_after`, `add_tags`, `append`, `set_body`, `verify`, `set_generated`, `set_resource`, `add_source` — the same writers as the CLI |
+| `okfw_search` | `q`, `project`, `tag`, `tags` (all must match), `dir`, `kind`, `type`, `status`, `stale`, `limit`, `offset` | 10 hits by default, at most 100 per page; `truncated` and `next_offset` say there are more |
+| `okfw_create` | `kind` (`note`/`issue`/`daily`), `title`, `project`, `dir`, `tags`, `description`, `body`, `template`, `date`, and for a note or issue `type`, `status`, `stale_after`, `resource`, `generated_by` | Returns `{id,path}` (a daily note returns `{path}`) |
+| `okfw_read` | `ref` (required: a concept, or a directory such as `/` or `issues/`), `section`, `offset`, `limit` | 200 lines by default; narrow with `section` or page with `offset`/`limit` |
+| `okfw_update` | `ref`, `action`, `value` (all required; an empty `value` on `verify`/`set_generated` means `human:<login>`) | Actions: `set_project`, `set_lifecycle`, `set_stale_after`, `add_tags`, `remove_tags`, `append`, `set_body`, `verify`, `set_generated`, `set_resource`, `add_source` — the same writers as the CLI |
 | `okfw_graph` | `action` (`backlinks`/`cluster`/`tag`/`dangling`), `ref`, `depth`, `limit` | 10 nodes by default; `truncated` means more exist |
 
 Every search hit carries `trust`, plus `status` and `stale` when they are the
@@ -334,6 +374,16 @@ okfw search --tag golang
 okfw search --tag golang --tag api  # AND (must have both)
 okfw search -T golang -T testing
 ```
+
+### Search one directory
+```bash
+okfw search --path issues --tag open      # issues/ and its subdirectories
+okfw search "login" --path research/auth
+```
+
+`--path` scopes the search to a bundle subdirectory, recursively — the same
+directories `okfw create --path` writes to. The walk starts there, so a scoped
+search costs the directory, not the bundle.
 
 ### Filter by structured kind
 ```bash
@@ -771,6 +821,8 @@ Usage: `okfw connect`
 | `--path` | - | - | Place the concept in an arbitrary wiki subdirectory (e.g. `projects/okf`) |
 | `--tags` | - | - | Additional tags (comma-separated) |
 | `--template` | `-T` | - | Use a note template (e.g., `meeting`, `user-story`) |
+| `--type` | - | the kind | Free-form OKF `type` |
+| `--kind` | - | the template's, else `note` | Structured kind: `note` or `issue` |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw templates`
@@ -788,6 +840,14 @@ Usage: `okfw connect`
 ### `okfw add-tags`
 
 Usage: `okfw add-tags <id_or_file> <tag1> [tag2...]`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--help` | `-h` | - | Show help |
+
+### `okfw remove-tags`
+
+Usage: `okfw remove-tags <id_or_file> <tag1> [tag2...]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -852,6 +912,7 @@ Usage: `okfw root`
 |------|-------|---------|-------------|
 | `--project` | `-p` | - | Filter by project |
 | `--tag` | `-T` | - | Filter by tag (repeatable, AND logic) |
+| `--path` | - | - | Search only this bundle subdirectory, recursively |
 | `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
 | `--type` | `-t` | - | Filter by the free-form OKF `type` field |
 | `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`) |

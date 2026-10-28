@@ -93,6 +93,41 @@ func UpdateFrontmatterRemove(content []byte, updates map[string]string, remove [
 	return out, nil
 }
 
+// RemoveFrontmatterTags removes tags from the `tags` sequence. A tag that is not
+// present is skipped, so the call is idempotent. The sequence stays, empty if
+// need be: `tags` is a required field.
+func RemoveFrontmatterTags(content []byte, tags []string) ([]byte, error) {
+	drop := map[string]bool{}
+	for _, t := range tags {
+		drop[t] = true
+	}
+	out, err := Edit(content, func(m *yaml.Node) error {
+		cur := MapGet(m, "tags")
+		if cur == nil || cur.Kind != yaml.SequenceNode {
+			return nil
+		}
+		kept := cur.Content[:0]
+		for _, n := range cur.Content {
+			if n.Kind == yaml.ScalarNode && drop[n.Value] {
+				continue
+			}
+			kept = append(kept, n)
+		}
+		cur.Content = kept
+		if len(kept) == 0 {
+			cur.Style = yaml.FlowStyle // render `tags: []`, as a new concept does
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := guardMutation(content, out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AddFrontmatterTags appends tags to the `tags` sequence, creating it when
 // absent. Tags already present are skipped, so the call is idempotent.
 func AddFrontmatterTags(content []byte, tags []string) ([]byte, error) {

@@ -108,6 +108,7 @@ okfw set-project ./concept.md newproject
 
 # Add tags
 okfw add-tags ./concept.md golang api security
+okfw remove-tags ./concept.md security
 ```
 
 ## Daily Notes

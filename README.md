@@ -138,7 +138,11 @@ Two complementary integration points:
 
 - **MCP server** — `okfw mcp` serves five consolidated tools (`okfw_search`,
   `okfw_create`, `okfw_read`, `okfw_update`, `okfw_graph`) over stdio with
-  compact JSON responses (about 4 KB of tool schemas). Register with
+  compact JSON responses (about 5 KB of tool schemas). On connect it sends the
+  wiki's conventions and its top-level directories as MCP `instructions`, so
+  any client gets them. `okfw_read` opens a directory's `index.md` listing as
+  well as a concept (`{"ref":"/"}` for the root), and `okfw_create` sets kind,
+  type, lifecycle, staleness, resource and author in one write. Register with
   `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
   unprefixed names still dispatch, for configurations that predate the prefix.
 - **Agent skill** — `okfw install --platform claude|gemini|codex` writes the

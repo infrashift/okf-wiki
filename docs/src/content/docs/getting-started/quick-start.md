@@ -29,6 +29,7 @@ okfw set-project path/to/note.md my-project
 # Add tags to a concept
 okfw add-tags path/to/note.md golang          # Add a single tag
 okfw add-tags path/to/note.md golang api      # Add multiple tags
+okfw remove-tags path/to/note.md golang       # Remove a tag
 
 # Validate frontmatter against CUE schema
 okfw validate path/to/note.md

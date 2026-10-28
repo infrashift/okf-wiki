@@ -32,6 +32,25 @@ import (
 
 const mcpProtocolVersion = "2024-11-05"
 
+// mcpInstructions is sent once, as the initialize result's `instructions`
+// (MCP 2025-03-26). It is the one piece of guidance every MCP client receives:
+// the skill and the CLAUDE.md/GEMINI.md/AGENTS.md block reach only agents that
+// `okfw install` set up, and an agent with tools but no conventions files
+// concepts with no description, no links and the wrong `status`. It stays in
+// the agent's context for the whole session, so it is held to a byte budget
+// by TestMCPInstructionsStayShort.
+const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown concepts with YAML frontmatter, linked by markdown links. It holds what the code does not say: decisions and their reasons, findings, open work, runbooks.
+
+- Search before you derive or write: okfw_search. Weigh each hit by trust, status and stale.
+- Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
+- Write one idea per concept, with a one-sentence description and at least one link, [Title](/dir/file.md) from the wiki root. Set type, kind, status and provenance in the okfw_create call itself.
+- status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it. Custom keys go under x:.
+- Never edit index.md or log.md; okfw generates them.
+- Results are capped: truncated or next_offset means there is more.`
+
+// maxInstructionDirs bounds the directory names appended to the instructions.
+const maxInstructionDirs = 20
+
 type mcpServer struct {
 	startDir string // wiki discovery start; "" = process cwd
 	out      io.Writer
@@ -104,6 +123,9 @@ func mcpTools() []map[string]interface{} {
 	num := func(desc string) map[string]interface{} {
 		return map[string]interface{}{"type": "integer", "description": desc}
 	}
+	strs := func(desc string) map[string]interface{} {
+		return map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": desc}
+	}
 
 	return []map[string]interface{}{
 		{
@@ -117,30 +139,37 @@ func mcpTools() []map[string]interface{} {
 				"type":    str("filter by OKF free-form type, e.g. Playbook, Metric"),
 				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
+				"tags":    strs("filter by tags (all must match)"),
+				"dir":     str("search only this wiki subdirectory, e.g. issues"),
 				"limit":   num("max results (default 10)"),
 				"offset":  num("skip this many results; `truncated` reports next_offset"),
 			}),
 		},
 		{
 			"name":        "okfw_create",
-			"description": "Create a concept. Returns {id,path}.",
+			"description": "Create a concept in one write; the metadata fields save follow-up okfw_update calls. Returns {id,path}.",
 			"inputSchema": obj(map[string]interface{}{
-				"kind":        enum("what to create (default note)", "note", "daily"),
-				"title":       str("title (required for note)"),
-				"project":     str("optional project metadata (also used as folder)"),
-				"dir":         str("wiki subdirectory, e.g. research/protocols"),
-				"tags":        map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
-				"description": str("one-sentence OKF description"),
-				"body":        str("markdown body content"),
-				"template":    str("template name (see okfw templates)"),
-				"date":        str("daily note date YYYY-MM-DD (default today)"),
+				"kind":         enum("what to create (default note)", "note", "issue", "daily"),
+				"title":        str("title (required for note)"),
+				"project":      str("optional project metadata (also used as folder)"),
+				"dir":          str("wiki subdirectory, e.g. research/protocols"),
+				"tags":         strs("tags"),
+				"description":  str("one-sentence OKF description"),
+				"type":         str("OKF free-form type (default: the kind)"),
+				"status":       enum("OKF lifecycle (default stable)", "draft", "stable", "deprecated"),
+				"stale_after":  str("ISO 8601 datetime after which the concept is stale"),
+				"resource":     str("URI of the asset the concept describes"),
+				"generated_by": str("actor that wrote it: human:<id>, process:<id> or <producer>/<version>"),
+				"body":         str("markdown body content"),
+				"template":     str("template name (see okfw templates)"),
+				"date":         str("daily note date YYYY-MM-DD (default today)"),
 			}),
 		},
 		{
 			"name":        "okfw_read",
-			"description": "Read a concept's markdown by id or wiki-relative path. Capped at 200 lines; narrow with section, or page with offset/limit.",
+			"description": "Read a concept's markdown by id or wiki-relative path, or a directory's index.md listing (ref \"/\" for the root, \"<dir>/\" for a directory). Capped at 200 lines; narrow with section, or page with offset/limit.",
 			"inputSchema": obj(map[string]interface{}{
-				"ref":     str("concept id or path"),
+				"ref":     str("concept id or path, or a directory ending in /"),
 				"section": str("read only this markdown section, by heading text"),
 				"offset":  num("first line to read (1-based; within the section if one is given)"),
 				"limit":   num("maximum lines to read"),
@@ -151,8 +180,8 @@ func mcpTools() []map[string]interface{} {
 			"description": "Update a concept: metadata, OKF trust/provenance (verify, set_generated, set_resource, add_source), or its markdown body (append / set_body).",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":    str("concept id or path"),
-				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
-				"value":  str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
+				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "remove_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
+				"value":  str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags (add_tags, remove_tags) | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
 			}, "ref", "action", "value"),
 		},
 		{
@@ -214,6 +243,7 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 			"protocolVersion": version,
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
 			"serverInfo":      map[string]interface{}{"name": "okfw", "version": config.Version()},
+			"instructions":    s.instructions(),
 		}
 	case "ping":
 		resp.Result = map[string]interface{}{}
@@ -233,6 +263,36 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 		resp.Error = &rpcError{Code: -32601, Message: "method not found: " + req.Method}
 	}
 	return resp
+}
+
+// instructions returns mcpInstructions plus this wiki's top-level directories,
+// so the first listing an agent opens is one it chose rather than guessed. With
+// no wiki yet, the static text alone is still correct.
+func (s *mcpServer) instructions() string {
+	cfg, err := s.cfg()
+	if err != nil {
+		return mcpInstructions
+	}
+	entries, err := os.ReadDir(cfg.RootPath)
+	if err != nil {
+		return mcpInstructions
+	}
+	var dirs []string
+	for _, e := range entries {
+		if !e.IsDir() || bundle.SkipWalkDir(cfg.RootPath, filepath.Join(cfg.RootPath, e.Name()), e.Name()) {
+			continue
+		}
+		dirs = append(dirs, e.Name()+"/")
+	}
+	if len(dirs) == 0 {
+		return mcpInstructions
+	}
+	more := ""
+	if len(dirs) > maxInstructionDirs {
+		more = fmt.Sprintf(" … %d more", len(dirs)-maxInstructionDirs)
+		dirs = dirs[:maxInstructionDirs]
+	}
+	return mcpInstructions + "\n\nThis wiki's top-level directories: " + strings.Join(dirs, ", ") + more + "."
 }
 
 func (s *mcpServer) cfg() (*config.Config, error) {
@@ -307,15 +367,17 @@ const maxSearchLimit = 100
 
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
-		Q       string `json:"q"`
-		Project string `json:"project"`
-		Tag     string `json:"tag"`
-		Kind    string `json:"kind"`
-		Type    string `json:"type"`
-		Status  string `json:"status"`
-		Stale   bool   `json:"stale"`
-		Limit   int    `json:"limit"`
-		Offset  int    `json:"offset"`
+		Q       string   `json:"q"`
+		Project string   `json:"project"`
+		Tag     string   `json:"tag"`
+		Tags    []string `json:"tags"`
+		Dir     string   `json:"dir"`
+		Kind    string   `json:"kind"`
+		Type    string   `json:"type"`
+		Status  string   `json:"status"`
+		Stale   bool     `json:"stale"`
+		Limit   int      `json:"limit"`
+		Offset  int      `json:"offset"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
@@ -335,9 +397,11 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Stale:   a.Stale,
 		Limit:   a.Limit,
 		Offset:  a.Offset,
+		Dir:     a.Dir,
+		Tags:    a.Tags,
 	}
 	if a.Tag != "" {
-		opts.Tags = []string{a.Tag}
+		opts.Tags = append(opts.Tags, a.Tag)
 	}
 	results, total, err := search.Search(cfg.RootPath, opts)
 	if err != nil {
@@ -384,13 +448,23 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		Template    string   `json:"template"`
 		Body        string   `json:"body"`
 		Date        string   `json:"date"`
+		Type        string   `json:"type"`
+		Status      string   `json:"status"`
+		StaleAfter  string   `json:"stale_after"`
+		Resource    string   `json:"resource"`
+		GeneratedBy string   `json:"generated_by"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
 	}
 
+	hasMeta := a.Type != "" || a.Status != "" || a.StaleAfter != "" || a.Resource != "" || a.GeneratedBy != ""
+
 	switch a.Kind {
 	case "daily":
+		if hasMeta {
+			return errResult(fmt.Errorf("type, status, stale_after, resource and generated_by apply to a note or issue, not a daily note"))
+		}
 		date := time.Now()
 		if a.Date != "" {
 			var err error
@@ -405,9 +479,17 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		return jsonResult(map[string]string{"path": relPath(cfg, path)})
 
-	case "", "note":
+	case "", "note", "issue":
 		if a.Title == "" {
 			return errResult(fmt.Errorf("title is required for notes"))
+		}
+		kind := ""
+		if a.Kind == "issue" {
+			kind = "issue"
+		}
+		meta, err := createMetadata(a.Status, a.StaleAfter, a.Resource, a.GeneratedBy)
+		if err != nil {
+			return errResult(err)
 		}
 		path, id, err := bundle.CreateConcept(cfg, bundle.Spec{
 			Title:       a.Title,
@@ -417,6 +499,9 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 			Description: a.Description,
 			Template:    a.Template,
 			Body:        a.Body,
+			Type:        a.Type,
+			Kind:        kind,
+			Frontmatter: meta,
 		})
 		if err != nil {
 			return errResult(err)
@@ -426,7 +511,60 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		return jsonResult(map[string]string{"id": id, "path": relPath(cfg, path)})
 	}
-	return errResult(fmt.Errorf("unknown kind %q: want note or daily", a.Kind))
+	return errResult(fmt.Errorf("unknown kind %q: want note, issue or daily", a.Kind))
+}
+
+// createMetadata turns okfw_create's lifecycle, trust and provenance fields
+// into one frontmatter edit, applied before the concept's single write. Every
+// value is checked here, before anything is written: a create that failed on
+// its third field used to leave the concept on disk without the rest. Each
+// field goes through the writer its okfw_update action uses.
+func createMetadata(status, staleAfter, resource, generatedBy string) (func(*yaml.Node) error, error) {
+	if status == "" && staleAfter == "" && resource == "" && generatedBy == "" {
+		return nil, nil
+	}
+	switch status {
+	case "", "draft", "stable", "deprecated":
+	default:
+		return nil, fmt.Errorf("invalid lifecycle status %q: want draft, stable, or deprecated", status)
+	}
+	if staleAfter != "" {
+		v, err := config.NormalizeDateTime(staleAfter)
+		if err != nil {
+			return nil, fmt.Errorf("invalid stale_after: %w", err)
+		}
+		staleAfter = v
+	}
+	if generatedBy != "" {
+		if err := config.ValidateActor(generatedBy); err != nil {
+			return nil, err
+		}
+	}
+	return func(m *yaml.Node) error {
+		// stable is the default when status is absent (OKF section 5.4), so it
+		// is not written.
+		if status != "" && status != "stable" {
+			bundle.MapSetString(m, "status", status)
+		}
+		if staleAfter != "" {
+			bundle.MapSetString(m, "stale_after", staleAfter)
+		}
+		if resource != "" {
+			if err := setResourceMutator(resource)(m); err != nil {
+				return err
+			}
+		}
+		if generatedBy != "" {
+			if err := setGeneratedMutator(generatedBy)(m); err != nil {
+				return err
+			}
+			// generated.at mirrors timestamp; validation rejects a disagreement.
+			if ts := bundle.MapGet(m, "timestamp"); ts != nil {
+				return bundle.SetPath(m, "generated.at", ts.Value)
+			}
+		}
+		return nil
+	}, nil
 }
 
 func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResult {
@@ -437,14 +575,35 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 		Limit   int    `json:"limit"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil || a.Ref == "" {
-		return errResult(fmt.Errorf("ref is required"))
+		return errResult(fmt.Errorf(`ref is required (use "/" for the root listing)`))
 	}
-	path, err := bundle.ResolveConceptPath(cfg, a.Ref)
-	if err != nil {
-		return errResult(err)
+	// A directory reads as its index.md listing: OKF section 8's disclosure
+	// layer, which an agent with only these tools could not reach — every ref
+	// had to name a concept, so it had to search before it could browse. A ref
+	// that spells a directory ("/", "dir/", "dir/index.md") is one; a bare
+	// "dir" is one only when no concept answers to it.
+	var path string
+	if looksLikeDir(a.Ref) {
+		dir, ok := bundleDirOf(cfg, a.Ref)
+		if !ok {
+			return errResult(fmt.Errorf("no directory %q in the wiki", a.Ref))
+		}
+		path = filepath.Join(dir, "index.md")
+	} else {
+		var err error
+		if path, err = bundle.ResolveConceptPath(cfg, a.Ref); err != nil {
+			dir, ok := bundleDirOf(cfg, a.Ref)
+			if !ok {
+				return errResult(err)
+			}
+			path = filepath.Join(dir, "index.md")
+		}
 	}
 	content, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) && filepath.Base(path) == "index.md" {
+			return errResult(fmt.Errorf("no index.md in %s; run okfw index-md", relPath(cfg, filepath.Dir(path))))
+		}
 		return errResult(err)
 	}
 	// A generated entity card is small, but a hand-written concept is not, and
@@ -467,6 +626,47 @@ func (s *mcpServer) toolRead(cfg *config.Config, args json.RawMessage) *toolResu
 		return textResult(readWindow(body, a.Offset, limit, a.Section))
 	}
 	return textResult(readWindow(string(content), a.Offset, limit, ""))
+}
+
+// looksLikeDir reports whether a ref is spelled as a directory or its listing.
+func looksLikeDir(ref string) bool {
+	ref = filepath.ToSlash(strings.TrimSpace(ref))
+	return strings.HasSuffix(ref, "/") || ref == "index.md" || strings.HasSuffix(ref, "/index.md")
+}
+
+// bundleDirOf returns the absolute bundle directory a ref names, if it names
+// one. The ref comes from the client unvetted, so it must stay inside the
+// bundle, through a symlink as much as through "..", and it may not name a
+// dot-directory, which no walk of the bundle visits.
+func bundleDirOf(cfg *config.Config, ref string) (string, bool) {
+	r := filepath.ToSlash(strings.TrimSpace(ref))
+	if r == "index.md" || strings.HasSuffix(r, "/index.md") {
+		r = strings.TrimSuffix(r, "index.md")
+	}
+	r = strings.Trim(r, "/")
+	if r != "" {
+		for _, seg := range strings.Split(r, "/") {
+			if seg == ".." || seg == "." || strings.HasPrefix(seg, ".") {
+				return "", false
+			}
+		}
+	}
+	dir := filepath.Join(cfg.RootPath, filepath.FromSlash(r))
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return "", false
+	}
+	realRoot, err := filepath.EvalSymlinks(cfg.RootPath)
+	if err != nil {
+		return "", false
+	}
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	if rel, err := filepath.Rel(realRoot, realDir); err != nil || rel == ".." || strings.HasPrefix(rel, "../") {
+		return "", false
+	}
+	return dir, true
 }
 
 // defaultReadLines bounds a read that asked for no window.
@@ -586,13 +786,12 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		}
 		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"stale_after": v})
 	case "add_tags":
-		var tags []string
-		for _, t := range strings.Split(a.Value, ",") {
-			if t = strings.TrimSpace(t); t != "" {
-				tags = append(tags, t)
-			}
+		newContent, err = bundle.AddFrontmatterTags(content, splitTags(a.Value))
+		if err == nil {
+			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
-		newContent, err = bundle.AddFrontmatterTags(content, tags)
+	case "remove_tags":
+		newContent, err = bundle.RemoveFrontmatterTags(content, splitTags(a.Value))
 		if err == nil {
 			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
@@ -680,6 +879,17 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		fmt.Fprintf(os.Stderr, "Warning: failed to index: %v\n", err)
 	}
 	return jsonResult(map[string]string{"path": relPath(cfg, path), "status": "ok"})
+}
+
+// splitTags reads a comma-separated tag list, dropping empty entries.
+func splitTags(v string) []string {
+	var tags []string
+	for _, t := range strings.Split(v, ",") {
+		if t = strings.TrimSpace(t); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
 }
 
 type mcpNode struct {

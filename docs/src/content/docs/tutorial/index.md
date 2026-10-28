@@ -714,6 +714,7 @@ okfw index-md
 | `okfw move <ref> <dest>` | Move or rename a concept, repairing links |
 | `okfw backlinks [file]` | Show backlinks |
 | `okfw add-tags <file> <tag1> [tag2...]` | Add tags to a concept |
+| `okfw remove-tags <file> <tag1> [tag2...]` | Remove tags from a concept |
 | `okfw validate <file>` | Validate frontmatter against okfw's CUE schema |
 | `okfw validate --all [path]` | Apply that strict check to every concept |
 | `okfw validate --okf [path]` | Validate whole-wiki OKF conformance (permissive) |

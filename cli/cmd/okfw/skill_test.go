@@ -31,7 +31,7 @@ func TestSkillDocumentsEveryCommand(t *testing.T) {
 		// name; listing all six in a skill an agent reads on every task is
 		// noise, and the conventions section names the two that matter.
 		"set-project": true, "set-stale-after": true, "set-resource": true,
-		"set-generated": true, "add-tags": true, "graph": true,
+		"set-generated": true, "add-tags": true, "remove-tags": true, "graph": true,
 		"graph-query": true,
 	}
 	for _, c := range rootCmd().Commands() {

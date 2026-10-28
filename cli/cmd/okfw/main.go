@@ -39,6 +39,8 @@ func rootCmd() *cobra.Command {
 	var templateFlag string
 	var descriptionFlag string
 	var pathFlag string
+	var createTypeFlag string
+	var createKindFlag string
 	var statusFlag string
 
 	var rootCmd = &cobra.Command{
@@ -75,6 +77,8 @@ Examples:
   okfw create "My Note"                                      # Basic note
   okfw create "Meeting Notes" --template meeting             # From template
   okfw create "Feature Spec" -T feature -p myproj            # Template with project
+  okfw create "Login fails" --kind issue --path issues       # An issue, without the template
+  okfw create "Q3 revenue" --type Metric                     # Free-form OKF type
   okfw create "Scripted" --json                              # Machine-readable result`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -91,6 +95,8 @@ Examples:
 				Description: descriptionFlag,
 				Template:    templateFlag,
 				Body:        bodyFlag,
+				Type:        createTypeFlag,
+				Kind:        createKindFlag,
 			})
 			if err != nil {
 				return err
@@ -279,6 +285,7 @@ Examples:
   okfw search --type Playbook               # Filter by OKF free-form type
   okfw search --status draft                # Filter by lifecycle status
   okfw search --stale                       # Concepts past their stale_after
+  okfw search --path issues --tag open      # Only the issues/ directory, recursively
   okfw search "auth" --project myproject    # Combined search`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
@@ -295,6 +302,7 @@ Examples:
 				Offset:  offsetFlag,
 				Status:  statusFlag,
 				Stale:   staleFlag,
+				Dir:     pathFlag,
 			}
 
 			if len(args) > 0 {
@@ -607,6 +615,8 @@ Examples:
 	createCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Additional tags (comma-separated)")
 	createCmd.Flags().BoolVar(&createJSONFlag, "json", false, "Print {\"id\",\"path\"} as JSON instead of prose")
 	createCmd.Flags().StringVar(&bodyFlag, "body", "", "Markdown body content for the note")
+	createCmd.Flags().StringVar(&createTypeFlag, "type", "", "OKF free-form type (default: the kind)")
+	createCmd.Flags().StringVar(&createKindFlag, "kind", "", "Structured kind: note or issue (default: the template's, else note)")
 
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
 	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
@@ -617,6 +627,7 @@ Examples:
 	searchCmd.Flags().IntVar(&offsetFlag, "offset", 0, "Skip this many results (pagination)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
 	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
+	searchCmd.Flags().StringVar(&pathFlag, "path", "", "Search only this bundle subdirectory, recursively (e.g. issues)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
@@ -697,6 +708,77 @@ Examples:
 	dailyCmd.Flags().BoolVar(&weekFlag, "week", false, "Show this week's notes (with --list)")
 	dailyCmd.Flags().BoolVar(&monthFlag, "month", false, "Show this month's notes (with --list)")
 	dailyCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON (with --list)")
+
+	var removeTagsCmd = &cobra.Command{
+		Use:   "remove-tags [id_or_file] [tags...]",
+		Short: "Remove tags from a concept",
+		Long: `Remove one or more tags from a concept's frontmatter. Tags that are not
+present are ignored. The tags list stays, empty if need be.
+
+Examples:
+  okfw remove-tags ./path/to/note.md draft-idea
+  okfw remove-tags 202602131045 open`,
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			_, filePath, err := resolveRefArg(args[0])
+			if err != nil {
+				return err
+			}
+
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				return fmt.Errorf("failed to read file: %w", err)
+			}
+
+			z, err := config.ParseFrontmatter(content)
+			if err != nil {
+				return fmt.Errorf("failed to parse frontmatter: %w", err)
+			}
+
+			present := make(map[string]bool)
+			for _, t := range z.Tags {
+				present[t] = true
+			}
+			var removed []string
+			for _, t := range args[1:] {
+				if present[t] {
+					removed = append(removed, t)
+					present[t] = false
+				}
+			}
+
+			if len(removed) == 0 {
+				fmt.Println("No such tags present")
+				return nil
+			}
+
+			newContent, err := bundle.RemoveFrontmatterTags(content, removed)
+			if err != nil {
+				return fmt.Errorf("failed to update frontmatter: %w", err)
+			}
+
+			// Bump the OKF timestamp (last meaningful change).
+			newContent, err = bundle.UpdateFrontmatter(newContent, nil)
+			if err != nil {
+				return fmt.Errorf("failed to update timestamp: %w", err)
+			}
+
+			if err := os.WriteFile(filePath, newContent, 0644); err != nil {
+				return fmt.Errorf("failed to write file: %w", err)
+			}
+
+			fmt.Printf("Removed tags: %s\n", strings.Join(removed, ", "))
+
+			cfg, cfgErr := config.Discover("")
+			if cfgErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: config load failed, skipping index update: %v\n", cfgErr)
+			} else if err := bundle.AutoSync(cfg, filePath); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to index: %v\n", err)
+			}
+
+			return nil
+		},
+	}
 
 	var addTagsCmd = &cobra.Command{
 		Use:   "add-tags [id_or_file] [tags...]",
@@ -1116,6 +1198,7 @@ Example client configuration (Claude Code):
 	rootCmd.AddCommand(backlinksCmd)
 	rootCmd.AddCommand(dailyCmd)
 	rootCmd.AddCommand(addTagsCmd)
+	rootCmd.AddCommand(removeTagsCmd)
 	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check the whole bundle for OKF conformance (permissive, spec section 11)")
 	validateCmd.Flags().BoolVar(&validateAll, "all", false, "Apply the strict okfw schema to every concept in the bundle")
 	for _, c := range fileCommands() {
