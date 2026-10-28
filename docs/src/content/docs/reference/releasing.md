@@ -28,8 +28,17 @@ git push origin v2026.10.0
 ## Build and sign
 
 ```bash
-make sign COSIGN_KEY=path/to/release.key
+make sign COSIGN_KEY=~/.config/cosign/infrashift/trusted-build-agents/release.key \
+  COSIGN_PUB=release/cosign.pub
 ```
+
+The project's release key is kept at
+`~/.config/cosign/infrashift/trusted-build-agents/release.key` on the
+maintainer's machine, not at the `make signing-key` default
+(`~/.config/cosign/okfw.key`), so `make sign` must be told where it is. Pass
+`COSIGN_PUB=release/cosign.pub` as well: the verification at the end of `make
+sign` then checks every new signature against the committed public key, so a
+wrong key fails there instead of producing a release no one can verify.
 
 `make sign` runs `make dist`, which builds the Linux x86_64 and aarch64
 binaries with the version stamped in, packages each as a tarball with an SPDX
