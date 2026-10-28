@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.10.2 — 2026-10-28
 
 ### Added
 - **The MCP server sends the wiki's conventions on connect.** `initialize` now returns MCP `instructions`: search before deriving, browse listings top-down, one idea per concept with a description and a link, `status` is lifecycle, never edit `index.md`. They end with the wiki's top-level directories. Every MCP client gets them, including one that `okfw install` never set up.

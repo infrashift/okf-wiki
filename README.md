@@ -73,7 +73,7 @@ Each [release](https://github.com/infrashift/okf-wiki/releases) carries signed,
 static Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`):
 
 ```bash
-VERSION=v2026.10.1
+VERSION=v2026.10.2
 ARCH=amd64   # or arm64
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
 tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
