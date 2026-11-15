@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // Relocating and removing concepts. Both operations have to keep three things
@@ -78,12 +78,12 @@ func eachConcept(root string, fn func(abs, rel string) error) error {
 			return err
 		}
 		if fi.IsDir() {
-			if SkipWalkDir(root, p, fi.Name()) {
+			if SkipWalkDir(root, p) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".md") || IsReservedBase(fi.Name()) {
+		if !strings.HasSuffix(p, ".md") || config.IsReservedBase(fi.Name()) {
 			return nil
 		}
 		rel, rerr := relSlash(root, p)
@@ -149,7 +149,7 @@ func DeleteConceptFile(cfg *config.Config, absPath string) (*DeleteResult, error
 	if err != nil {
 		return nil, err
 	}
-	if IsReservedBase(filepath.Base(absPath)) {
+	if config.IsReservedBase(filepath.Base(absPath)) {
 		return nil, fmt.Errorf("%s is a reserved generated file, not a concept", rel)
 	}
 
@@ -207,7 +207,7 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 	if err != nil {
 		return nil, err
 	}
-	if IsReservedBase(filepath.Base(newAbs)) {
+	if config.IsReservedBase(filepath.Base(newAbs)) {
 		return nil, fmt.Errorf("%s is a reserved OKF filename", newRel)
 	}
 	if !strings.HasSuffix(newRel, ".md") {

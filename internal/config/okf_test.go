@@ -217,7 +217,7 @@ func TestTrustTier(t *testing.T) {
 
 func TestGeneratedAtMustAgreeWithTimestamp(t *testing.T) {
 	if _, err := ParseAndValidate(concept(`generated:
-  by: "okfw/0.2"
+  by: "github.com/infrashift/okf-wiki/0.2"
   at: "2026-07-01T10:00:00Z"
 `)); err != nil {
 		t.Errorf("matching generated.at should validate: %v", err)
@@ -225,19 +225,19 @@ func TestGeneratedAtMustAgreeWithTimestamp(t *testing.T) {
 	// The comparison is on the instant, not the text, so a different offset
 	// spelling of the same moment still agrees.
 	if _, err := ParseAndValidate(concept(`generated:
-  by: "okfw/0.2"
+  by: "github.com/infrashift/okf-wiki/0.2"
   at: "2026-07-01T12:00:00+02:00"
 `)); err != nil {
 		t.Errorf("same instant in another offset should validate: %v", err)
 	}
 	if _, err := ParseAndValidate(concept(`generated:
-  by: "okfw/0.2"
+  by: "github.com/infrashift/okf-wiki/0.2"
   at: "2026-07-02T10:00:00Z"
 `)); err == nil {
 		t.Error("generated.at disagreeing with timestamp should be rejected")
 	}
 	// generated.by alone is fine — at is optional.
-	if _, err := ParseAndValidate(concept("generated:\n  by: \"okfw/0.2\"\n")); err != nil {
+	if _, err := ParseAndValidate(concept("generated:\n  by: \"github.com/infrashift/okf-wiki/0.2\"\n")); err != nil {
 		t.Errorf("generated without at should validate: %v", err)
 	}
 }
@@ -456,7 +456,7 @@ func TestConceptKey(t *testing.T) {
 // The closed schema rejected every section 10 key, so okfw could not hold an
 // Attested Computation concept at all; x: cannot carry spec-defined keys.
 func TestAttestedComputationKeysValidate(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_concept_attested.md")
+	content, err := os.ReadFile("../../cli/testdata/valid_concept_attested.md")
 	if err != nil {
 		t.Fatal(err)
 	}

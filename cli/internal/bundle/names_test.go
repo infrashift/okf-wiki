@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 func TestSlugify(t *testing.T) {
@@ -124,15 +124,6 @@ func TestSanitizeSubdirRejectsDotDirectories(t *testing.T) {
 	}
 }
 
-func TestIsReservedBase(t *testing.T) {
-	if !IsReservedBase("index.md") || !IsReservedBase("log.md") {
-		t.Error("index.md/log.md should be reserved")
-	}
-	if IsReservedBase("note--abcd.md") {
-		t.Error("regular concept should not be reserved")
-	}
-}
-
 func TestConceptDir(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.ConfigFor(root)
@@ -177,18 +168,21 @@ func TestRelDir(t *testing.T) {
 
 func TestSkipWalkDir(t *testing.T) {
 	root := "/bundle"
-	if SkipWalkDir(root, root, ".okfw") {
+	if SkipWalkDir(root, root) {
 		t.Error("the root itself must never be skipped, even though it is a dot-dir")
 	}
 	for _, name := range []string{".index", ".todos", "ephemeral", ".git"} {
-		if !SkipWalkDir(root, filepath.Join(root, name), name) {
+		if !SkipWalkDir(root, filepath.Join(root, name)) {
 			t.Errorf("SkipWalkDir should skip %q", name)
 		}
 	}
-	if SkipWalkDir(root, filepath.Join(root, "notes"), "notes") {
+	if SkipWalkDir(root, filepath.Join(root, "notes")) {
 		t.Error("SkipWalkDir should not skip a normal directory")
 	}
-	if SkipWalkDir(root, filepath.Join(root, "foo", "ephemeral"), "ephemeral") {
+	if SkipWalkDir(root, filepath.Join(root, "foo", "ephemeral")) {
 		t.Error("only the root's ephemeral/ is okfw's; a nested one is part of the bundle")
+	}
+	if !SkipWalkDir(".okfw/", ".okfw/ephemeral") {
+		t.Error("a root spelt with a trailing slash must still own its ephemeral/")
 	}
 }

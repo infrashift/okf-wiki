@@ -1,7 +1,7 @@
 ---
 description: Graph traversal, backlinks, and relationship queries over an OKF Wiki's links
 globs:
-  - "cli/internal/graph/**"
+  - "internal/graph/**"
   - "cli/internal/bundle/loadgraph.go"
 ---
 

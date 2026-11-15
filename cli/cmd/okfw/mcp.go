@@ -24,10 +24,10 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
-	"okfw/cli/internal/search"
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
+	"github.com/infrashift/okf-wiki/cli/internal/search"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 const mcpProtocolVersion = "2024-11-05"
@@ -279,7 +279,7 @@ func (s *mcpServer) instructions() string {
 	}
 	var dirs []string
 	for _, e := range entries {
-		if !e.IsDir() || bundle.SkipWalkDir(cfg.RootPath, filepath.Join(cfg.RootPath, e.Name()), e.Name()) {
+		if !e.IsDir() || bundle.SkipWalkDir(cfg.RootPath, filepath.Join(cfg.RootPath, e.Name())) {
 			continue
 		}
 		dirs = append(dirs, e.Name()+"/")

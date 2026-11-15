@@ -14,7 +14,7 @@ var actorCases = []struct {
 	{`human:CORP\alice`, true},
 	{"process:finance-nightly", true},
 	{"reference_agent/gemini-2.5-pro", true},
-	{"okfw/0.2", true},
+	{"github.com/infrashift/okf-wiki/0.2", true},
 	{"ollama/llama3:8b", true}, // a version may hold a colon
 
 	{"humna:alice", false},

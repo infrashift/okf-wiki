@@ -11,7 +11,7 @@ import (
 	_ "embed"
 	"path/filepath"
 
-	"okfw/cli/internal/agentskill"
+	"github.com/infrashift/okf-wiki/cli/internal/agentskill"
 )
 
 //go:embed assets/SKILL.md.tmpl

@@ -3,7 +3,7 @@ package config
 import (
 	"strconv"
 
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // ResourceRef is the part of an Attested Computation's executor or attester

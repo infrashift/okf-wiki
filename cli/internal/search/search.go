@@ -14,7 +14,9 @@
 // What is deliberately kept is *ranking*. The dominant agent pattern is search
 // then read, with a small result cap, so the caller needs the best few hits
 // rather than the first few in directory order. Scoring is a weighted field
-// match rather than BM25 — see scoreConcept.
+// match rather than BM25 — see scoreConcept in pkg/bundle, which owns the walk
+// and the ranking so that the public package ranks as `okfw search` does. This
+// package adds the filters, the paging and the CLI's output.
 //
 // The cost is linear in bundle size. At tens of thousands of concepts this is
 // the design choice to revisit.
@@ -23,16 +25,15 @@ package search
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"path"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
+	okfbundle "github.com/infrashift/okf-wiki/pkg/bundle"
 )
 
 // Options selects and filters concepts. The zero value matches everything.
@@ -79,62 +80,36 @@ type Result struct {
 // Lifecycle is the hit's OKF lifecycle status, with absent read as stable.
 func (r Result) Lifecycle() string { return lifecycleOf(r.Status) }
 
-// Field weights. Title outranks description outranks body because a concept
-// whose *title* is the query is almost always the one meant, and okfw's own
-// convention is one idea per concept with a one-sentence description.
-const (
-	weightTitle       = 10.0
-	weightTag         = 6.0
-	weightDescription = 4.0
-	weightBody        = 1.0
-	// bonusExactTitle fires when the whole query is the title, which is how an
-	// agent following a name from the code graph arrives here.
-	bonusExactTitle = 25.0
-	// bonusAllTerms rewards a concept matching every term over one matching a
-	// single term many times — the property BM25 saturation buys, obtained here
-	// by rewarding coverage rather than by damping frequency.
-	bonusAllTerms = 8.0
-)
+// unbounded lets the CLI read a bundle of any size, as it always has: the
+// limits in okfbundle.Limits protect a consumer of untrusted bundles, and the
+// CLI reads the user's own.
+var unbounded = okfbundle.Limits{MaxFileBytes: math.MaxInt64, MaxFiles: math.MaxInt}
 
 // Search walks the bundle, keeps concepts passing every filter, scores them
 // against the query and returns one page plus the total number of matches.
+//
+// The walk and the ranking are pkg/bundle's Walk and Search, the code a
+// consumer of the public package runs, so the two cannot drift apart.
 func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = DefaultLimit
 	}
-	terms := tokenize(opts.Query)
 	now := time.Now()
 
-	start, err := scopeDir(bundleRoot, opts.Dir)
+	dir, err := scopeDir(bundleRoot, opts.Dir)
 	if err != nil {
 		return nil, 0, err
 	}
 
-	var all []Result
-	err = filepath.Walk(start, func(p string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if fi.IsDir() {
-			if bundle.SkipWalkDir(bundleRoot, p, fi.Name()) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
-			return nil
-		}
-		content, err := os.ReadFile(p)
-		if err != nil {
-			return nil // unreadable: skip, do not fail the whole search
-		}
+	var candidates []*okfbundle.Concept
+	byConcept := make(map[*okfbundle.Concept]Result)
+	err = okfbundle.Walk(os.DirFS(bundleRoot), dir, unbounded, func(rel string, content []byte) error {
 		fm, err := config.ParseFrontmatter(content)
 		if err != nil {
 			return nil // no parseable frontmatter: not a concept
 		}
-		abs, _ := filepath.Abs(p)
-		rel, _ := filepath.Rel(bundleRoot, p)
+		abs, _ := filepath.Abs(filepath.Join(bundleRoot, filepath.FromSlash(rel)))
 		r := Result{
 			// A concept okfw did not write may carry no id; its OKF concept ID
 			// (the path) is what identifies it, and what read and resolve accept.
@@ -154,36 +129,26 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 		if !matches(r, opts) {
 			return nil
 		}
-		body := config.ExtractBody(content)
-		if len(terms) > 0 {
-			score, snippet := scoreConcept(r, body, terms)
-			if score <= 0 {
-				return nil
-			}
-			r.Score, r.Snippet = score, snippet
-		} else if r.Description != "" {
-			r.Snippet = firstLine(r.Description)
+		c := &okfbundle.Concept{
+			Path:        rel,
+			ID:          r.ID,
+			Title:       r.Title,
+			Type:        r.Type,
+			Description: r.Description,
+			Tags:        r.Tags,
+			Status:      fm.LifecycleStatus(),
+			Body:        config.ExtractBody(content),
 		}
-		all = append(all, r)
+		candidates = append(candidates, c)
+		byConcept[c] = r
 		return nil
 	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	// Highest score first; ties by title then id so paging is stable and two
-	// runs over an unchanged bundle agree.
-	sort.Slice(all, func(i, j int) bool {
-		if all[i].Score != all[j].Score {
-			return all[i].Score > all[j].Score
-		}
-		if all[i].Title != all[j].Title {
-			return all[i].Title < all[j].Title
-		}
-		return all[i].ID < all[j].ID
-	})
-
-	total := len(all)
+	hits := okfbundle.Search(candidates, opts.Query, 0)
+	total := len(hits)
 	if opts.Offset < 0 {
 		opts.Offset = 0
 	}
@@ -191,17 +156,26 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 		return nil, total, nil
 	}
 	end := min(opts.Offset+limit, total)
-	return all[opts.Offset:end], total, nil
+	page := make([]Result, 0, end-opts.Offset)
+	for _, h := range hits[opts.Offset:end] {
+		r := byConcept[h.Concept]
+		r.Score, r.Snippet = h.Score, h.Snippet
+		page = append(page, r)
+	}
+	return page, total, nil
 }
 
 // scopeDir resolves Options.Dir to the directory the walk starts from. The
 // walk starting there, rather than filtering every path afterwards, is what
 // makes a scoped search cost the scope and not the bundle. The dir comes from
 // an MCP client unvetted, so it must stay inside the bundle.
+//
+// It returns the directory as okfbundle.Walk takes it: slash-separated and
+// relative to the bundle root, "." for the whole bundle.
 func scopeDir(bundleRoot, dir string) (string, error) {
 	dir = strings.Trim(filepath.ToSlash(dir), "/")
 	if dir == "" {
-		return bundleRoot, nil
+		return ".", nil
 	}
 	for _, seg := range strings.Split(dir, "/") {
 		if seg == ".." || seg == "." || strings.HasPrefix(seg, ".") {
@@ -212,7 +186,7 @@ func scopeDir(bundleRoot, dir string) (string, error) {
 	if fi, err := os.Stat(start); err != nil || !fi.IsDir() {
 		return "", fmt.Errorf("no directory %q in the wiki", dir)
 	}
-	return start, nil
+	return path.Clean(dir), nil
 }
 
 func lifecycleOf(s string) string {
@@ -254,137 +228,6 @@ func matches(r Result, opts Options) bool {
 		}
 	}
 	return true
-}
-
-// scoreConcept ranks a concept against the query terms and returns a snippet
-// around the best body match.
-//
-// A weighted field match rather than BM25. With one idea per concept and a
-// one-sentence description, term frequency within a concept carries far less
-// signal than *where* a term appears, and coverage of the query matters more
-// than repetition — which is what bonusAllTerms encodes.
-func scoreConcept(r Result, body string, terms []string) (float64, string) {
-	title := strings.ToLower(r.Title)
-	desc := strings.ToLower(r.Description)
-	lowBody := strings.ToLower(body)
-	tags := strings.ToLower(strings.Join(r.Tags, " "))
-
-	var score float64
-	hits := 0
-	for _, t := range terms {
-		var termScore float64
-		if strings.Contains(title, t) {
-			termScore += weightTitle
-		}
-		if strings.Contains(tags, t) {
-			termScore += weightTag
-		}
-		if strings.Contains(desc, t) {
-			termScore += weightDescription
-		}
-		if n := strings.Count(lowBody, t); n > 0 {
-			// Damp repetition: a term appearing 50 times is not 50x the signal.
-			termScore += weightBody * (1 + float64(min(n, 5))/2)
-		}
-		if termScore > 0 {
-			hits++
-		}
-		score += termScore
-	}
-	if score == 0 {
-		return 0, ""
-	}
-	if hits == len(terms) {
-		score += bonusAllTerms
-	}
-	if title == strings.Join(terms, " ") {
-		score += bonusExactTitle
-	}
-	return score, snippetFor(body, terms, r.Description)
-}
-
-// snippetFor returns a short window of body text around the first matching
-// term, falling back to the description.
-//
-// Plain text, never marked up: the previous implementation used bleve's default
-// html highlighter, whose formatter ran html.EscapeString over the text
-// *around* each match, so a snippet of a markdown concept came back containing
-// `&amp;` and `&lt;`. That was corruption, not markup.
-func snippetFor(body string, terms []string, fallback string) string {
-	const window = 160
-	at := matchOffset(body, terms)
-	if at < 0 {
-		return firstLine(fallback)
-	}
-	// Cut on rune boundaries: a byte window through a multi-byte character put
-	// invalid UTF-8 in the snippet, which JSON encoding turned into U+FFFD.
-	start := max(at-window/2, 0)
-	for start > 0 && !utf8.RuneStart(body[start]) {
-		start--
-	}
-	end := min(start+window, len(body))
-	for end < len(body) && !utf8.RuneStart(body[end]) {
-		end--
-	}
-	s := strings.TrimSpace(strings.ReplaceAll(body[start:end], "\n", " "))
-	if start > 0 {
-		s = "..." + s
-	}
-	if end < len(body) {
-		s += "..."
-	}
-	return s
-}
-
-// matchOffset returns the byte offset in body of the earliest term, matched
-// case-insensitively, or -1.
-//
-// The match is found in strings.ToLower(body), but that offset cannot slice
-// body: lowering changes the byte length of some runes — Ⱥ grows from two bytes
-// to three, İ and the Kelvin sign shrink to one, an invalid byte becomes a
-// three-byte U+FFFD — so it pointed elsewhere in the original, and past its end
-// in a body dense with growing runes, which panicked the whole search. The
-// offset is translated back by re-walking body and summing each rune's lowered
-// width, the same per-rune mapping strings.ToLower applies.
-func matchOffset(body string, terms []string) int {
-	low := strings.ToLower(body)
-	idx := -1
-	for _, t := range terms {
-		if i := strings.Index(low, t); i >= 0 && (idx < 0 || i < idx) {
-			idx = i
-		}
-	}
-	if idx < 0 {
-		return -1
-	}
-	n := 0
-	for i, r := range body {
-		if n >= idx {
-			return i
-		}
-		n += utf8.RuneLen(unicode.ToLower(r))
-	}
-	return len(body)
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
-	}
-	return strings.TrimSpace(s)
-}
-
-// tokenize lowercases and splits a query on whitespace, dropping punctuation
-// that would never match inside a word.
-func tokenize(q string) []string {
-	var out []string
-	for _, f := range strings.Fields(strings.ToLower(q)) {
-		f = strings.Trim(f, `.,;:!?"'()[]{}`)
-		if f != "" {
-			out = append(out, f)
-		}
-	}
-	return out
 }
 
 // ResultsToJSON renders results as a JSON array.

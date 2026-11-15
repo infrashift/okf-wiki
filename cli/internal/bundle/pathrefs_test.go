@@ -10,7 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // referrer writes a concept whose frontmatter carries extra, verbatim.

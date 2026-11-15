@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // ReadConceptKey reads the concept at bundleRel and returns its ConceptKey, or

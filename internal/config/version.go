@@ -3,7 +3,8 @@ package config
 import "runtime/debug"
 
 // version is stamped by `make` from the git tag (-ldflags -X
-// okfw/cli/internal/config.version=...). Empty in a plain `go build`.
+// github.com/infrashift/okf-wiki/internal/config.version=...). Empty in a
+// plain `go build`.
 var version string
 
 // Version is okfw's own version, printed by `okfw --version` and reported by

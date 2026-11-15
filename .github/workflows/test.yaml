@@ -31,18 +31,18 @@ jobs:
       - name: Test
         env:
           CGO_ENABLED: 1
-        run: go test ./cli/... -count=1 -race -coverprofile=coverage.out
+        run: go test ./... -count=1 -race -coverprofile=coverage.out
 
       - name: Coverage summary
         run: go tool cover -func=coverage.out | tail -1
 
       - name: Vet
-        run: go vet ./cli/...
+        run: go vet ./...
 
       # gofmt and tidy drift are cheap to catch and annoying to discover later.
       - name: Gofmt
         run: |
-          unformatted=$(gofmt -l ./cli)
+          unformatted=$(gofmt -l ./cli ./internal ./pkg)
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt:"
             echo "$unformatted"
@@ -66,13 +66,13 @@ jobs:
       # `cue vet` on the schema alone type-checks it against no data instance, so
       # it cannot catch a concept that violates #Concept. It is kept only as a
       # syntax gate; the real conformance check is
-      # cli/internal/config/fixtures_test.go, which validates the fixture corpus
+      # internal/config/fixtures_test.go, which validates the fixture corpus
       # against the compiled schema as part of the suite above.
       - name: Install CUE
         run: go install cuelang.org/go/cmd/cue@latest
 
       - name: Validate CUE schema syntax
-        run: cue vet ./cli/internal/config/concept-schema.cue
+        run: cue vet ./internal/config/concept-schema.cue
 
   lua:
     runs-on: ubuntu-latest

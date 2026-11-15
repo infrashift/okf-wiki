@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"okfw/cli/internal/okfwskills"
+	"github.com/infrashift/okf-wiki/cli/internal/okfwskills"
 )
 
 // TestSkillDocumentsEveryCommand keeps the agent-facing documentation honest

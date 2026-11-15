@@ -19,10 +19,10 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
-	"okfw/cli/internal/okfwskills"
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
+	"github.com/infrashift/okf-wiki/cli/internal/okfwskills"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // resolveRefArg turns a concept id or path argument into an absolute file path.

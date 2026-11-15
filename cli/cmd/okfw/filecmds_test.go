@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // runCmdIn is runCmd with stdin attached, for the confirmation prompt. A

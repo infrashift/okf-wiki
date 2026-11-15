@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 func testCfg(t *testing.T) (*config.Config, string) {

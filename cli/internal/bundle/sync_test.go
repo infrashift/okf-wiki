@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 func writeConcept(t *testing.T, root, rel, content string) string {

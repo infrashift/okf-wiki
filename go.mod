@@ -1,4 +1,4 @@
-module okfw
+module github.com/infrashift/okf-wiki
 
 go 1.24.0
 

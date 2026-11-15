@@ -3,12 +3,12 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/gitctx"
-	"okfw/cli/internal/graph"
-	"okfw/cli/internal/search"
-	"okfw/cli/internal/templates"
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
+	"github.com/infrashift/okf-wiki/cli/internal/gitctx"
+	"github.com/infrashift/okf-wiki/cli/internal/search"
+	"github.com/infrashift/okf-wiki/cli/internal/templates"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -180,12 +180,12 @@ wiki exists.`,
 					return nil
 				}
 				if fi.IsDir() {
-					if bundle.SkipWalkDir(cfg.RootPath, p, fi.Name()) {
+					if bundle.SkipWalkDir(cfg.RootPath, p) {
 						return filepath.SkipDir
 					}
 					return nil
 				}
-				if strings.HasSuffix(p, ".md") && !bundle.IsReservedBase(fi.Name()) {
+				if strings.HasSuffix(p, ".md") && !config.IsReservedBase(fi.Name()) {
 					concepts++
 				}
 				return nil
@@ -1287,12 +1287,12 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 			return err
 		}
 		if fi.IsDir() {
-			if bundle.SkipWalkDir(root, p, fi.Name()) {
+			if bundle.SkipWalkDir(root, p) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+		if !strings.HasSuffix(p, ".md") || config.IsReservedBase(fi.Name()) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -1383,12 +1383,12 @@ func runValidateAll(cfg *config.Config, path string) error {
 			return err
 		}
 		if fi.IsDir() {
-			if p != root && bundle.SkipWalkDir(bundleRoot, p, fi.Name()) {
+			if p != root && bundle.SkipWalkDir(bundleRoot, p) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(fi.Name()) {
+		if !strings.HasSuffix(p, ".md") || config.IsReservedBase(fi.Name()) {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
@@ -1457,7 +1457,7 @@ func runValidateOKF(cfg *config.Config, path string) error {
 			return err
 		}
 		if fi.IsDir() {
-			if p != root && bundle.SkipWalkDir(bundleRoot, p, fi.Name()) {
+			if p != root && bundle.SkipWalkDir(bundleRoot, p) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1686,7 +1686,7 @@ func runLog(cfg *config.Config, root string) error {
 		}
 		status := fields[0]
 		p := fields[len(fields)-1]
-		if !strings.HasSuffix(p, ".md") || bundle.IsReservedBase(filepath.Base(p)) {
+		if !strings.HasSuffix(p, ".md") || config.IsReservedBase(filepath.Base(p)) {
 			continue
 		}
 		verb := "Update"
@@ -1795,7 +1795,7 @@ func createOrOpenDaily(cfg *config.Config, targetDate time.Time) (path string, c
 func findDailyNote(dir, date string) string {
 	entries, _ := filepath.Glob(filepath.Join(dir, "*.md"))
 	for _, e := range entries {
-		if bundle.IsReservedBase(filepath.Base(e)) {
+		if config.IsReservedBase(filepath.Base(e)) {
 			continue
 		}
 		content, err := os.ReadFile(e)
@@ -1883,7 +1883,7 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 			return nil
 		}
 
-		if bundle.IsReservedBase(info.Name()) {
+		if config.IsReservedBase(info.Name()) {
 			return nil
 		}
 		content, err := os.ReadFile(path)

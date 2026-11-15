@@ -9,7 +9,7 @@ LINUX_ARCHES=amd64 arm64
 # tag when HEAD has one, else the commit. Releases are CalVer tags, vYYYY.M.N
 # with no leading zeros (v2026.1.0, not v2026.01.0), so they are also semver.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS=-X okfw/cli/internal/config.version=$(VERSION)
+LDFLAGS=-X github.com/infrashift/okf-wiki/internal/config.version=$(VERSION)
 SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
 # Signing (optional: `make dist` never signs). The default key lives outside
@@ -109,13 +109,13 @@ verify-signatures:
 # regression in code the cache key did not notice.
 test:
 	@echo "Running Go tests..."
-	go test -count=1 -cover ./cli/...
+	go test -count=1 -cover ./...
 	@echo "Validating CUE schema syntax..."
-	@echo "(concept conformance is checked by cli/internal/config/fixtures_test.go)"
-	cue vet ./cli/internal/config/concept-schema.cue
+	@echo "(concept conformance is checked by internal/config/fixtures_test.go)"
+	cue vet ./internal/config/concept-schema.cue
 
 test-race:
-	go test -count=1 -race ./cli/...
+	go test -count=1 -race ./...
 
 lint:
 	@echo "Running linters..."
@@ -126,12 +126,12 @@ lint:
 		echo "staticcheck not installed: go install honnef.co/go/tools/cmd/staticcheck@latest"; \
 		exit 1; \
 	fi
-	gofmt -l ./cli
+	gofmt -l ./cli ./internal ./pkg
 	go mod tidy -diff
 
 fmt:
 	go fmt ./...
-	@command -v cue >/dev/null && cue fmt ./cli/internal/config/concept-schema.cue || true
+	@command -v cue >/dev/null && cue fmt ./internal/config/concept-schema.cue || true
 
 install: build
 	mv $(BIN_DIR)/$(BINARY_NAME) $(GOPATH)/bin/$(BINARY_NAME)
