@@ -25,9 +25,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/infrashift/okf-wiki/cli/internal/bundle"
-	"github.com/infrashift/okf-wiki/cli/internal/config"
-	"github.com/infrashift/okf-wiki/cli/internal/graph"
 	"github.com/infrashift/okf-wiki/cli/internal/search"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 const mcpProtocolVersion = "2024-11-05"

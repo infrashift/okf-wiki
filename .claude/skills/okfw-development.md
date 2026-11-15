@@ -13,7 +13,7 @@ globs:
 ```bash
 make build                    # Build bin/okfw binary
 make test                     # Go tests + CUE schema validation
-go test ./cli/... -count=1    # All Go tests
+go test ./... -count=1        # All Go tests
 go test ./cli/internal/search/... -v  # Single package, verbose
 go build -o /dev/null ./cli/cmd/okfw  # Just compile, no binary output
 make test-race                # Go tests under the race detector
@@ -35,7 +35,7 @@ built from, so it is not a required check.
 ## Versions & Releases
 
 `make` stamps the version from `git describe --tags` via
-`-ldflags -X github.com/infrashift/okf-wiki/cli/internal/config.version=$(VERSION)`; `okfw --version`
+`-ldflags -X github.com/infrashift/okf-wiki/internal/config.version=$(VERSION)`; `okfw --version`
 prints it, and an unstamped `go build` falls back to Go's VCS build info.
 Releases are CalVer tags `vYYYY.M.N` (no leading zeros) cut locally — there is
 no release workflow:
@@ -64,9 +64,9 @@ state: search and the link graph are computed from the concepts on demand.
 `okfw connect` verifies the wiki; `okfw root` prints its path.
 
 Internal packages:
-- `cli/internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
+- `internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
 - `cli/internal/bundle/` — The write path: concept creation, `yaml.Node` frontmatter editing, move/delete, `index.md` listings, migrate, OKF conformance, reference resolution (`ResolveConceptPath`), and `LoadGraph`
-- `cli/internal/graph/` — In-memory graph (Node, Edge, BFS, Mermaid and ASCII rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
+- `internal/graph/` — In-memory graph (Node, Edge, BFS, Mermaid and ASCII rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
 - `cli/internal/search/` — Concept search: scan, filter on frontmatter, rank by weighted field match. No index
 - `cli/internal/agentskill/` + `cli/internal/okfwskills/` — `okfw install`: the tool-neutral installer and okfw's SKILL.md / CLAUDE.md-block templates
 - `cli/internal/templates/` — Embedded markdown templates via `//go:embed`
@@ -75,7 +75,7 @@ Internal packages:
 ## Key Types
 
 ```go
-// cli/internal/config/concept.go
+// internal/config/concept.go
 type Concept struct {
     Type, Title, Description, Resource string
     Tags []string
@@ -91,7 +91,7 @@ type Concept struct {
     X map[string]interface{}          // open x: block
 }
 
-// cli/internal/graph/graph.go
+// internal/graph/graph.go
 type Node struct {
     ID, Title, FilePath, Project, Parent string
     Children, Links, Tags []string
@@ -100,7 +100,7 @@ type Node struct {
 
 ## CUE Schemas
 
-- `cli/internal/config/concept-schema.cue` — #Concept
+- `internal/config/concept-schema.cue` — #Concept
 
 Validation pattern: embed CUE file with `//go:embed`, compile it once with `cuecontext.New()` (`LoadConceptSchema`, a process-wide `sync.Once`), unify with data under `schemaMu` (CUE v0.7 is not safe for concurrent unification), validate with `cue.Concrete(true)`.
 

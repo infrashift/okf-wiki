@@ -282,7 +282,7 @@ timestamp: "2026-02-13T10:45:00Z"
 
 func TestParseAndValidate_ValidFile(t *testing.T) {
 	// Read the valid test file
-	content, err := os.ReadFile("../../testdata/valid_concept.md")
+	content, err := os.ReadFile("../../cli/testdata/valid_concept.md")
 	if err != nil {
 		t.Fatalf("testdata fixture missing: %v", err)
 	}
@@ -298,7 +298,7 @@ func TestParseAndValidate_ValidFile(t *testing.T) {
 }
 
 func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_concept_with_parent.md")
+	content, err := os.ReadFile("../../cli/testdata/valid_concept_with_parent.md")
 	if err != nil {
 		t.Fatalf("testdata fixture missing: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestParseAndValidate_ValidFileWithParent(t *testing.T) {
 }
 
 func TestParseAndValidate_InvalidFile(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/invalid_concept.md")
+	content, err := os.ReadFile("../../cli/testdata/invalid_concept.md")
 	if err != nil {
 		t.Fatalf("testdata fixture missing: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestParseAndValidate_InvalidFile(t *testing.T) {
 }
 
 func TestParseAndValidate_NoProject(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_concept_no_project.md")
+	content, err := os.ReadFile("../../cli/testdata/valid_concept_no_project.md")
 	if err != nil {
 		t.Fatalf("testdata fixture missing: %v", err)
 	}

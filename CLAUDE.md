@@ -14,16 +14,16 @@ CLI `zk`.)
 ```
 cli/cmd/okfw/                — Cobra CLI: rootCmd() in main.go, plus filecmds.go
                                (delete/move), okfcmds.go (OKF writers, install), mcp.go
-cli/internal/config/         — .okfw discovery, CUE schema, concept parsing
 cli/internal/bundle/         — Bundle write path (concept creation, frontmatter,
                                move/delete, index.md listings, link-graph load)
-cli/internal/graph/          — In-memory graph + rendering (ASCII tree, Mermaid)
 cli/internal/search/         — Concept search: scan + rank, no index
 cli/internal/agentskill/     — Agent-skill installer (SKILL.md placement, managed
                                CLAUDE.md/GEMINI.md/AGENTS.md block)
 cli/internal/okfwskills/     — okfw's SKILL.md / CLAUDE.md-block templates
 cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git root lookup
+internal/config/             — .okfw discovery, CUE schema, concept parsing
+internal/graph/              — In-memory graph + rendering (ASCII tree, Mermaid)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
 plugin/okfw.lua              — Neovim plugin auto-load
 ```
@@ -43,7 +43,7 @@ make test-race       # Go tests under the race detector
 make install         # Installs okfw to $GOPATH/bin
 make integration-test # NeoVim plugin suite (sources plugin/okfw.lua for the :Okfw* commands)
 make e2e             # The NeoVim suite against the okfw binary, inside a container
-go test ./cli/... -count=1   # Run all tests
+go test ./... -count=1       # Run all tests
 ```
 
 **Versions are CalVer tags, `vYYYY.M.N`** (no leading zeros, so also valid
@@ -327,5 +327,5 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   attributed the coverage to the wrong place
 - `cue vet` on the schema alone type-checks it against no data instance and
   cannot catch a concept that violates `#Concept`. It is a syntax gate only; the
-  real check is `cli/internal/config/fixtures_test.go`, which validates the
+  real check is `internal/config/fixtures_test.go`, which validates the
   `cli/testdata/` corpus against the compiled schema

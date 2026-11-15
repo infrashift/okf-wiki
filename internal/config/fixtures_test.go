@@ -8,12 +8,12 @@ import (
 )
 
 // The Makefile and CI used to gate schema validity on
-// `cue vet cli/internal/config/concept-schema.cue`, which type-checks the schema
+// `cue vet internal/config/concept-schema.cue`, which type-checks the schema
 // file against no data instance at all. It cannot catch a concept that violates
 // #Concept — the only thing worth gating. This walks the fixture corpus instead,
 // so the check runs in the normal `go test` suite and actually asserts something.
 
-const fixtureDir = "../../testdata"
+const fixtureDir = "../../cli/testdata"
 
 func TestEveryValidFixtureValidates(t *testing.T) {
 	entries, err := os.ReadDir(fixtureDir)

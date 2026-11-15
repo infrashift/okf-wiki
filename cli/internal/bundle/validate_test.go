@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 const legacyTodo = `---

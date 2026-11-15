@@ -9,7 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/infrashift/okf-wiki/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // Trust tiers derived from `verified` (OKF v0.2 section 5.3).

@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // Validation on the write path has two different jobs, so it has two entry

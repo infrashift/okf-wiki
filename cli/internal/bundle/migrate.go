@@ -6,7 +6,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // OKF v0.2 first wrote stale_after, sources[].last_modified and usage_window as

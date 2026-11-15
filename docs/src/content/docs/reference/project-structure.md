@@ -36,15 +36,16 @@ okf-wiki/
 ├── cli/
 │   ├── cmd/okfw/        # CLI entry point (Cobra commands, MCP server)
 │   ├── internal/
-│   │   ├── config/      # .okfw discovery, CUE schema, concept parsing
 │   │   ├── bundle/      # Write path: concept creation, frontmatter, index.md, link graph
-│   │   ├── graph/       # In-memory graph (BFS, Mermaid, ASCII tree)
 │   │   ├── search/      # Scan-and-rank concept search (no index)
 │   │   ├── agentskill/  # Agent-skill installer (okfw install)
 │   │   ├── okfwskills/  # okfw's SKILL.md / CLAUDE.md-block templates
 │   │   ├── templates/   # Embedded note templates
 │   │   └── gitctx/      # Git root lookup (where okfw init places .okfw/)
 │   └── testdata/        # Test fixtures
+├── internal/
+│   ├── config/          # .okfw discovery, CUE schema, concept parsing
+│   └── graph/           # In-memory graph (BFS, Mermaid, ASCII tree)
 ├── lua/okfw/            # NeoVim plugin (snacks-based pickers)
 ├── plugin/okfw.lua      # NeoVim plugin auto-load
 ├── after/ftplugin/      # NeoVim markdown ftplugin

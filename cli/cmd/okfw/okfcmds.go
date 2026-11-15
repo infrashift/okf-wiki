@@ -20,9 +20,9 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/infrashift/okf-wiki/cli/internal/bundle"
-	"github.com/infrashift/okf-wiki/cli/internal/config"
-	"github.com/infrashift/okf-wiki/cli/internal/graph"
 	"github.com/infrashift/okf-wiki/cli/internal/okfwskills"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // resolveRefArg turns a concept id or path argument into an absolute file path.

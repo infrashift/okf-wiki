@@ -456,7 +456,7 @@ func TestConceptKey(t *testing.T) {
 // The closed schema rejected every section 10 key, so okfw could not hold an
 // Attested Computation concept at all; x: cannot carry spec-defined keys.
 func TestAttestedComputationKeysValidate(t *testing.T) {
-	content, err := os.ReadFile("../../testdata/valid_concept_attested.md")
+	content, err := os.ReadFile("../../cli/testdata/valid_concept_attested.md")
 	if err != nil {
 		t.Fatal(err)
 	}

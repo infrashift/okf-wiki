@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/infrashift/okf-wiki/cli/internal/bundle"
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // --- helpers ---

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // AutoSync refreshes the OKF index.md listings after a concept is created or

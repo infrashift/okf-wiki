@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/infrashift/okf-wiki/cli/internal/config"
-	"github.com/infrashift/okf-wiki/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
 // normalize and linksIn keep the tests speaking in terms of resolved targets,

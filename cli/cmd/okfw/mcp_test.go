@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/infrashift/okf-wiki/cli/internal/bundle"
-	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // mcpTestServer returns a server bound to a fresh initialized wiki.
