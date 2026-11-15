@@ -13,8 +13,8 @@ import (
 	"github.com/google/uuid"
 	"gopkg.in/yaml.v3"
 
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/templates"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/templates"
 )
 
 // Spec describes a concept to create.

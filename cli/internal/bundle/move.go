@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/graph"
 )
 
 // Relocating and removing concepts. Both operations have to keep three things

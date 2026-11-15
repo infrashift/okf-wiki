@@ -8,8 +8,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/graph"
 )
 
 // refNode is one path-valued frontmatter field located in the yaml.Node tree.

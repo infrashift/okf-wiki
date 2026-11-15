@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
 )
 
 func TestCheckIndexFile(t *testing.T) {

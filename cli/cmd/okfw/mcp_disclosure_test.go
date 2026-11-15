@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
 )
 
 // createdPath creates a concept through the MCP tool and returns its absolute

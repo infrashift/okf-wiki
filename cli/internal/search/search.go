@@ -31,8 +31,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"okfw/cli/internal/bundle"
-	"okfw/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
 )
 
 // Options selects and filters concepts. The zero value matches everything.

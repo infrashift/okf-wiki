@@ -9,8 +9,8 @@ import (
 	"sort"
 	"strings"
 
-	"okfw/cli/internal/config"
-	"okfw/cli/internal/graph"
+	"github.com/infrashift/okf-wiki/cli/internal/config"
+	"github.com/infrashift/okf-wiki/cli/internal/graph"
 )
 
 // LoadGraph builds the bundle's link graph by reading the concepts on disk.

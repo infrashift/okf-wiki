@@ -9,7 +9,7 @@ LINUX_ARCHES=amd64 arm64
 # tag when HEAD has one, else the commit. Releases are CalVer tags, vYYYY.M.N
 # with no leading zeros (v2026.1.0, not v2026.01.0), so they are also semver.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS=-X okfw/cli/internal/config.version=$(VERSION)
+LDFLAGS=-X github.com/infrashift/okf-wiki/cli/internal/config.version=$(VERSION)
 SHA256SUM=$(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo shasum -a 256)
 
 # Signing (optional: `make dist` never signs). The default key lives outside

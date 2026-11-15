@@ -35,7 +35,7 @@ built from, so it is not a required check.
 ## Versions & Releases
 
 `make` stamps the version from `git describe --tags` via
-`-ldflags -X okfw/cli/internal/config.version=$(VERSION)`; `okfw --version`
+`-ldflags -X github.com/infrashift/okf-wiki/cli/internal/config.version=$(VERSION)`; `okfw --version`
 prints it, and an unstamped `go build` falls back to Go's VCS build info.
 Releases are CalVer tags `vYYYY.M.N` (no leading zeros) cut locally — there is
 no release workflow:
