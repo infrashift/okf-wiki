@@ -44,10 +44,10 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 			if err != nil {
 				return err
 			}
-			if fi.IsDir() && SkipWalkDir(path, p, fi.Name()) {
+			if fi.IsDir() && SkipWalkDir(path, p) {
 				return filepath.SkipDir
 			}
-			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !IsReservedBase(fi.Name()) {
+			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !config.IsReservedBase(fi.Name()) {
 				files = append(files, p)
 			}
 			return nil

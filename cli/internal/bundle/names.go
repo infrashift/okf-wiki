@@ -152,11 +152,6 @@ func ConceptDir(cfg *config.Config, pathFlag, project string) (string, error) {
 	return cfg.RootPath, nil
 }
 
-// IsReservedBase reports whether name is an OKF reserved filename (index.md/log.md).
-func IsReservedBase(name string) bool {
-	return name == "index.md" || name == "log.md"
-}
-
 // RelDir returns the directory portion of a slash-separated bundle-relative path.
 func RelDir(rel string) string {
 	if i := strings.LastIndex(rel, "/"); i >= 0 {
@@ -165,18 +160,18 @@ func RelDir(rel string) string {
 	return ""
 }
 
-// SkipWalkDir reports whether a bundle walk should skip the directory: hidden
-// directories and the ephemeral export scratch area, but never the root itself.
-// ephemeral/ is okfw's own directory at the walk root only; a "ephemeral"
-// directory deeper down is an ordinary part of the bundle, and skipping it at
-// any depth hid its concepts from every command, validate --okf included.
+// SkipWalkDir reports whether a walk of the bundle rooted at root should skip
+// the directory p: the rule is config.SkipBundleDir, applied to p's path
+// relative to root.
 //
 // Paths are compared clean, so a root given as ".okfw/" still matches the
 // ".okfw/ephemeral" that filepath.Walk joins beneath it.
-func SkipWalkDir(root, p, name string) bool {
-	root = filepath.Clean(root)
-	if filepath.Clean(p) == root {
-		return false
+func SkipWalkDir(root, p string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(p))
+	if err != nil {
+		// p and root are not both absolute or both relative: no relation to
+		// the root can be shown, so only the hidden-directory rule applies.
+		return strings.HasPrefix(filepath.Base(p), ".")
 	}
-	return strings.HasPrefix(name, ".") || (name == "ephemeral" && filepath.Dir(p) == root)
+	return config.SkipBundleDir(filepath.ToSlash(rel))
 }

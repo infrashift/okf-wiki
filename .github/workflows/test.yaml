@@ -42,7 +42,7 @@ jobs:
       # gofmt and tidy drift are cheap to catch and annoying to discover later.
       - name: Gofmt
         run: |
-          unformatted=$(gofmt -l ./cli ./internal)
+          unformatted=$(gofmt -l ./cli ./internal ./pkg)
           if [ -n "$unformatted" ]; then
             echo "These files need gofmt:"
             echo "$unformatted"

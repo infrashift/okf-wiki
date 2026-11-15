@@ -44,8 +44,9 @@ okf-wiki/
 │   │   └── gitctx/      # Git root lookup (where okfw init places .okfw/)
 │   └── testdata/        # Test fixtures
 ├── internal/
-│   ├── config/          # .okfw discovery, CUE schema, concept parsing
+│   ├── config/          # .okfw discovery, CUE schema, concept parsing, walk rules
 │   └── graph/           # In-memory graph (BFS, Mermaid, ASCII tree)
+├── pkg/bundle/          # Public Go package: read and search a bundle from an fs.FS
 ├── lua/okfw/            # NeoVim plugin (snacks-based pickers)
 ├── plugin/okfw.lua      # NeoVim plugin auto-load
 ├── after/ftplugin/      # NeoVim markdown ftplugin

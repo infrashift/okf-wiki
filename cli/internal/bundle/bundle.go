@@ -217,12 +217,12 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 			return err
 		}
 		if info.IsDir() {
-			if SkipWalkDir(cfg.RootPath, path, info.Name()) {
+			if SkipWalkDir(cfg.RootPath, path) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".md") || IsReservedBase(info.Name()) {
+		if !strings.HasSuffix(path, ".md") || config.IsReservedBase(info.Name()) {
 			return nil
 		}
 		// A legacy <id>.md filename.
@@ -273,7 +273,7 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 			idOrPath, len(prefixed), relNames(prefixed))
 	}
 	// A bare OKF concept ID for a concept at the bundle root.
-	if p := filepath.Join(cfg.RootPath, idOrPath+".md"); !IsReservedBase(idOrPath+".md") && fileExists(p) {
+	if p := filepath.Join(cfg.RootPath, idOrPath+".md"); !config.IsReservedBase(idOrPath+".md") && fileExists(p) {
 		return p, nil
 	}
 

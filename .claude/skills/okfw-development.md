@@ -64,13 +64,16 @@ state: search and the link graph are computed from the concepts on demand.
 `okfw connect` verifies the wiki; `okfw root` prints its path.
 
 Internal packages:
-- `internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation
+- `internal/config/` — Wiki discovery (`config.Discover`) + CUE schema loading + concept frontmatter parsing/validation + the walk rules (`walk.go`)
 - `cli/internal/bundle/` — The write path: concept creation, `yaml.Node` frontmatter editing, move/delete, `index.md` listings, migrate, OKF conformance, reference resolution (`ResolveConceptPath`), and `LoadGraph`
 - `internal/graph/` — In-memory graph (Node, Edge, BFS, Mermaid and ASCII rendering, link extraction) plus the queries: backlinks, tag, dangling. Built by `bundle.LoadGraph`, which scans the bundle
-- `cli/internal/search/` — Concept search: scan, filter on frontmatter, rank by weighted field match. No index
+- `cli/internal/search/` — Concept search: filter on frontmatter, page, format. The walk and the ranking are `pkg/bundle`'s. No index
 - `cli/internal/agentskill/` + `cli/internal/okfwskills/` — `okfw install`: the tool-neutral installer and okfw's SKILL.md / CLAUDE.md-block templates
 - `cli/internal/templates/` — Embedded markdown templates via `//go:embed`
 - `cli/internal/gitctx/` — Git project-root helper (used by `okfw init` and `okfw log`)
+
+Public package:
+- `pkg/bundle/` — Reads a bundle from an `fs.FS` with bounded reads (`Walk`, `Load`, `Limits`), parses (`Parse`) and validates (`Validate`) one concept, and ranks (`Search`). `okfw search` runs its walk and ranking
 
 ## Key Types
 

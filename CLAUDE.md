@@ -22,8 +22,11 @@ cli/internal/agentskill/     — Agent-skill installer (SKILL.md placement, mana
 cli/internal/okfwskills/     — okfw's SKILL.md / CLAUDE.md-block templates
 cli/internal/templates/      — Embedded note templates
 cli/internal/gitctx/         — Git root lookup
-internal/config/             — .okfw discovery, CUE schema, concept parsing
+internal/config/             — .okfw discovery, CUE schema, concept parsing,
+                               the walk rules (walk.go)
 internal/graph/              — In-memory graph + rendering (ASCII tree, Mermaid)
+pkg/bundle/                  — Public read API: fs.FS walk with limits, Parse,
+                               Validate, Search (the ranking okfw search uses)
 lua/okfw/                    — Neovim plugin (snacks-based pickers)
 plugin/okfw.lua              — Neovim plugin auto-load
 ```
@@ -256,6 +259,22 @@ okfw-owned keys inside `x:` (that block belongs to the user).
   rule about the cache, and all of them are gone with it. Scanning is linear in
   bundle size, so this is the first design choice to revisit past roughly tens
   of thousands of concepts.
+- **`pkg/bundle` is the one public package, and the CLI runs its code.** The
+  module is `github.com/infrashift/okf-wiki` so other modules can import it
+  (HALO parses bundles it downloads with it). It owns the `fs.FS` walk and the
+  search ranking; `cli/internal/search` calls `Walk` and `Search` (imported as
+  `okfbundle`, to tell it from `cli/internal/bundle`) and adds the filters,
+  paging and output. `TestSearchMatchesThePublicPackage` pins that the two
+  return the same hits. The walk rules (`SkipBundleDir`, `IsConceptFile`,
+  `IsReservedBase`) live in `internal/config/walk.go`, and `bundle.SkipWalkDir`
+  applies them to OS paths, so every walk agrees on which files are concepts.
+  `pkg/` cannot import `cli/internal/`, which is why `config` and `graph` sit
+  in the module's `internal/`. Keep the public API small, and when a consumer
+  needs more of what the CLI does, move that code into the shared packages;
+  never copy it. `Limits` must be positive: its zero value is an error, not
+  "unbounded", and the CLI passes its own unbounded value. Go cannot use the
+  CalVer tags as module versions (`v2026` would need a `/v2026` path suffix),
+  so consumers pin a commit.
 - Graph output is a function of the files, so it must not vary between runs.
   `graph.Graph` keys nodes in a map; anything whose result depends on visit
   order goes through `sortedIDs`, never `range g.nodes`. A capped `cluster`

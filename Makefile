@@ -126,7 +126,7 @@ lint:
 		echo "staticcheck not installed: go install honnef.co/go/tools/cmd/staticcheck@latest"; \
 		exit 1; \
 	fi
-	gofmt -l ./cli ./internal
+	gofmt -l ./cli ./internal ./pkg
 	go mod tidy -diff
 
 fmt:

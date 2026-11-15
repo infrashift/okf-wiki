@@ -154,6 +154,25 @@ Two complementary integration points:
 
 ---
 
+## Reading Bundles from Go
+
+`github.com/infrashift/okf-wiki/pkg/bundle` reads a bundle from any `fs.FS`,
+such as one extracted in memory from an archive. It is the code `okfw search`
+runs, so it finds, parses and ranks concepts exactly as the CLI does:
+
+```go
+root, _ := fs.Sub(archiveFS, ".okfw")
+concepts, err := bundle.Load(root, bundle.DefaultLimits) // 1 MiB per file, 4096 files
+hits := bundle.Search(concepts, "token refresh", 25)
+```
+
+`bundle.Validate` applies the strict check of `okfw validate`. Go cannot use
+the CalVer release tags as module versions (a major version above 1 would need
+a `/v2026` path suffix), so depend on a commit:
+`go get github.com/infrashift/okf-wiki@<commit>`.
+
+---
+
 ## Development
 
 ```bash
@@ -192,6 +211,7 @@ okf-wiki/
 ├── internal/
 │   ├── config/          # .okfw discovery and CUE schema validation
 │   └── graph/           # In-memory graph + rendering (Mermaid, ASCII tree)
+├── pkg/bundle/          # Public Go package: read and search a bundle from an fs.FS
 ├── lua/okfw/            # NeoVim plugin
 ├── plugin/              # NeoVim autoload
 ├── doc/                 # NeoVim help

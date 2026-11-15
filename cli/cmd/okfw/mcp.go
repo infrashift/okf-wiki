@@ -279,7 +279,7 @@ func (s *mcpServer) instructions() string {
 	}
 	var dirs []string
 	for _, e := range entries {
-		if !e.IsDir() || bundle.SkipWalkDir(cfg.RootPath, filepath.Join(cfg.RootPath, e.Name()), e.Name()) {
+		if !e.IsDir() || bundle.SkipWalkDir(cfg.RootPath, filepath.Join(cfg.RootPath, e.Name())) {
 			continue
 		}
 		dirs = append(dirs, e.Name()+"/")

@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Added
+- **A public Go package reads bundles: `github.com/infrashift/okf-wiki/pkg/bundle`.** `Load` and `Walk` read a bundle from any `fs.FS`, such as one extracted in memory from an archive, with every read bounded: a file-size limit, a file-count limit, and no path outside the bundle. `Parse` reads one concept (id, title, type, description, tags, lifecycle status and body) as leniently as every okfw read does, `Validate` applies the strict check of `okfw validate`, and `Search` ranks as `okfw search` does. The CLI runs the same walk and ranking, so the two cannot disagree. A program that consumed bundles had to reimplement the format, because the parser was internal to the CLI.
+
+### Changed
+- **The Go module is `github.com/infrashift/okf-wiki`.** It was `okfw`, which `go get` cannot fetch. The version stamp's `-ldflags -X` path is now `github.com/infrashift/okf-wiki/internal/config.version`, and the concept model and link graph moved from `cli/internal/` to `internal/`. The CLI's commands, output and on-disk format are unchanged.
+
 ## v2026.10.2 — 2026-10-28
 
 ### Added
