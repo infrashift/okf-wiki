@@ -116,7 +116,8 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
    `set_generated`: it moves `generated.at`, and only reviews made after it
    count. Custom metadata goes in keys named `x-<producer>-<name>` (OKF
    section 4.1) — the schema is otherwise closed and will reject a typo'd
-   field.
+   field. Keys named `x-okfw-*` are okfw's own (its id, timestamps, kind,
+   project, parent): leave them to okfw.
 8. **Never blend what a source says with what you concluded from it** unless the
    boundary is visible on the page. A concept recording a decision, an incident
    or a measurement is read later as *the record*, by people and agents alike,

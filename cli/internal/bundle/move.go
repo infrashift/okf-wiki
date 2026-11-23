@@ -198,7 +198,7 @@ type MoveResult struct {
 //     "./sibling.md" points somewhere else once the file sits elsewhere.
 //     Bundle-absolute links are immune, which is why OKF recommends them.
 //
-// The moved concept's `timestamp` is bumped, because a concept's OKF identity is
+// The moved concept's `x-okfw-timestamp` is bumped, because a concept's OKF identity is
 // its path — moving it is a meaningful change. The concepts whose links were
 // retargeted are not stamped: their knowledge did not change, only the spelling
 // of a pointer to the same concept.

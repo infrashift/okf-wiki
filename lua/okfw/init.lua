@@ -755,7 +755,8 @@ local function get_current_concept_id()
         elseif in_frontmatter and line == "---" then
             break
         elseif in_frontmatter then
-            local id = line:match('^id:%s*"?([%w%-]+)"?')
+            -- okfw writes x-okfw-id; concepts from before the namespace say id.
+            local id = line:match('^x%-okfw%-id:%s*"?([%w%-]+)"?') or line:match('^id:%s*"?([%w%-]+)"?')
             if id then
                 return id
             end
@@ -1012,7 +1013,8 @@ M.resolve_concept = function(ref)
         if not ok or lines[1] ~= "---" then return nil end
         for i = 2, #lines do
             if lines[i] == "---" then return nil end
-            local v = lines[i]:match('^id:%s*["\']?([^"\']+)["\']?%s*$')
+            local v = lines[i]:match('^x%-okfw%-id:%s*["\']?([^"\']+)["\']?%s*$')
+                or lines[i]:match('^id:%s*["\']?([^"\']+)["\']?%s*$')
             if v then return v end
         end
         return nil

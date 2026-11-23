@@ -423,7 +423,7 @@ Examples:
 			}
 
 			newContent, err := bundle.UpdateFrontmatter(content, map[string]string{
-				"project": project,
+				config.KeyProject: project,
 			})
 			if err != nil {
 				return fmt.Errorf("failed to update frontmatter: %w", err)
@@ -897,6 +897,12 @@ rewrites a legacy 'status':
 The free-form OKF 'type' is left alone: the spec does not register type values,
 so an existing type: "todo" stays until you change it.
 
+okfw's own keys move to OKF v0.3's extension namespace: id, kind, project,
+parent, created and timestamp become x-okfw-id, x-okfw-kind and so on, each in
+its place and with its value unchanged. Only a concept okfw wrote is touched
+(an okfw-shaped id, or both created and timestamp): another producer's bare
+id is its own.
+
 OKF v0.3 (okfw migrate moves a bundle from v0.2 to it):
 
   - A bare path field ("skills/run.md") now resolves from the concept's own
@@ -943,7 +949,7 @@ Examples:
 okfw's schema is deliberately stricter than OKF requires.
 
   (default)  Strict okfw validation of one concept: the full CUE #Concept
-             schema — required id/title/type/tags/created/timestamp, and no
+             schema — required type/title/tags and x-okfw-id/-created/-timestamp, and no
              undeclared fields.
   --all      The same strict check over every concept in the bundle.
   --okf      OKF v0.3 conformance only (spec section 11): every frontmatter
@@ -1389,6 +1395,13 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 
 		var notes []string
 		out := content
+		if renamed, keys, err := bundle.UpgradeOkfwKeys(out); err != nil {
+			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
+			return nil
+		} else if renamed != nil {
+			out = renamed
+			notes = append(notes, "okfw keys to x-okfw-*: "+strings.Join(keys, ", "))
+		}
 		if stripped, dropped, err := bundle.StripLegacyTodoFields(out); err != nil {
 			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
 			return nil
@@ -1935,7 +1948,7 @@ func runLog(cfg *config.Config, root string) error {
 	return nil
 }
 
-// bundle.TouchTimestamp ensures the updates map bumps the OKF `timestamp` field to now
+// bundle.TouchTimestamp ensures the updates map bumps okfw's `x-okfw-timestamp` to now
 // (last meaningful change), unless the caller already set it explicitly.
 // bundle.UpdateFrontmatter updates specific fields in YAML frontmatter
 // backlinksToJSON converts backlinks slice to JSON

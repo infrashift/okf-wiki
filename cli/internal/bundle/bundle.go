@@ -114,9 +114,9 @@ func setKindAndType(m *yaml.Node, spec Spec) error {
 	case "":
 	case "note":
 		// The default kind is never written; see GenerateNote.
-		MapDelete(m, "kind")
+		MapDelete(m, config.KeyKind)
 	case "issue":
-		mapSetAfter(m, "kind", "type", QuotedScalar("issue"))
+		mapSetAfter(m, config.KeyKind, "type", QuotedScalar("issue"))
 		if spec.Type == "" {
 			MapSetString(m, "type", "issue")
 		}
@@ -135,12 +135,12 @@ func GenerateBasicNote(id, title, project string, tags []string) string {
 
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
-	buf.WriteString(fmt.Sprintf("id: %q\n", id))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyID, id))
 	buf.WriteString(fmt.Sprintf("title: %q\n", title))
 	buf.WriteString("type: \"note\"\n")
 
 	if project != "" {
-		buf.WriteString(fmt.Sprintf("project: %q\n", project))
+		buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyProject, project))
 	}
 
 	buf.WriteString("tags:")
@@ -154,8 +154,8 @@ func GenerateBasicNote(id, title, project string, tags []string) string {
 	}
 
 	stamp := now.Format(time.RFC3339)
-	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
-	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyCreated, stamp))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyTimestamp, stamp))
 	buf.WriteString("---\n\n")
 	buf.WriteString(fmt.Sprintf("# %s\n\n", title))
 

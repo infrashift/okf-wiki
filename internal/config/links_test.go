@@ -12,7 +12,7 @@ func writeConcept(t *testing.T, root, rel, id string) string {
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 		t.Fatal(err)
 	}
-	content := "---\nid: \"" + id + "\"\ntitle: \"T\"\ntype: \"note\"\ntags: []\ncreated: \"2026-02-13T10:45:00Z\"\ntimestamp: \"2026-02-13T10:45:00Z\"\n---\n\n# T\n"
+	content := "---\nx-okfw-id: \"" + id + "\"\ntitle: \"T\"\ntype: \"note\"\ntags: []\nx-okfw-created: \"2026-02-13T10:45:00Z\"\nx-okfw-timestamp: \"2026-02-13T10:45:00Z\"\n---\n\n# T\n"
 	if err := os.WriteFile(p, []byte(content), 0644); err != nil {
 		t.Fatal(err)
 	}

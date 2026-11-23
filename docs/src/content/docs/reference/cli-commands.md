@@ -127,7 +127,7 @@ path, anything else is a directory to move into under the current filename. Both
 are bundle-relative and cannot escape the bundle or name one of its internal
 dot-directories.
 
-The concept's `id` does not change, so hierarchies built with `parent` survive.
+The concept's `x-okfw-id` does not change, so hierarchies built with `x-okfw-parent` survive.
 Links are repaired at **both** ends, because a move breaks two different sets.
 A link here means a body link or a path-valued frontmatter field naming a
 concept (`resource`, `sources[].resource`, `computation`, `executor.resource`,
@@ -140,7 +140,7 @@ quoting.
   from the new directory. Bundle-absolute links need no fixing, which is exactly
   why OKF recommends them.
 
-The moved concept's `timestamp` is bumped, since a concept's OKF identity is its
+The moved concept's `x-okfw-timestamp` is bumped, since a concept's OKF identity is its
 path within the bundle. Concepts whose links were merely retargeted are not
 stamped: their knowledge did not change, only the spelling of a pointer.
 
@@ -195,9 +195,9 @@ okfw validate --all path/to/.okfw   # ...or an explicit path
 ```
 
 The same strict check over the whole bundle, reporting each failure. It also
-reports any `id` declared by more than one concept — a concept copied as a
-template keeps its `id` — naming every file that declares it. Exits non-zero if
-any concept is invalid or any `id` is duplicated.
+reports any `x-okfw-id` declared by more than one concept — a concept copied as a
+template keeps its id — naming every file that declares it. Exits non-zero if
+any concept is invalid or any id is duplicated.
 
 ### Validate OKF conformance
 ```bash
@@ -227,7 +227,11 @@ and okfw was using it for todo progress. This drops `due`, `completed`,
 | `status: closed` | `status: deprecated` |
 | `status: open` or `status: in_progress` | removed (absent means `stable`) |
 
-It also moves a bundle from OKF v0.2 to v0.3: bare path fields that okfw read
+It moves okfw's own keys into OKF v0.3's extension namespace — `id`,
+`kind`, `project`, `parent`, `created` and `timestamp` become `x-okfw-id`,
+`x-okfw-kind` and so on, in place, with their values unchanged — in every
+concept okfw wrote; another tool's bare `id` is left alone. It also moves a
+bundle from OKF v0.2 to v0.3: bare path fields that okfw read
 from the bundle root gain a leading `/` (v0.3 reads a bare path from the
 concept's directory), the root `index.md` declares `okf_version: "0.3"` with
 its other keys kept, and the export scratch directory moves from `ephemeral/`
@@ -756,7 +760,7 @@ hence the default actor.
 unless `--at` says otherwise). That is the statement that the content was
 produced again, so reviews made before it stop counting. okfw moves
 `generated.at` itself only for a body rewrite made through okfw; tag,
-lifecycle, source and verify edits change only okfw's `timestamp`.
+lifecycle, source and verify edits change only okfw's `x-okfw-timestamp`.
 
 `--by` on both commands must be `<scheme>:<id>` — `human:`, `team:`,
 `process:` or another lowercase scheme — or `<producer>/<version>`. A near miss
@@ -1145,18 +1149,18 @@ vanilla markdown links pointing at these paths.
 
 ```yaml
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Note Title"
 type: "note"            # required, free-form OKF kind; defaults to the kind value
 # kind: "note"          # structured kind; omitted when it equals "note"
 description: "..."      # optional one-sentence OKF summary
-project: "project-name" # optional
+x-okfw-project: "project-name" # optional
 tags:
   - "tag1"
   - "tag2"
-created: "YYYY-MM-DDTHH:MM:SS+HH:MM"     # ISO 8601 with an explicit offset
-timestamp: "YYYY-MM-DDTHH:MM:SS+HH:MM"   # OKF last meaningful change
-parent: "019f0312-4700-7def-9abc-ffffffffffff"  # optional; the parent's full id
+x-okfw-created: "YYYY-MM-DDTHH:MM:SS+HH:MM"     # ISO 8601 with an explicit offset
+x-okfw-timestamp: "YYYY-MM-DDTHH:MM:SS+HH:MM"   # okfw's last write (not generated.at)
+x-okfw-parent: "019f0312-4700-7def-9abc-ffffffffffff"  # optional; the parent's full id
 ---
 ```
 

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"text/template"
 	"time"
+
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 //go:embed meeting.md
@@ -164,7 +166,7 @@ func (t *Template) GenerateFrontmatter(id, title, project string, extraTags []st
 
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
-	buf.WriteString(fmt.Sprintf("id: %q\n", id))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyID, id))
 	buf.WriteString(fmt.Sprintf("title: %q\n", title))
 
 	// OKF requires a non-empty `type` on every concept. Default it to the
@@ -174,11 +176,11 @@ func (t *Template) GenerateFrontmatter(id, title, project string, extraTags []st
 	// Write the structured `kind` only when it differs from the default,
 	// to keep plain-note frontmatter clean.
 	if kind != "note" {
-		buf.WriteString(fmt.Sprintf("kind: %q\n", kind))
+		buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyKind, kind))
 	}
 
 	if project != "" {
-		buf.WriteString(fmt.Sprintf("project: %q\n", project))
+		buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyProject, project))
 	}
 
 	buf.WriteString("tags:\n")
@@ -187,8 +189,8 @@ func (t *Template) GenerateFrontmatter(id, title, project string, extraTags []st
 	}
 
 	stamp := now.Format(time.RFC3339)
-	buf.WriteString(fmt.Sprintf("created: %q\n", stamp))
-	buf.WriteString(fmt.Sprintf("timestamp: %q\n", stamp))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyCreated, stamp))
+	buf.WriteString(fmt.Sprintf("%s: %q\n", config.KeyTimestamp, stamp))
 	buf.WriteString("---\n\n")
 
 	return buf.String()

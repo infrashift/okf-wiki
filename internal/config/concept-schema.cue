@@ -4,7 +4,8 @@
 // spec's consumer rules, in exchange for a hard guarantee about the bundles okfw
 // authors. Both are intentional; do not "fix" them toward the spec:
 //
-//   1. Required fields. okfw requires id/title/type/tags/created/timestamp.
+//   1. Required fields. okfw requires type, title and tags, and its own
+//      x-okfw-id, x-okfw-created and x-okfw-timestamp.
 //      OKF v0.3 section 4.1 requires only a non-empty `type` (title and tags
 //      are optional), and section 11.2 says consumers MUST NOT reject a
 //      concept for missing optional fields.
@@ -15,7 +16,8 @@
 // Two escape hatches keep (2) liveable. Every mapping accepts `x-*` keys, the
 // namespace v0.3 section 4.1 promises never to claim (producers SHOULD name
 // theirs x-<producer>-<name>); and the open `x:` block from okfw's v0.2 days
-// still passes anything through. okfw itself writes neither.
+// still passes anything through. okfw's own keys are x-okfw-*; every other
+// x-* key, and `x:`, belongs to the user.
 //
 // `okfw validate --okf` implements the permissive spec check, so a bundle okfw
 // did not author can still be assessed on the spec's own terms.
@@ -28,7 +30,8 @@
 //   - Lifecycle (sections 5.4-5.5): status, superseded_by, stale_after.
 //     Absent status => stable.
 //
-// okfw extensions: id, kind, project, parent, created, timestamp, x (open).
+// okfw extensions: x-okfw-id, -kind, -project, -parent, -created and
+// -timestamp, plus the legacy open block x.
 //
 // okfw has no task-tracking fields. It used to carry status/due/completed/
 // priority for a `todo` kind, where `status` collided with OKF's lifecycle
@@ -146,13 +149,17 @@
 	attester?:    #Attester // runtime is required for this type: see ValidateBusinessRules
 
 	// --- okfw extensions ---
-	id:        #ConceptID // okfw-required; OKF derives concept identity from the file path
-	kind:      *"note" | "daily-note" | "issue"
-	project?:  string
-	parent?:   #ConceptID
-	created:   #DateTime
-	timestamp: #DateTime // okfw's last-write time; NOT generated.at (see TouchTimestamp)
-	category?: string    // legacy (untethered/tethered), tolerated but ignored
+	// In OKF v0.3's extension namespace (section 4.1: future versions will
+	// not define x- keys; producers SHOULD name theirs x-<producer>-<name>).
+	// okfw wrote them bare before; `okfw migrate` renames them, and a strict
+	// check of a file still using the bare names says so (checkLegacyKeys).
+	"x-okfw-id":        #ConceptID // okfw-required; OKF derives concept identity from the file path
+	"x-okfw-kind":      *"note" | "daily-note" | "issue"
+	"x-okfw-project"?:  string
+	"x-okfw-parent"?:   #ConceptID
+	"x-okfw-created":   #DateTime
+	"x-okfw-timestamp": #DateTime // okfw's last-write time; NOT generated.at (see TouchTimestamp)
+	category?:          string    // legacy (untethered/tethered), tolerated but ignored
 
 	// The one open struct in an otherwise closed schema: user-defined metadata
 	// passes through untouched. This is what makes a closed #Concept liveable —

@@ -97,8 +97,24 @@ frontmatter block (`graphy:`), `kind: code`, or `search --node-id`.
 ## Data Model
 
 Concepts are markdown files with YAML frontmatter. A concept's OKF ID is its file
-path within the bundle, minus `.md`. The stable internal `id` is a UUIDv7 (RFC
-9562); legacy notes may use `YYYYMMDDHHmmss-UUIDv4`; both formats are accepted.
+path within the bundle, minus `.md`. The stable internal id (`x-okfw-id`) is a
+UUIDv7 (RFC 9562); legacy notes may use `YYYYMMDDHHmmss-UUIDv4`; both formats
+are accepted.
+
+**okfw's own keys are `x-okfw-*`** — `x-okfw-id`, `-kind`, `-project`,
+`-parent`, `-created`, `-timestamp` (`config.Key*`; never spell them as string
+literals). v0.3 §4.1 promises no OKF version will define an `x-` key and asks
+producers to use `x-<producer>-<name>`, so this is the one namespace a future
+spec cannot collide with; bare `timestamp` already collided with v0.1's
+generation time (Appendix B). okfw wrote them bare until v2026.11. Reads accept
+both (`legacyKeys`, inlined into `Concept`; the new key wins); writes and strict
+validation use only the new names, and `checkLegacyKeys` turns the old ones
+into a "run `okfw migrate`" error. `migrate` (`bundle.UpgradeOkfwKeys`) and
+every `bundle.Edit` rename them in place (`config.UpgradeLegacyKeys`), so no
+file holds both spellings — but only in a concept okfw wrote
+(`LegacyKeysToUpgrade`: an okfw-shaped `id`, or both `created` and
+`timestamp`): another producer's bare `id` is its own. The Neovim plugin reads
+`x-okfw-id`, falling back to `id`.
 
 Placement: an explicit `--path` wins, else an explicit `--project` name as a
 top-level folder, else the wiki root. Concepts may live in any directory and
@@ -214,8 +230,8 @@ spec-defined one.
 the schema-compiles check.
 
 **Two deliberate divergences from OKF, both load-bearing — do not "fix" them
-toward the spec.** okfw requires six fields (`id`, `title`, `type`, `tags`,
-`created`, `timestamp`) where §4.1 requires only a non-empty `type`, and
+toward the spec.** okfw requires six fields (`type`, `title`, `tags`, and its
+own `x-okfw-id`, `x-okfw-created`, `x-okfw-timestamp`) where §4.1 requires only a non-empty `type`, and
 `#Concept` is a *closed* CUE definition that rejects undeclared keys where §4.1
 and §11.2 say consumers MUST NOT. None of the six was deprecated by v0.3
 (`title` and `tags` went from "recommended" to "optional"). The trade buys a
@@ -255,9 +271,9 @@ knowledge format, not a task tracker. `okfw migrate` strips those fields from
 older concepts (`status: closed` becomes `deprecated`; open/in_progress lose
 `status` entirely, since absent means stable). The free-form `type` is left
 alone, since the spec does not register type values. Do not reintroduce todo
-fields, an `okfw:` block (the name reads as "the OKF fields" and confuses), or
-okfw-owned keys inside `x:` or under `x-okfw-*` (extension keys belong to the
-user).
+fields, an `okfw:` block or an `okfw-` prefix (both read as "the OKF fields"
+and confuse; `x-okfw-` is the spec's own form), or okfw-owned keys inside
+`x:`. `x-okfw-*` is okfw's; every other `x-` key and `x:` belong to the user.
 
 ## Wiki Layout (fixed, inside `.okfw/`)
 

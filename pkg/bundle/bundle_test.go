@@ -12,7 +12,7 @@ import (
 
 func TestParseReadsTheFields(t *testing.T) {
 	content := "---\r\n" +
-		"id: \"019680f0-7e00-7abc-8def-1234567890ab\"\r\n" +
+		"x-okfw-id: \"019680f0-7e00-7abc-8def-1234567890ab\"\r\n" +
 		"title: \"Token refresh\"\r\n" +
 		"type: ADR\r\n" +
 		"description: How tokens are refreshed.\r\n" +
@@ -44,7 +44,7 @@ func TestParseReadsTheFields(t *testing.T) {
 // v0.3 section 11.2: a scalar tags is one tag, never split at commas, and an
 // unknown status is kept raw, since it is not stable (section 5.4).
 func TestParseIsLenient(t *testing.T) {
-	c, err := bundle.Parse("notes/x.md", []byte("---\ntype: Note\ntitle: X\ntags: foo, bar\nstatus: open\ncreated: soon\n---\nbody\n"))
+	c, err := bundle.Parse("notes/x.md", []byte("---\ntype: Note\ntitle: X\ntags: foo, bar\nstatus: open\nx-okfw-created: soon\n---\nbody\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

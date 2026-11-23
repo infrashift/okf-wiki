@@ -11,12 +11,12 @@ import (
 // concept wraps frontmatter in a minimally valid concept.
 func concept(extra string) []byte {
 	return []byte(`---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "T"
 type: "note"
 tags: []
-created: "2026-07-01T10:00:00Z"
-timestamp: "2026-07-01T10:00:00Z"
+x-okfw-created: "2026-07-01T10:00:00Z"
+x-okfw-timestamp: "2026-07-01T10:00:00Z"
 ` + extra + `---
 
 # T
@@ -432,11 +432,11 @@ func TestUndeclaredTopLevelKeyIsRejected(t *testing.T) {
 // --- kind ---
 
 func TestKindNoLongerAcceptsTodo(t *testing.T) {
-	if _, err := ParseAndValidate(concept("kind: \"todo\"\n")); err == nil {
+	if _, err := ParseAndValidate(concept("x-okfw-kind: \"todo\"\n")); err == nil {
 		t.Error("kind: todo was removed and should be rejected")
 	}
 	for _, k := range []string{"note", "daily-note", "issue"} {
-		if _, err := ParseAndValidate(concept("kind: \"" + k + "\"\n")); err != nil {
+		if _, err := ParseAndValidate(concept("x-okfw-kind: \"" + k + "\"\n")); err != nil {
 			t.Errorf("kind %q should be valid: %v", k, err)
 		}
 	}
@@ -463,11 +463,11 @@ func TestGetKindFallsBackToType(t *testing.T) {
 func TestParseFrontmatterToleratesABadField(t *testing.T) {
 	for name, extra := range map[string]string{
 		"scalar tags":  "tags: foo\n",
-		"bad created":  "created: \"Jan 15 2024\"\n",
+		"bad created":  "x-okfw-created: \"Jan 15 2024\"\n",
 		"list for x":   "x: [1, 2]\n",
 		"map for type": "status: {a: 1}\n",
 	} {
-		content := []byte("---\nid: \"019680f0-7e00-7abc-8def-1234567890ab\"\ntitle: \"Kept\"\ntype: \"note\"\n" + extra + "---\n\nbody\n")
+		content := []byte("---\nx-okfw-id: \"019680f0-7e00-7abc-8def-1234567890ab\"\ntitle: \"Kept\"\ntype: \"note\"\n" + extra + "---\n\nbody\n")
 		z, err := ParseFrontmatter(content)
 		if err != nil {
 			t.Errorf("%s: %v", name, err)

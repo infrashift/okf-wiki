@@ -13,7 +13,7 @@ func bareLF(b []byte) bool {
 	return bytes.Count(b, []byte("\n")) != bytes.Count(b, []byte("\r\n"))
 }
 
-const crlfConcept = "---\r\nid: \"a\"\r\ntitle: \"T\" # kept\r\ntags:\r\n  - x\r\n---\r\n\r\n# T\r\n\r\nBody line.\r\n"
+const crlfConcept = "---\r\nx-okfw-id: \"a\"\r\ntitle: \"T\" # kept\r\ntags:\r\n  - x\r\n---\r\n\r\n# T\r\n\r\nBody line.\r\n"
 
 // One frontmatter edit used to write the block as LF between a CRLF closing
 // delimiter and a CRLF body.

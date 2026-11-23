@@ -24,7 +24,6 @@ reason, and the consequence.
 | A closed schema: unknown keys are errors, except `x-*` | Consumers MUST NOT reject unknown keys (§4.1, §11.2) | `okfw validate`, writers |
 | Bundle `title` and `description` required | Both optional (§8.1) | `okfw validate --all`, `okfw init` |
 | Near-miss `human:` actor schemes refused | Any scheme is a valid non-human actor (§7) | `okfw validate`, writers |
-| okfw's own metadata keys are not `x-` prefixed | Producers SHOULD name their keys `x-<producer>-<name>` (§4.1) | every concept okfw writes |
 
 None of these applies when okfw **reads**. A concept that breaks okfw's rules
 is still found by search, drawn in the graph and listed in `index.md`. Use
@@ -36,26 +35,28 @@ is still found by search, drawn in the graph and listed in `index.md`. Use
 `tags` are optional, and a consumer MUST NOT reject a concept for a missing
 optional field (§11.2).
 
-**okfw:** every concept it writes carries `id`, `title`, `type`, `tags`,
-`created` and `timestamp`, and `okfw validate` rejects one that does not.
+**okfw:** every concept it writes carries `type`, `title` and `tags`, and
+okfw's own `x-okfw-id`, `x-okfw-created` and `x-okfw-timestamp`, and
+`okfw validate` rejects one that does not.
 
 **Why:**
 - OKF identifies a concept by its path, which changes when the concept moves.
-  The UUIDv7 `id` stays the same, so a reference by `id`, such as a `parent:`, a
+  The UUIDv7 `x-okfw-id` stays the same, so a reference by id, such as an `x-okfw-parent:`, a
   daily-note link or an agent's memory, survives a reorganization.
 - `title` and `tags` are what the `index.md` listings, search ranking and
   pickers show. A concept without them is hard to find.
-- `created` and `timestamp` record okfw's own write history, which works in a
+- `x-okfw-created` and `x-okfw-timestamp` record okfw's own write history, which works in a
   bundle that is not in git.
 
 **Consequences:**
 - `okfw validate` and `okfw validate --all` reject a bundle another tool wrote
   even when it is conformant. Use `okfw validate --okf` for those.
 - Other OKF consumers ignore these keys, as the spec requires them to.
-- In a bundle that declares `okf_version` 0.2 or none, a consumer MAY read
-  `timestamp` as the last content change when `generated` is absent (Appendix
-  B). okfw's `timestamp` is its last write, not its last content change. Run
-  `okfw migrate`: a bundle that declares 0.3 does not get that fallback.
+- okfw's keys live in the `x-` namespace the spec reserves for producers
+  (§4.1), so no future OKF version can give one of them a meaning of its own.
+  Before this release okfw wrote them bare, and OKF v0.1 had already defined a
+  bare `timestamp` as the generation time (Appendix B), so other tools could
+  misread okfw's last-write time. `okfw migrate` renames them.
 
 ## A closed schema
 
@@ -75,6 +76,7 @@ place to live that a closed schema can accept safely.
 
 **Consequences:**
 - Name custom keys `x-<producer>-<name>`, for example `x-acme-owner`.
+  `x-okfw-*` is okfw's own; every other `x-` key belongs to you.
 - A third-party bundle that uses non-`x-` custom keys fails `okfw validate`,
   but passes `okfw validate --okf`.
 - okfw never drops a key it does not know. Frontmatter is edited in place, so
@@ -115,24 +117,6 @@ and nothing would say why.
 **Consequences:** reads accept these actors, as the spec requires, and treat
 them as non-human. Only writes and strict validation refuse them.
 
-## okfw's own keys are not `x-` prefixed
-
-**The spec:** producers SHOULD name their own keys `x-<producer>-<name>`
-(§4.1).
-
-**okfw:** okfw writes its own keys without a prefix: `id`, `kind`, `project`,
-`parent`, `created` and `timestamp`.
-
-**Why:** these keys predate the v0.3 recommendation. Every okfw bundle, the
-Neovim plugin and agents' habits depend on them. Renaming them would be a
-breaking change for every user, and the spec makes it a SHOULD, not a MUST.
-
-**Consequences:** a future OKF version could define one of these names, for
-example `parent`, with a different meaning. The spec promises that it will
-never define an `x-` key, but it makes no such promise for these names. If
-that happens, okfw will need a migration that renames its keys. Until then,
-other consumers read them as unknown keys and ignore them.
-
 ## What okfw implements that the spec only permits
 
 These are not divergences, but they are choices worth knowing:
@@ -145,7 +129,7 @@ These are not divergences, but they are choices worth knowing:
   every other timestamp the same way, so the format stays uniform.
 - **`generated.at` moves only for a content change:** `okfw set-generated`,
   or a body rewrite through okfw. Tag, lifecycle, source and verify edits, and
-  link repair, change only okfw's `timestamp`. That way an unrelated edit
+  link repair, change only okfw's `x-okfw-timestamp`. That way an unrelated edit
   never invalidates a review (§5.2–5.3).
 - **`okfw search --current`** excludes deprecated concepts and concepts with an
   unknown status, and follows `superseded_by` to the replacement (§5.4).

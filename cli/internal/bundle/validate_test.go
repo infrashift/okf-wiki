@@ -8,18 +8,18 @@ import (
 )
 
 const legacyTodo = `---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Ship it"
 type: "todo"
-kind: "todo"
+x-okfw-kind: "todo"
 status: "closed"
 due: "2026-08-01"
 completed: "2026-07-20"
 priority: "high"
 tags:
   - "release"
-created: "2026-07-01T10:00:00Z"
-timestamp: "2026-07-20T10:00:00Z"
+x-okfw-created: "2026-07-01T10:00:00Z"
+x-okfw-timestamp: "2026-07-20T10:00:00Z"
 ---
 
 # Ship it
@@ -30,7 +30,7 @@ func TestValidateGenerated(t *testing.T) {
 	if err := ValidateGenerated([]byte(good)); err != nil {
 		t.Errorf("a generated note should validate: %v", err)
 	}
-	if err := ValidateGenerated([]byte("---\nid: \"nope\"\n---\n")); err == nil {
+	if err := ValidateGenerated([]byte("---\nx-okfw-id: \"nope\"\n---\n")); err == nil {
 		t.Error("expected an error for an invalid concept")
 	}
 }

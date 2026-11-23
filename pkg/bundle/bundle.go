@@ -77,8 +77,8 @@ func Parse(path string, content []byte) (*Concept, error) {
 
 // Validate applies the strict check that `okfw validate` applies to one
 // concept: the frontmatter must satisfy okfw's CUE #Concept schema (which
-// requires id, title, type, tags, created and timestamp, and rejects
-// undeclared keys outside x:), the business rules the schema cannot express,
+// requires type, title, tags and okfw's x-okfw-id, x-okfw-created and x-okfw-timestamp, and rejects
+// undeclared keys other than x-* and x:), the business rules the schema cannot express,
 // and every [^label] footnote in the body must resolve.
 //
 // okfw's schema is deliberately stricter than OKF, so a conformant bundle

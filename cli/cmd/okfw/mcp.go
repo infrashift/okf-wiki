@@ -591,7 +591,7 @@ func createMetadata(status, staleAfter, resource, generatedBy string) (func(*yam
 		if generatedBy != "" {
 			// Created now, so generated at the creation instant.
 			at := ""
-			if ts := bundle.MapGet(m, "timestamp"); ts != nil {
+			if ts := bundle.MapGet(m, config.KeyTimestamp); ts != nil {
 				at = ts.Value
 			}
 			if err := setGeneratedMutator(generatedBy, at)(m); err != nil {
@@ -810,7 +810,7 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	var newContent []byte
 	switch a.Action {
 	case "set_project":
-		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"project": a.Value})
+		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{config.KeyProject: a.Value})
 	case "set_lifecycle":
 		mut, merr := lifecycleMutator(cfg, a.Value, a.SupersededBy)
 		if merr != nil {
@@ -1057,7 +1057,7 @@ func applyOKFEdit(content []byte, fn func(*yaml.Node) error) ([]byte, error) {
 		}
 		// timestamp records the write; generated.at is left alone, as the
 		// CLI's editConcept leaves it (OKF v0.3 section 5.2).
-		bundle.MapSetString(m, "timestamp", time.Now().Format(time.RFC3339))
+		bundle.MapSetString(m, config.KeyTimestamp, time.Now().Format(time.RFC3339))
 		return nil
 	})
 	if err != nil {

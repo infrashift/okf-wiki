@@ -66,14 +66,14 @@ Daily notes are a staging area: refine what proves durable into its own concept 
 
 ```markdown
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "2026-02-13 Friday"
 type: "daily-note"
-kind: "daily-note"
+x-okfw-kind: "daily-note"
 tags:
   - "daily"
-created: "2026-02-13T08:12:30-06:00"
-timestamp: "2026-02-13T08:12:30-06:00"
+x-okfw-created: "2026-02-13T08:12:30-06:00"
+x-okfw-timestamp: "2026-02-13T08:12:30-06:00"
 ---
 
 # 2026-02-13 Friday

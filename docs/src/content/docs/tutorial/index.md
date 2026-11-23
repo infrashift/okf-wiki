@@ -183,7 +183,7 @@ captures need nothing more than a title, and you can assign a project later.
 **Daily notes** are date-stamped journal entries stored inside the wiki under
 `daily/` in a `YYYY/MM/` directory hierarchy.
 
-Each note has a UUIDv7 `id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
+Each note has a UUIDv7 `x-okfw-id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
 embeds a timestamp for natural sorting while remaining collision-free. Legacy
 `YYYYMMDDHHmmss-UUID` IDs are still accepted. A concept's **OKF id is its
 path within the wiki minus `.md`** — for example the file
@@ -238,14 +238,14 @@ sections for your morning plan, tasks, notes, and end-of-day reflection:
 
 ```markdown
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "2026-02-19 Thursday"
 type: "daily-note"
-kind: "daily-note"
+x-okfw-kind: "daily-note"
 tags:
   - "daily"
-created: "2026-02-19T14:30:00Z"
-timestamp: "2026-02-19T14:30:00Z"
+x-okfw-created: "2026-02-19T14:30:00Z"
+x-okfw-timestamp: "2026-02-19T14:30:00Z"
 ---
 
 # 2026-02-19 Thursday

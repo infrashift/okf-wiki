@@ -73,7 +73,7 @@ This structure isn't bureaucracy - it's the minimum viable metadata for a functi
 
 ### Parent-Child Relationships
 
-The optional `parent` field supports concept sequences - chains of thought where one idea directly develops from another. This preserves the logical progression of your thinking while maintaining atomic concepts.
+The optional `x-okfw-parent` field supports concept sequences - chains of thought where one idea directly develops from another. This preserves the logical progression of your thinking while maintaining atomic concepts.
 
 ### Plain Text Markdown
 
