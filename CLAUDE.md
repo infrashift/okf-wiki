@@ -414,6 +414,11 @@ and confuse; `x-okfw-` is the spec's own form), or okfw-owned keys inside
   value. `initialize` returns `mcpInstructions` plus the top-level directories;
   `TestMCPInstructionsStayShort` holds it to a byte budget, since it rides in
   the agent's context all session.
+  `--read-only` (`mcpServer.readOnly`) serves only search/read/graph, with
+  `mcpReadOnlyInstructions`, and refuses create/update under either name.
+  The okfw-benchmark token runs put the tool definitions + instructions at
+  60-80% of okfw's input tokens, and the write tools are nearly half the
+  definitions; `TestMCPReadOnly` holds the saving to at least 35%.
   Every tool result is capped and says so (`truncated`, `next_offset`, `… N
   more`); `TestEveryMCPToolIsCappedAndSaysSo` is driven from the tool list so a
   tool added later cannot escape it, and exists because every other MCP test
