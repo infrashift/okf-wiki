@@ -8,23 +8,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// OKF section 5: every timestamp-valued key is an ISO 8601 datetime with an
-// explicit UTC offset. That covers generated.at, verified[].at, stale_after,
-// sources[].last_modified and both ends of usage_window — and okfw holds its
-// own created/timestamp to the same form.
+// OKF v0.3 section 5: a timestamp-valued key (generated.at, verified[].at,
+// stale_after, sources[].last_modified, usage_window.from/.to) holds one of two
+// RFC 3339 forms and nothing else — a date-time with an explicit offset, or a
+// full-date, which means the start of that day in UTC. A date-time without an
+// offset stays invalid.
 //
-// A bare date is not accepted on read. "2026-12-31" names a different instant
-// in every timezone, so the same bundle could be stale in one office and fresh
-// in another; the spec moved off dates for exactly that reason, and a
-// midnight-UTC fallback would quietly put the disagreement back. Writers are
-// more forgiving (see NormalizeDateTime), because there a human typed the value
-// and okfw can say what it turned it into.
+// v0.2 (after an in-place erratum, okf#24) required the offset, and okfw
+// rejected bare dates because a date named a different instant in every
+// timezone. v0.3 pins a date to UTC midnight, which removes that objection, so
+// a date is accepted again everywhere OKF accepts it. okfw's own writers still
+// write the date-time form, and okfw's own created/timestamp keep requiring it
+// (dateTimeRe; #DateTime in the schema). Keep both regexps in step with the
+// schema's #DateTime and #Timestamp.
 var dateTimeRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$`)
 
 var dateOnlyRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// ParseDateTime parses an OKF timestamp, rejecting a bare date or a datetime
-// without an offset.
+// ParseDateTime parses the date-time form only: okfw's created and timestamp,
+// which are okfw's fields and keep the stricter rule.
 func ParseDateTime(s string) (time.Time, error) {
 	if !dateTimeRe.MatchString(s) {
 		return time.Time{}, fmt.Errorf("%q is not an ISO 8601 datetime with a UTC offset (e.g. 2026-12-31T00:00:00Z)", s)
@@ -32,12 +34,30 @@ func ParseDateTime(s string) (time.Time, error) {
 	return time.Parse(time.RFC3339Nano, s)
 }
 
-// IsDateOnly reports whether s is a bare YYYY-MM-DD date — the form OKF used
-// for these fields before it required datetimes.
+// ParseTimestamp parses an OKF timestamp value (section 5): a date-time with an
+// offset, or a full-date, read as the start of that day in UTC.
+func ParseTimestamp(s string) (time.Time, error) {
+	if IsDateOnly(s) {
+		t, err := time.Parse("2006-01-02", s)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("%q is not a valid date", s)
+		}
+		return t, nil
+	}
+	if !dateTimeRe.MatchString(s) {
+		return time.Time{}, fmt.Errorf("%q is neither an RFC 3339 date-time with an offset nor a YYYY-MM-DD date (OKF section 5)", s)
+	}
+	return time.Parse(time.RFC3339Nano, s)
+}
+
+// IsDateOnly reports whether s is a bare YYYY-MM-DD date.
 func IsDateOnly(s string) bool { return dateOnlyRe.MatchString(s) }
 
-// NormalizeDateTime turns writer input into the OKF form: a datetime with an
-// offset is kept exactly as written, and a bare date becomes midnight UTC.
+// NormalizeDateTime turns writer input into the form okfw writes: a datetime
+// with an offset is kept exactly as written, and a bare date becomes midnight
+// UTC, the instant v0.3 says the date means. okfw writes the date-time form
+// because section 5 asks producers to for generated.at and verified[].at, which
+// consumers compare, and one form everywhere is simpler to read.
 func NormalizeDateTime(s string) (string, error) {
 	if IsDateOnly(s) {
 		if _, err := time.Parse("2006-01-02", s); err != nil {
@@ -52,19 +72,30 @@ func NormalizeDateTime(s string) (string, error) {
 }
 
 // IsStale reports whether a stale_after value has been reached: stale means
-// now >= stale_after, compared as instants (OKF section 5.5). An absent value is
-// never stale, and neither is one that is not a valid OKF datetime — a consumer
-// derives staleness only from the field as specified, and `okfw validate`
-// is what reports the malformed value.
+// now >= stale_after, compared as instants (OKF section 5.5). An absent or
+// empty value is never stale. A value that does not parse IS stale: v0.3
+// section 5.5 says a consumer MUST NOT treat it as fresh, and "check it again"
+// is the safe reading of a review date nobody can read. (okfw v0.2 returned
+// false here, which a v0.3 consumer may not.)
 func IsStale(staleAfter string, now time.Time) bool {
 	if staleAfter == "" {
 		return false
 	}
-	cutoff, err := ParseDateTime(staleAfter)
+	cutoff, err := ParseTimestamp(staleAfter)
 	if err != nil {
-		return false
+		return true
 	}
 	return !now.Before(cutoff)
+}
+
+// IsMalformedTimestamp reports whether a non-empty timestamp value does not
+// parse, so a caller can show it as malformed (section 5.5's SHOULD).
+func IsMalformedTimestamp(s string) bool {
+	if s == "" {
+		return false
+	}
+	_, err := ParseTimestamp(s)
+	return err != nil
 }
 
 // frontmatterValue decodes a YAML node into plain Go values for schema

@@ -521,32 +521,57 @@ func NormalizeTarget(href, fromDir string) string {
 	return strings.TrimPrefix(p, "/")
 }
 
-// RefLink returns the body-link spelling of a path-valued frontmatter field
-// (OKF section 6.2): a path starting "./" or "../" resolves from the concept's
-// directory, as a body link does, and any other path from the bundle root, so
-// a bare one gains a leading "/". Body links are not read this way; section
-// 6.1 makes a bare body link a standard markdown relative path.
+// NormalizeRef resolves a path-valued frontmatter field (OKF v0.3 section
+// 6.2) by the one rule section 6 gives links and path fields alike — a value
+// starting "/" resolves from the bundle root, any other from the directory of
+// the file holding it — and returns "" unless it names a markdown file inside
+// the bundle. The same field may hold a URL, a scope descriptor ("all queries
+// in project X") or a non-concept file such as an attester's .py, and none of
+// those is an edge between concepts.
 //
-// Section 6.2 does not say what a bare path is relative to, and okfw first
-// read it from the concept's directory. That left the spec's own Appendix A
-// example (executor.resource: references/skills/run-on-bq.md, written from
-// computations/revenue.md) and 12 of 12 such paths in the upstream acme_retail
-// bundle pointing at nothing. This reading resolves every one of them and
-// §6.2's own ../computations/revenue.md, and is the one proposed in upstream
-// issues #245 and #408.
-func RefLink(value string) string {
-	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") || strings.HasPrefix(value, "../") {
-		return value
+// okfw v0.2 read a bare path from the bundle root instead. Section 6.2 was
+// silent then, okfw's reading resolved the v0.2 spec's own examples, and it was
+// the one proposed upstream (#245, #408). v0.3 ruled the other way, and listed
+// it as a breaking change (section 13.1), so a bare path here is relative.
+// LegacyRootRef gives the old reading for the section 12.1 fallback.
+func NormalizeRef(value, fromDir string) string {
+	v := refPath(value)
+	if v == "" {
+		return ""
 	}
-	return "/" + value
+	return NormalizeTarget(v, fromDir)
 }
 
-// NormalizeRef resolves a path-valued frontmatter field (OKF section 6.2) by
-// RefLink's rule, and returns "" unless it names a markdown file inside the
-// bundle. The same field may hold a URL, a scope descriptor ("all queries in
-// project X") or a non-concept file such as an attester's .py, and none of
-// those is an edge between concepts.
-func NormalizeRef(value, fromDir string) string {
+// LegacyRootRef returns the v0.2 reading of a bare path-field value — from the
+// bundle root — or "" when the value is not bare ("/", "./", "../"), or names
+// no markdown file in the bundle. Section 6.2 lets a consumer try it only for a
+// bundle that declares okf_version 0.2 or earlier, or no version, and only
+// when the value does not resolve from its file's directory; ResolveRef
+// applies those conditions.
+func LegacyRootRef(value string) string {
+	v := refPath(value)
+	if v == "" || strings.HasPrefix(v, "/") || strings.HasPrefix(v, "./") || strings.HasPrefix(v, "../") {
+		return ""
+	}
+	return NormalizeTarget("/"+v, "")
+}
+
+// ResolveRef resolves a path field with the section 6.2 compatibility
+// fallback. exists reports whether a bundle-relative path names a file; a nil
+// exists means the fallback does not apply (a v0.3 or later bundle), and
+// ResolveRef is NormalizeRef.
+func ResolveRef(value, fromDir string, exists func(rel string) bool) string {
+	rel := NormalizeRef(value, fromDir)
+	if exists == nil || (rel != "" && exists(rel)) {
+		return rel
+	}
+	if alt := LegacyRootRef(value); alt != "" && exists(alt) {
+		return alt
+	}
+	return rel
+}
+
+func refPath(value string) string {
 	v := strings.TrimSpace(value)
 	if i := strings.IndexByte(v, '#'); i >= 0 {
 		v = v[:i]
@@ -554,7 +579,7 @@ func NormalizeRef(value, fromDir string) string {
 	if !isInternalMarkdown(v) {
 		return ""
 	}
-	return NormalizeTarget(RefLink(v), fromDir)
+	return v
 }
 
 // RewriteLinks applies rewrite to the destination of every internal markdown

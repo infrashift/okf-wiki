@@ -83,6 +83,9 @@ func eachConcept(root string, fn func(abs, rel string) error) error {
 			}
 			return nil
 		}
+		if fi.Mode()&os.ModeSymlink != 0 && !Within(root, p) {
+			return nil // OKF section 3.2: never follow a link out of the bundle
+		}
 		if !strings.HasSuffix(p, ".md") || config.IsReservedBase(fi.Name()) {
 			return nil
 		}
@@ -98,6 +101,7 @@ func eachConcept(root string, fn func(abs, rel string) error) error {
 // (itself bundle-relative), from the body or a path-valued frontmatter field,
 // excluding target's own self-links.
 func InboundLinks(root, target string) ([]string, error) {
+	exists := existsAlso(RefExists(root), target)
 	var sources []string
 	err := eachConcept(root, func(abs, rel string) error {
 		if rel == target {
@@ -107,7 +111,7 @@ func InboundLinks(root, target string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		if linksTo(content, RelDir(rel), target) {
+		if linksTo(content, RelDir(rel), target, exists) {
 			sources = append(sources, rel)
 		}
 		return nil
@@ -257,11 +261,16 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 			return nil, err
 		}
 	}
-	moved, err = RewritePathRefs(moved, oldDir, ownLink)
+	// The v0.2 path fallback must still see the concept at its old path: the
+	// inbound pass below runs after the file has moved.
+	exists := existsAlso(RefExists(cfg.RootPath), oldRel)
+	moved, err = RewritePathRefs(moved, oldDir, ownLink, exists)
 	if err != nil {
 		return nil, err
 	}
-	// A move changes the concept's OKF identity, so it is a meaningful change.
+	// A move changes the concept's OKF identity, so okfw's timestamp moves.
+	// generated.at does not: the content is unchanged, and v0.3 section 5.2
+	// says a link repair is not a meaningful change.
 	moved, err = UpdateFrontmatter(moved, nil)
 	if err != nil {
 		return nil, err
@@ -303,7 +312,7 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		}
 		if mayReference(rewritten, oldRel) {
 			var ferr error
-			if rewritten, ferr = RewritePathRefs(rewritten, fromDir, inbound); ferr != nil {
+			if rewritten, ferr = RewritePathRefs(rewritten, fromDir, inbound, exists); ferr != nil {
 				return nil // frontmatter we cannot safely re-encode
 			}
 		}
@@ -328,4 +337,15 @@ func MoveConcept(cfg *config.Config, oldAbs, newAbs string) (*MoveResult, error)
 		return nil, fmt.Errorf("failed to refresh index.md files: %w", err)
 	}
 	return res, nil
+}
+
+// existsAlso extends a RefExists check to report rel as present: a concept
+// being moved or deleted still has to count as the target of the v0.2
+// fallback while its inbound links are found. A nil check (a v0.3 bundle)
+// stays nil.
+func existsAlso(exists func(string) bool, rel string) func(string) bool {
+	if exists == nil {
+		return nil
+	}
+	return func(r string) bool { return r == rel || exists(r) }
 }

@@ -15,8 +15,8 @@ func ReadConceptKey(bundleRoot, bundleRel string) string {
 		return ""
 	}
 	z, err := ParseFrontmatter(content)
-	if err != nil {
-		return ""
+	if err != nil || !IsConcept(z) {
+		return "" // a file with no type is not a concept (OKF section 3.2)
 	}
 	return ConceptKey(z, bundleRel)
 }

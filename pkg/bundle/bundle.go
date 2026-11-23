@@ -37,8 +37,9 @@ type Concept struct {
 	Description string // a one-sentence summary; may be empty
 	Tags        []string
 
-	// Status is the OKF lifecycle status: draft, stable or deprecated. An
-	// absent or unrecognised value reads as stable (OKF section 5.4).
+	// Status is the OKF lifecycle status: draft, stable or deprecated, or
+	// "stable" when absent. An unrecognised value is kept raw: OKF v0.3
+	// section 5.4 says it is not stable, and a consumer SHOULD show it.
 	Status string
 
 	// Body is the markdown after the frontmatter block.
@@ -48,14 +49,19 @@ type Concept struct {
 // Parse reads the concept in content, the bytes of the file at path (relative
 // to the bundle root, used for Path and for ID when the frontmatter has none).
 //
-// Parse is lenient, as every okfw read is: a field with the wrong shape, such
-// as `tags: foo`, is left empty instead of failing the concept. It returns an
-// error only when content has no frontmatter block, or the frontmatter is not
-// a YAML mapping. Use Validate for the strict check.
+// Parse is lenient, as every okfw read is: a field with the wrong shape is
+// left empty instead of failing the concept, and a scalar `tags` is one tag
+// (OKF v0.3 section 11.2). It returns an error when content has no frontmatter
+// block, when the frontmatter is not a YAML mapping, and — ErrNotConcept — when
+// it has no non-empty `type`, which OKF v0.3 section 3.2 says makes the file
+// no concept at all. Use Validate for the strict check.
 func Parse(path string, content []byte) (*Concept, error) {
 	z, err := config.ParseFrontmatter(content)
 	if err != nil {
 		return nil, err
+	}
+	if !config.IsConcept(z) {
+		return nil, ErrNotConcept
 	}
 	return &Concept{
 		Path:        path,

@@ -5,32 +5,39 @@ import (
 	"testing"
 )
 
+// guard marks an actor that has the section 7 shape — so CUE accepts it — but
+// that ValidateActor refuses as a misspelt human:.
 var actorCases = []struct {
 	actor string
 	ok    bool
+	guard bool
 }{
-	{"human:alice", true},
-	{"human:John Smith", true}, // a Windows login may hold a space
-	{`human:CORP\alice`, true},
-	{"process:finance-nightly", true},
-	{"reference_agent/gemini-2.5-pro", true},
-	{"github.com/infrashift/okf-wiki/0.2", true},
-	{"ollama/llama3:8b", true}, // a version may hold a colon
+	{"human:alice", true, false},
+	{"human:John Smith", true, false}, // a Windows login may hold a space
+	{`human:CORP\alice`, true, false},
+	{"process:finance-nightly", true, false},
+	{"reference_agent/gemini-2.5-pro", true, false},
+	{"github.com/infrashift/okf-wiki/0.2", true, false},
+	{"ollama/llama3:8b", true, false}, // a version may hold a colon
 
-	{"humna:alice", false},
-	{"Human:alice", false},
-	{"HUMAN:alice", false},
-	{"human:", false},
-	{"human: alice", false},
-	{"human:alice ", false},
-	{"human:a\nb", false},
-	{"process:", false},
-	{"alice", false},
-	{"team:data-platform", false},
-	{"/v1", false},
-	{"agent/", false},
-	{"my agent/v1", false},
-	{"humna:alice/x", false}, // a producer may not hold a colon
+	{"team:data-platform", true, false},  // v0.3 section 7 defines team:
+	{"service-account:etl", true, false}, // other schemes are valid, and non-human
+	{"humna:alice", false, true},
+	{"huma:alice", false, true},
+	{"humans:alice", false, true},
+	{"Human:alice", false, false},
+	{"HUMAN:alice", false, false},
+	{"human:", false, false},
+	{"human: alice", false, false},
+	{"human:alice ", false, false},
+	{"human:a\nb", false, false},
+	{"process:", false, false},
+	{"alice", false, false},
+	{"/v1", false, false},
+	{"agent/", false, false},
+	{"my agent/v1", false, false},
+	{"Team:x", false, false},       // the scheme is lowercase
+	{"humna:alice/x", false, true}, // a producer may not hold a colon
 }
 
 // TestActorConventionAgreesWithTheSchema runs one table through actorRe and
@@ -46,7 +53,7 @@ func TestActorConventionAgreesWithTheSchema(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cueErr := ValidateConceptYAML(fm); (cueErr == nil) != tc.ok {
+		if cueErr := ValidateConceptYAML(fm); (cueErr == nil) != (tc.ok || tc.guard) {
 			t.Errorf("schema on %q: %v, want ok=%v", tc.actor, cueErr, tc.ok)
 		}
 	}

@@ -77,10 +77,10 @@ func TestExportRefusesIDsThatEscapeTheExportDirectory(t *testing.T) {
 		filepath.Join(filepath.Dir(project), "escaped.md"),
 	} {
 		if _, err := os.Stat(p); err == nil {
-			t.Errorf("export wrote %s outside ephemeral/", p)
+			t.Errorf("export wrote %s outside .ephemeral/", p)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(cfg.RootPath, "ephemeral", "019680f0-7e00-7abc-8def-1234567890ab.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(cfg.RootPath, ".ephemeral", "019680f0-7e00-7abc-8def-1234567890ab.md")); err != nil {
 		t.Errorf("safe concept not exported: %v", err)
 	}
 }
@@ -114,10 +114,11 @@ func TestExportRewritesFrontmatterPaths(t *testing.T) {
 	if _, err := runCmd(t, rootCmd(), "export"); err != nil {
 		t.Fatalf("export: %v", err)
 	}
-	got := readFile(t, filepath.Join(cfg.RootPath, "ephemeral", "019680f0-7e00-7abc-8def-200000000000.md"))
-	// Exported concepts sit side by side in ephemeral/, and a bare frontmatter
-	// path would be read from the bundle root, so the export spells it ./.
-	if !strings.Contains(got, `resource: "./019680f0-7e00-7abc-8def-100000000000.md"`) {
+	got := readFile(t, filepath.Join(cfg.RootPath, ".ephemeral", "019680f0-7e00-7abc-8def-200000000000.md"))
+	// Exported concepts sit side by side in .ephemeral/, and under OKF v0.3 a
+	// bare frontmatter path resolves from its file's directory, as a body
+	// link does, so the export spells it bare.
+	if !strings.Contains(got, `resource: "019680f0-7e00-7abc-8def-100000000000.md"`) {
 		t.Errorf("export left the source pointing at the old path:\n%s", got)
 	}
 }

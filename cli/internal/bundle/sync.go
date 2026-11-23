@@ -44,7 +44,7 @@ func IsGeneratedIndex(content []byte) bool {
 // number of index files written; a listing that is already current is not
 // rewritten.
 func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
-	return writeIndexFiles(root, false)
+	return writeIndexFiles(root, isBundleRoot(cfg, root), false)
 }
 
 // AdoptIndexFiles is WriteIndexFiles for an explicit regeneration (`okfw
@@ -52,10 +52,35 @@ func WriteIndexFiles(cfg *config.Config, root string) (int, error) {
 // directories that hold okfw concepts, which is how listings written before the
 // marker existed come back under maintenance. It still never prunes one.
 func AdoptIndexFiles(cfg *config.Config, root string) (int, error) {
-	return writeIndexFiles(root, true)
+	return writeIndexFiles(root, isBundleRoot(cfg, root), true)
 }
 
-func writeIndexFiles(root string, adopt bool) (int, error) {
+func isBundleRoot(cfg *config.Config, root string) bool {
+	a, err1 := filepath.Abs(cfg.RootPath)
+	b, err2 := filepath.Abs(root)
+	return err1 == nil && err2 == nil && filepath.Clean(a) == filepath.Clean(b)
+}
+
+// rootFrontmatter returns the frontmatter block the bundle-root index.md is
+// written with: the existing one, byte for byte — OKF v0.3 section 8.1 says a
+// producer that regenerates index.md MUST keep it — or, for a new file, the
+// okf_version declaration the section asks every bundle to carry. An existing
+// okf_version is never changed here: it decides how a bare path field reads,
+// so only `okfw migrate` moves it (StampOKFVersion).
+func rootFrontmatter(path string) string {
+	if have, err := os.ReadFile(path); err == nil && hasFrontmatter(have) {
+		if fm, closing, _, err := splitFrontmatter(have); err == nil {
+			eol := "\n"
+			if strings.HasSuffix(string(closing), "\r") {
+				eol = "\r\n"
+			}
+			return "---" + eol + string(fm) + strings.TrimRight(string(closing), "\r") + eol + eol
+		}
+	}
+	return "---\nokf_version: \"" + config.OKFVersion + "\"\n---\n\n"
+}
+
+func writeIndexFiles(root string, bundleRoot, adopt bool) (int, error) {
 	concepts := map[string][]indexEntry{}
 	dirs := map[string]bool{"": true}
 	// ours marks directories holding a concept okfw wrote (one with an id):
@@ -91,8 +116,8 @@ func writeIndexFiles(root string, adopt bool) (int, error) {
 			return nil
 		}
 		z, err := config.ParseFrontmatter(content)
-		if err != nil {
-			return nil
+		if err != nil || !config.IsConcept(z) {
+			return nil // not a concept (OKF section 3.2): no listing entry
 		}
 		rel, _ := filepath.Rel(root, p)
 		rel = filepath.ToSlash(rel)
@@ -126,11 +151,10 @@ func writeIndexFiles(root string, adopt bool) (int, error) {
 	count := 0
 	for d := range dirs {
 		var b strings.Builder
-		if d == "" {
-			// OKF v0.2 section 12: the bundle-root index.md is the only place
-			// frontmatter is permitted in an index file, and okf_version is
-			// the only key it may carry.
-			b.WriteString("---\nokf_version: \"" + config.OKFVersion + "\"\n---\n\n")
+		if d == "" && bundleRoot {
+			// OKF v0.3 section 8.1: only the bundle-root index.md may carry
+			// frontmatter — bundle metadata, kept as it is.
+			b.WriteString(rootFrontmatter(filepath.Join(root, "index.md")))
 		}
 		heading := d
 		if heading == "" {

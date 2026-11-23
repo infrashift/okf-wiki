@@ -80,11 +80,10 @@ func TestStaleAfterIsAnInstant(t *testing.T) {
 	}
 }
 
-// OKF section 5 requires every timestamp to carry an explicit offset. A bare
-// date names a different instant in every timezone, and it must be rejected
-// whether or not it is quoted — unquoted, yaml.v3 resolves it to a time.Time
-// that used to reach the schema re-rendered as a valid datetime.
-func TestTimestampFieldsRequireAnOffset(t *testing.T) {
+// OKF v0.3 section 5: every OKF timestamp is a date-time with an offset or a
+// full-date (the start of that day in UTC), quoted or YAML-native. A date-time
+// without an offset, or anything else, is invalid.
+func TestTimestampFieldsTakeTheTwoV03Forms(t *testing.T) {
 	fields := map[string]string{
 		"stale_after":             "stale_after: %s\n",
 		"generated.at":            "generated:\n  by: \"human:me\"\n  at: %s\n",
@@ -95,24 +94,46 @@ func TestTimestampFieldsRequireAnOffset(t *testing.T) {
 	}
 	for name, tmpl := range fields {
 		for _, bad := range []string{
-			`"2026-12-31"`, `2026-12-31`, // bare date, quoted and not
 			`"2026-12-31T00:00:00"`,      // no offset
 			`"2026-12-31T00:00:00Zjunk"`, // trailing garbage
 			`"2026-12-31 00:00:00Z"`,     // space separator
+			`"2026-12"`,                  // partial date
 			`"not-a-date"`,
 		} {
 			if _, err := ParseAndValidate(concept(fmt.Sprintf(tmpl, bad))); err == nil {
 				t.Errorf("%s = %s was accepted", name, bad)
 			}
 		}
-		for _, good := range []string{`"2026-12-31T00:00:00Z"`, `"2026-12-31T08:30:00+05:30"`, `2026-12-31T00:00:00.123Z`} {
-			if name == "generated.at" {
-				continue // must also equal timestamp; covered by TestGeneratedAtMirrorsTimestamp
-			}
+		for _, good := range []string{
+			`"2026-12-31T00:00:00Z"`, `"2026-12-31T08:30:00+05:30"`, `2026-12-31T00:00:00.123Z`,
+			`"2026-12-31"`, `2026-12-31`, // full-date, quoted and YAML-native
+		} {
 			if _, err := ParseAndValidate(concept(fmt.Sprintf(tmpl, good))); err != nil {
 				t.Errorf("%s = %s was rejected: %v", name, good, err)
 			}
 		}
+	}
+}
+
+// okfw's own created and timestamp keep the stricter date-time rule.
+func TestOkfwTimestampsStillRequireADateTime(t *testing.T) {
+	bad := strings.Replace(string(concept("")), `created: "2026-07-01T10:00:00Z"`, `created: "2026-07-01"`, 1)
+	if _, err := ParseAndValidate([]byte(bad)); err == nil {
+		t.Error("created as a bare date was accepted")
+	}
+}
+
+// A full-date means the start of that day in UTC, wherever the reader is.
+func TestDateOnlyStaleAfterIsUTCMidnight(t *testing.T) {
+	z, err := ParseAndValidate(concept("stale_after: 2026-07-25\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.IsStale(time.Date(2026, 7, 24, 23, 59, 59, 0, time.UTC)) {
+		t.Error("stale one second before UTC midnight")
+	}
+	if !z.IsStale(time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC)) {
+		t.Error("not stale at UTC midnight")
 	}
 }
 
@@ -133,14 +154,20 @@ func TestNormalizeDateTime(t *testing.T) {
 	}
 }
 
-// A value okfw cannot read as an instant is never stale — the consumer rule —
-// and `okfw validate` is what reports it.
-func TestIsStaleIgnoresMalformedValues(t *testing.T) {
-	now := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
-	for _, v := range []string{"2026-01-01", "2026-01-01T00:00:00", "garbage"} {
-		if IsStale(v, now) {
-			t.Errorf("IsStale(%q) = true; a malformed value must not mark a concept stale", v)
+// OKF v0.3 section 5.5: a consumer MUST NOT treat a stale_after it cannot
+// parse as fresh. Empty means absent, which is never stale.
+func TestMalformedStaleAfterIsStale(t *testing.T) {
+	now := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC) // long before every value
+	for _, v := range []string{"2026-01-01T00:00:00", "garbage", "2026-13-45"} {
+		if !IsStale(v, now) {
+			t.Errorf("IsStale(%q) = false; an unparseable value must not read as fresh", v)
 		}
+	}
+	if IsStale("", now) {
+		t.Error("an empty stale_after is absent, never stale")
+	}
+	if IsStale("2026-01-01", now) {
+		t.Error("a valid future date reads as stale")
 	}
 }
 
@@ -215,30 +242,51 @@ func TestTrustTier(t *testing.T) {
 	}
 }
 
-func TestGeneratedAtMustAgreeWithTimestamp(t *testing.T) {
+// v0.3 section 5.2: generated.at is the last meaningful change and timestamp
+// is okfw's last write; they may differ.
+func TestGeneratedAtNeedNotMatchTimestamp(t *testing.T) {
 	if _, err := ParseAndValidate(concept(`generated:
   by: "github.com/infrashift/okf-wiki/0.2"
-  at: "2026-07-01T10:00:00Z"
+  at: "2026-06-02T10:00:00Z"
 `)); err != nil {
-		t.Errorf("matching generated.at should validate: %v", err)
+		t.Errorf("generated.at older than timestamp should validate: %v", err)
 	}
-	// The comparison is on the instant, not the text, so a different offset
-	// spelling of the same moment still agrees.
-	if _, err := ParseAndValidate(concept(`generated:
-  by: "github.com/infrashift/okf-wiki/0.2"
-  at: "2026-07-01T12:00:00+02:00"
-`)); err != nil {
-		t.Errorf("same instant in another offset should validate: %v", err)
-	}
-	if _, err := ParseAndValidate(concept(`generated:
-  by: "github.com/infrashift/okf-wiki/0.2"
-  at: "2026-07-02T10:00:00Z"
-`)); err == nil {
-		t.Error("generated.at disagreeing with timestamp should be rejected")
-	}
-	// generated.by alone is fine — at is optional.
 	if _, err := ParseAndValidate(concept("generated:\n  by: \"github.com/infrashift/okf-wiki/0.2\"\n")); err != nil {
 		t.Errorf("generated without at should validate: %v", err)
+	}
+}
+
+// v0.3 section 5.3: only current events count. An event before generated.at
+// is history: the reviewer did not read the rewritten text.
+func TestTrustTierCountsOnlyCurrentEvents(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw, want string
+	}{
+		{"review after rewrite", "generated:\n  by: \"a/1\"\n  at: \"2026-07-01T00:00:00Z\"\nverified:\n  - by: \"human:r\"\n    at: \"2026-07-02T00:00:00Z\"\n", TrustHumanReviewed},
+		{"review at the same instant", "generated:\n  by: \"a/1\"\n  at: \"2026-07-01T00:00:00Z\"\nverified:\n  - by: \"human:r\"\n    at: \"2026-07-01T00:00:00Z\"\n", TrustHumanReviewed},
+		{"review before rewrite", "generated:\n  by: \"a/1\"\n  at: \"2026-07-03T00:00:00Z\"\nverified:\n  - by: \"human:r\"\n    at: \"2026-07-02T00:00:00Z\"\n", TrustUnverified},
+		{"stale human, current machine", "generated:\n  by: \"a/1\"\n  at: \"2026-07-03T00:00:00Z\"\nverified:\n  - by: \"human:r\"\n    at: \"2026-07-02T00:00:00Z\"\n  - by: \"process:n\"\n    at: \"2026-07-04T00:00:00Z\"\n", TrustMachineConfirmed},
+		{"no generated: all count", "verified:\n  - by: \"human:r\"\n    at: \"2020-01-01T00:00:00Z\"\n", TrustHumanReviewed},
+		{"event without at is ignored", "verified:\n  - by: \"human:r\"\n", TrustUnverified},
+		{"unreadable generated.at: nothing is current", "generated:\n  by: \"a/1\"\n  at: \"soon\"\nverified:\n  - by: \"human:r\"\n    at: \"2026-07-02T00:00:00Z\"\n", TrustUnverified},
+		{"date-only events compare as UTC midnight", "generated:\n  by: \"a/1\"\n  at: \"2026-07-02T00:00:00Z\"\nverified:\n  - by: \"human:r\"\n    at: 2026-07-02\n", TrustHumanReviewed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			z, err := ParseFrontmatter(concept(tc.raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := z.TrustTier(); got != tc.want {
+				t.Errorf("TrustTier = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// v0.3 section 5.2: by and at are REQUIRED in a verified event.
+func TestVerifiedEventRequiresAt(t *testing.T) {
+	if _, err := ParseAndValidate(concept("verified:\n  by: \"human:r\"\n")); err == nil {
+		t.Error("a verified event without at was accepted")
 	}
 }
 
@@ -479,6 +527,85 @@ func TestAttestedComputationKeysValidate(t *testing.T) {
 	} {
 		if _, err := ParseAndValidate(concept(bad)); err == nil {
 			t.Errorf("%s was accepted", name)
+		}
+	}
+}
+
+// OKF v0.3 section 4.1: extension keys may appear at any level, and x- is the
+// namespace the spec promises never to claim. The closed schema admits them
+// everywhere, and still rejects any other unknown key.
+func TestExtensionKeysAtEveryLevel(t *testing.T) {
+	for name, raw := range map[string]string{
+		"top level":    "x-acme-owner: \"fpa\"\n",
+		"generated":    "generated:\n  by: \"a/1\"\n  x-acme-run: 7\n",
+		"verified":     "verified:\n  - by: \"human:r\"\n    at: \"2026-07-02T00:00:00Z\"\n    x-acme-ticket: \"T-1\"\n",
+		"source":       "sources:\n  - resource: \"x\"\n    x-acme-weight: 0.5\n",
+		"usage_window": "usage_window:\n  from: \"2026-01-01\"\n  x-acme-note: \"q1\"\n",
+		"executor":     "runtime: \"bigquery\"\nexecutor:\n  resource: \"/r.md\"\n  x-acme-region: \"eu\"\n",
+		"legacy x:":    "x:\n  anything: [1, 2]\n",
+	} {
+		if _, err := ParseAndValidate(concept(raw)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, raw := range map[string]string{
+		"top level":   "owner: \"fpa\"\n",
+		"in a source": "sources:\n  - resource: \"x\"\n    weight: 0.5\n",
+	} {
+		if _, err := ParseAndValidate(concept(raw)); err == nil {
+			t.Errorf("%s: an unknown non-x- key was accepted", name)
+		}
+	}
+}
+
+// OKF v0.3 section 4: producers MUST NOT write duplicate keys. yaml.v3 lets a
+// struct decode keep the last one silently, so okfw checks the node tree.
+func TestDuplicateKeysAreRejected(t *testing.T) {
+	for _, raw := range []string{
+		"description: \"a\"\ndescription: \"b\"\n",
+		"generated:\n  by: \"a/1\"\n  by: \"b/2\"\n",
+	} {
+		if _, err := ParseAndValidate(concept(raw)); err == nil || !strings.Contains(err.Error(), "duplicate") {
+			t.Errorf("%q: err = %v, want a duplicate-key error", raw, err)
+		}
+	}
+}
+
+// OKF v0.3 section 11.2: one item stands for a one-item list, a scalar tags is
+// one tag, and null or empty means absent.
+func TestSingleItemAndEmptyValues(t *testing.T) {
+	z, err := ParseFrontmatter([]byte("---\ntype: T\ntags: a, b\nsources:\n  resource: \"x\"\nstale_after: \"\"\nverified: ~\n---\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(z.Tags) != 1 || z.Tags[0] != "a, b" {
+		t.Errorf("tags = %q, want one tag, unsplit", z.Tags)
+	}
+	if len(z.Sources) != 1 || z.Sources[0].Resource != "x" {
+		t.Errorf("sources = %+v, want one entry", z.Sources)
+	}
+	if z.IsStale(time.Now()) || z.Verified != nil {
+		t.Errorf("empty values should read as absent: %+v", z)
+	}
+}
+
+func TestUnknownStatusIsNotCurrent(t *testing.T) {
+	z, err := ParseFrontmatter(concept("status: \"retired\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.LifecycleStatus() != "retired" || z.IsCurrent() {
+		t.Errorf("status %q current=%v; an unknown status is kept raw and is not current", z.LifecycleStatus(), z.IsCurrent())
+	}
+	if w := ConceptWarnings(z); len(w) == 0 {
+		t.Error("an unknown status should be warned about")
+	}
+}
+
+func TestLegacyPathFallbackByVersion(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "0.1": true, "0.2": true, "0.3": false, "1.0": false, "garbage": false} {
+		if got := LegacyPathFallback(v); got != want {
+			t.Errorf("LegacyPathFallback(%q) = %v, want %v", v, got, want)
 		}
 	}
 }

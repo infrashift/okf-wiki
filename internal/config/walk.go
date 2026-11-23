@@ -11,8 +11,16 @@ import (
 // concepts the CLI sees.
 
 // EphemeralDir is okfw's export scratch directory, directly under the bundle
-// root. It is the only directory okfw generates, and walks skip it.
-const EphemeralDir = "ephemeral"
+// root. It is the only directory okfw generates. It is dot-named because OKF
+// v0.3 section 3.2 leaves only dot-named paths outside the bundle: under its
+// old name, ephemeral/, every exported copy was a second concept to any other
+// consumer.
+const EphemeralDir = ".ephemeral"
+
+// LegacyEphemeralDir is the scratch directory's name before v0.3. Walks still
+// skip it at the bundle root until `okfw migrate` removes it, since its copies
+// share their originals' ids.
+const LegacyEphemeralDir = "ephemeral"
 
 // IsReservedBase reports whether name is an OKF reserved filename (index.md or
 // log.md). Neither carries concept frontmatter.
@@ -39,5 +47,5 @@ func SkipBundleDir(rel string) bool {
 	if rel == "." {
 		return false
 	}
-	return strings.HasPrefix(path.Base(rel), ".") || rel == EphemeralDir
+	return strings.HasPrefix(path.Base(rel), ".") || rel == LegacyEphemeralDir
 }

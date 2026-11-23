@@ -32,7 +32,8 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // UpdateFrontmatter sets fields in a concept's YAML frontmatter, bumping
-// `timestamp` unless the caller supplied one. Keys may be dotted paths
+// `timestamp` unless the caller supplied one. It never moves generated.at: a
+// metadata edit is not a change to the content (see TouchContentChange). Keys may be dotted paths
 // ("okfw.status"); intermediate mappings are created as needed.
 func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
 	updates = TouchTimestamp(updates)
@@ -42,7 +43,7 @@ func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error
 				return err
 			}
 		}
-		return syncGeneratedAt(m, updates["timestamp"])
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -53,20 +54,36 @@ func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error
 	return out, nil
 }
 
-// syncGeneratedAt keeps `generated.at` equal to `timestamp`. Both record when the
-// content last meaningfully changed, and ValidateBusinessRules rejects a
-// disagreement, so exactly one code path updates both.
+// TouchContentChange records a meaningful change to a concept's content: it
+// bumps `timestamp` and, when the concept has a `generated` block, moves
+// generated.at to the same instant.
+//
+// OKF v0.3 section 5.2 gives generated.at one meaning — the last meaningful
+// change to the content — and section 5.3 counts a verification only if it is
+// at or after it. So only a change to what a reviewer read may move it: the
+// body writers call this, and the metadata writers (tags, lifecycle, sources,
+// verify) and link repair do not. okfw v0.2 kept generated.at equal to
+// timestamp on every write, which under v0.3 would have demoted a human review
+// every time someone added a tag.
 //
 // It only touches an existing `generated` block: creating one would need a
 // `generated.by` actor, and inventing an attribution is worse than omitting it.
-func syncGeneratedAt(m *yaml.Node, timestamp string) error {
-	if timestamp == "" {
-		return nil
+func TouchContentChange(content []byte) ([]byte, error) {
+	stamp := time.Now().Format(time.RFC3339)
+	out, err := Edit(content, func(m *yaml.Node) error {
+		MapSetString(m, "timestamp", stamp)
+		if MapGet(m, "generated") == nil {
+			return nil
+		}
+		return SetPath(m, "generated.at", stamp)
+	})
+	if err != nil {
+		return nil, err
 	}
-	if MapGet(m, "generated") == nil {
-		return nil
+	if err := guardMutation(content, out); err != nil {
+		return nil, err
 	}
-	return SetPath(m, "generated.at", timestamp)
+	return out, nil
 }
 
 // UpdateFrontmatterRemove sets fields and removes others. Removals are applied
@@ -82,7 +99,7 @@ func UpdateFrontmatterRemove(content []byte, updates map[string]string, remove [
 				return err
 			}
 		}
-		return syncGeneratedAt(m, updates["timestamp"])
+		return nil
 	})
 	if err != nil {
 		return nil, err

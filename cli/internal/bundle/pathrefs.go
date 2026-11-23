@@ -2,7 +2,9 @@ package bundle
 
 import (
 	"bytes"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -19,7 +21,7 @@ type refNode struct {
 }
 
 // pathRefNodes walks the path-valued fields of a frontmatter mapping — the
-// same five, in the same order, as config.Concept.PathRefs — returning the
+// same six, in the same order, as config.Concept.PathRefs — returning the
 // scalar node of each so a caller can rewrite it in place. Rewriting the node
 // rather than the text keeps comments, quoting and key order (see Edit).
 func pathRefNodes(m *yaml.Node) []refNode {
@@ -41,40 +43,53 @@ func pathRefNodes(m *yaml.Node) []refNode {
 	scalar("computation", m, "computation")
 	scalar("executor.resource", MapGet(m, "executor"), "resource")
 	scalar("attester.resource", MapGet(m, "attester"), "resource")
+	scalar("superseded_by", m, "superseded_by")
 	return out
 }
 
+// RefExists returns the existence check that turns on OKF v0.3 section 6.2's
+// compatibility fallback (graph.ResolveRef) for a bundle that declares
+// okf_version 0.2 or earlier, or none — every bundle okfw wrote before v0.3
+// spelled bare path fields from the root. It is nil for a v0.3 bundle, where a
+// bare path resolves from its file's directory and nothing else.
+func RefExists(bundleRoot string) func(rel string) bool {
+	if !config.LegacyPathFallback(config.ReadDeclaredOKFVersion(bundleRoot)) {
+		return nil
+	}
+	return func(rel string) bool {
+		_, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(rel)))
+		return err == nil
+	}
+}
+
 // RewritePathRefs applies rewrite to every path-valued frontmatter field that
-// names a concept (graph.NormalizeRef), with the contract of
-// graph.RewriteLinks: rewrite receives the path as a body link would spell it
-// (graph.RefLink) with any #fragment removed, and returns its replacement, or
-// "" (or the same path) to leave it; the fragment is kept. Callers can
-// therefore pass the closures they use for body links, and the replacement is
-// translated back: a bare path, which rewrite sees as bundle-absolute, is
-// written back bare, and a bare replacement, which in a body link is relative,
-// gains a "./" so it is not read from the bundle root. Content is returned
-// unchanged, and not re-encoded, when nothing is rewritten.
-func RewritePathRefs(content []byte, fromDir string, rewrite func(href string) string) ([]byte, error) {
+// names a concept, with the contract of graph.RewriteLinks: rewrite receives
+// the path with any #fragment removed and returns its replacement, or "" (or
+// the same path) to leave it; the fragment is kept. Since OKF v0.3 a path
+// field resolves exactly as a body link does (section 6), so callers pass the
+// closures they use for body links and the value is handed over as written.
+//
+// exists is RefExists for the bundle. When it is non-nil and a bare value only
+// resolves through the v0.2 fallback (from the bundle root), rewrite sees it
+// spelled bundle-absolute, "/"+value, which is what it means. Content is
+// returned unchanged, and not re-encoded, when nothing is rewritten.
+func RewritePathRefs(content []byte, fromDir string, rewrite func(href string) string, exists func(rel string) bool) ([]byte, error) {
 	apply := func(value string) (string, bool) {
-		if graph.NormalizeRef(value, fromDir) == "" {
+		rel := graph.ResolveRef(value, fromDir, exists)
+		if rel == "" {
 			return "", false
 		}
 		p, frag := value, ""
 		if i := strings.IndexByte(value, '#'); i >= 0 {
 			p, frag = value[:i], value[i:]
 		}
-		href := graph.RefLink(p)
+		href := strings.TrimSpace(p)
+		if rel != graph.NormalizeRef(value, fromDir) {
+			href = "/" + href // resolved by the v0.2 fallback: from the root
+		}
 		v := rewrite(href)
 		if v == "" || v == href {
 			return "", false
-		}
-		switch {
-		case strings.HasPrefix(v, "/"):
-			if href != p {
-				v = v[1:]
-			}
-		case graph.RefLink(v) != v:
-			v = "./" + v
 		}
 		return v + frag, true
 	}
@@ -116,7 +131,8 @@ func mayReference(content []byte, target string) bool {
 
 // linksTo reports whether a concept at fromDir, with this content, links to
 // target (bundle-relative) from its body or a path-valued frontmatter field.
-func linksTo(content []byte, fromDir, target string) bool {
+// exists is RefExists for the bundle.
+func linksTo(content []byte, fromDir, target string, exists func(rel string) bool) bool {
 	for _, href := range graph.ExtractLinkTargets(config.ExtractBody(content)) {
 		if graph.NormalizeTarget(href, fromDir) == target {
 			return true
@@ -127,7 +143,7 @@ func linksTo(content []byte, fromDir, target string) bool {
 	}
 	if z, err := config.ParseFrontmatter(content); err == nil {
 		for _, r := range z.PathRefs() {
-			if graph.NormalizeRef(r.Value, fromDir) == target {
+			if graph.ResolveRef(r.Value, fromDir, exists) == target {
 				return true
 			}
 		}

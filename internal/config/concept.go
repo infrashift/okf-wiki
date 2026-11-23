@@ -12,7 +12,7 @@ import (
 	"github.com/infrashift/okf-wiki/internal/graph"
 )
 
-// Trust tiers derived from `verified` (OKF v0.2 section 5.3).
+// Trust tiers derived from the current `verified` events (OKF v0.3 section 5.3).
 const (
 	TrustUnverified       = "unverified"
 	TrustMachineConfirmed = "machine-confirmed"
@@ -23,16 +23,19 @@ const (
 // tier keys off this prefix and nothing else: "team:..." is *not* human.
 const HumanActorPrefix = "human:"
 
-// Generated records who wrote the concept and when (OKF section 5.2).
+// Generated records who wrote the concept and when its content last
+// meaningfully changed (OKF section 5.2). A trivial edit — format, whitespace,
+// link repair — does not move At, and okfw's own `timestamp` is not it.
 type Generated struct {
 	By string `yaml:"by"`
-	At string `yaml:"at,omitempty"` // ISO 8601 datetime
+	At string `yaml:"at,omitempty"` // OKF timestamp (section 5)
 }
 
-// Verification is one verification event (OKF section 5.2).
+// Verification is one verification event (OKF section 5.2). v0.3 makes both
+// keys REQUIRED in an event; a consumer ignores an event missing either.
 type Verification struct {
 	By string `yaml:"by"`
-	At string `yaml:"at,omitempty"` // ISO 8601 datetime
+	At string `yaml:"at,omitempty"` // OKF timestamp (section 5)
 }
 
 // VerifiedList is the `verified` field. OKF section 5.2 and section 11 make it a
@@ -58,12 +61,69 @@ func (v *VerifiedList) UnmarshalYAML(value *yaml.Node) error {
 		*v = many
 		return nil
 	case yaml.ScalarNode:
-		if value.Tag == "!!null" {
+		if value.Tag == "!!null" || value.Value == "" {
 			*v = nil
 			return nil
 		}
 	}
 	return fmt.Errorf("verified must be a mapping or a list of mappings")
+}
+
+// StringList is a list-valued field that OKF v0.3 section 11.2 lets hold one
+// item: a scalar is a one-item list (a scalar `tags: a, b` is the single tag
+// "a, b" — consumers MUST NOT split it at commas), and null or an empty string
+// is absent.
+type StringList []string
+
+// UnmarshalYAML accepts a scalar or a sequence of scalars.
+func (l *StringList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		if value.Tag == "!!null" || value.Value == "" {
+			*l = nil
+			return nil
+		}
+		*l = StringList{value.Value}
+		return nil
+	case yaml.SequenceNode:
+		var many []string
+		if err := value.Decode(&many); err != nil {
+			return err
+		}
+		*l = many
+		return nil
+	}
+	return fmt.Errorf("must be a string or a list of strings")
+}
+
+// SourceList is `sources`; like `verified`, one bare mapping is a one-item
+// list (section 11.2).
+type SourceList []Source
+
+// UnmarshalYAML normalizes a bare mapping into a one-element list.
+func (l *SourceList) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.MappingNode:
+		var one Source
+		if err := value.Decode(&one); err != nil {
+			return err
+		}
+		*l = SourceList{one}
+		return nil
+	case yaml.SequenceNode:
+		var many []Source
+		if err := value.Decode(&many); err != nil {
+			return err
+		}
+		*l = many
+		return nil
+	case yaml.ScalarNode:
+		if value.Tag == "!!null" || value.Value == "" {
+			*l = nil
+			return nil
+		}
+	}
+	return fmt.Errorf("sources must be a mapping or a list of mappings")
 }
 
 // UsageWindow frames usage_count values with a datetime range (OKF section 5.1).
@@ -86,15 +146,17 @@ type Source struct {
 // Concept represents a bundle note's frontmatter.
 type Concept struct {
 	// OKF core
-	Type        string   `yaml:"type"` // OKF required: free-form concept kind
-	Title       string   `yaml:"title"`
-	Description string   `yaml:"description,omitempty"` // one-sentence summary
-	Resource    string   `yaml:"resource,omitempty"`    // URI of the underlying asset
-	Tags        []string `yaml:"tags"`
+	Type        string     `yaml:"type"` // OKF required: free-form concept kind
+	Title       string     `yaml:"title"`
+	Description string     `yaml:"description,omitempty"` // one-sentence summary
+	Resource    string     `yaml:"resource,omitempty"`    // URI of the underlying asset
+	Tags        StringList `yaml:"tags"`
 
-	// OKF lifecycle. Absent means "stable".
-	Status     string `yaml:"status,omitempty"`
-	StaleAfter string `yaml:"stale_after,omitempty"`
+	// OKF lifecycle. Absent means "stable". SupersededBy is a path field
+	// (section 6.2) with a meaning only under status: deprecated (section 5.4).
+	Status       string `yaml:"status,omitempty"`
+	SupersededBy string `yaml:"superseded_by,omitempty"`
+	StaleAfter   string `yaml:"stale_after,omitempty"`
 
 	// OKF trust
 	Generated *Generated   `yaml:"generated,omitempty"`
@@ -109,7 +171,7 @@ type Concept struct {
 	Attester    *ResourceRef `yaml:"attester,omitempty"`
 
 	// OKF provenance
-	Sources     []Source     `yaml:"sources,omitempty"`
+	Sources     SourceList   `yaml:"sources,omitempty"`
 	UsageWindow *UsageWindow `yaml:"usage_window,omitempty"`
 
 	// okfw extensions
@@ -118,7 +180,7 @@ type Concept struct {
 	Project   string    `yaml:"project,omitempty"`
 	Parent    string    `yaml:"parent,omitempty"`
 	Created   time.Time `yaml:"created"`
-	Timestamp time.Time `yaml:"timestamp"` // mirrors generated.at
+	Timestamp time.Time `yaml:"timestamp"` // okfw's last-write time; not generated.at
 
 	// X is the open extension block: user-defined metadata, passed through
 	// untouched. okfw claims no keys inside it.
@@ -139,28 +201,76 @@ func (z *Concept) GetKind() string {
 	return "note"
 }
 
-// LifecycleStatus returns the OKF lifecycle status, defaulting to "stable"
-// (OKF section 5.4: absent status means stable).
+// LifecycleStatus returns the OKF lifecycle status as written, "stable" when
+// absent (OKF section 5.4). An unknown value is returned raw — v0.3 says it is
+// not stable and a consumer SHOULD show it — so callers compare against the
+// three known values rather than assume one of them.
 func (z *Concept) LifecycleStatus() string {
-	switch z.Status {
-	case "draft", "stable", "deprecated":
-		return z.Status
+	s := strings.TrimSpace(z.Status)
+	if s == "" {
+		return "stable"
 	}
-	return "stable"
+	return s
 }
 
-// TrustTier derives the trust tier from `verified` (OKF section 5.3). Keyed
-// strictly on the "human:" actor prefix.
+// IsKnownStatus reports whether s is one of the section 5.4 lifecycle values.
+func IsKnownStatus(s string) bool {
+	return s == "draft" || s == "stable" || s == "deprecated"
+}
+
+// IsCurrent reports whether the concept counts as current knowledge (section
+// 5.4): neither deprecated nor carrying a status outside the vocabulary.
+func (z *Concept) IsCurrent() bool {
+	s := z.LifecycleStatus()
+	return s == "draft" || s == "stable"
+}
+
+// TrustTier derives the trust tier from the current `verified` events (OKF
+// v0.3 section 5.3), keyed strictly on the "human:" actor scheme. An event is
+// current when its `at` is at or after generated.at, or when there is no
+// `generated`; an event missing `by` or `at` is ignored (section 5.2). After a
+// rewrite the earlier reviews stay in the file as history but no longer count:
+// the human did not read the new text.
 func (z *Concept) TrustTier() string {
-	if len(z.Verified) == 0 {
-		return TrustUnverified
-	}
-	for _, v := range z.Verified {
-		if strings.HasPrefix(v.By, HumanActorPrefix) {
+	tier := TrustUnverified
+	for _, v := range z.CurrentVerifications() {
+		if IsHumanActor(v.By) {
 			return TrustHumanReviewed
 		}
+		tier = TrustMachineConfirmed
 	}
-	return TrustMachineConfirmed
+	return tier
+}
+
+// CurrentVerifications returns the verification events that count toward the
+// trust tier (section 5.3). When generated.at is present but cannot be read,
+// no event can be shown to be current, so none is: the tier can only go down,
+// which is the safe direction. A `generated` block with no `at` records no
+// change time to compare against, so every complete event counts.
+func (z *Concept) CurrentVerifications() []Verification {
+	var baseline time.Time
+	if z.Generated != nil && z.Generated.At != "" {
+		t, err := ParseTimestamp(z.Generated.At)
+		if err != nil {
+			return nil
+		}
+		baseline = t
+	}
+	var out []Verification
+	for _, v := range z.Verified {
+		if strings.TrimSpace(v.By) == "" || v.At == "" {
+			continue
+		}
+		at, err := ParseTimestamp(v.At)
+		if err != nil {
+			continue
+		}
+		if !baseline.IsZero() && at.Before(baseline) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // LastVerifiedAt returns the most recent verification time, or the zero time
@@ -168,7 +278,7 @@ func (z *Concept) TrustTier() string {
 func (z *Concept) LastVerifiedAt() time.Time {
 	var latest time.Time
 	for _, v := range z.Verified {
-		t, err := time.Parse(time.RFC3339, v.At)
+		t, err := ParseTimestamp(v.At)
 		if err != nil {
 			continue
 		}
@@ -222,6 +332,12 @@ func ParseFrontmatter(content []byte) (*Concept, error) {
 	}
 	return &z, nil
 }
+
+// IsConcept reports whether parsed frontmatter makes a file a concept: OKF
+// v0.3 section 3.2 says a .md file with no frontmatter, or no non-empty
+// `type`, is not one, and consumers skip it. That is what lets a bundle hold a
+// README.md or a SKILL.md.
+func IsConcept(z *Concept) bool { return z != nil && strings.TrimSpace(z.Type) != "" }
 
 // ConceptKey identifies a concept in a bundle: its frontmatter id, or, for a
 // concept without one, its OKF concept ID (section 2) — the bundle-relative path
@@ -300,7 +416,7 @@ func ExtractBody(content []byte) string {
 }
 
 // ValidateBusinessRules checks the constraints CUE cannot express: fields that
-// are conditionally required, and the two timestamps that must agree.
+// are conditionally required, and source ids that must be unique.
 //
 // These used to live in a ValidateConcept function with no callers anywhere —
 // production or test — so none of them ran. They are now part of
@@ -330,19 +446,40 @@ func ValidateBusinessRules(z *Concept) error {
 		}
 		firstWithID[graph.FootnoteKey(s.ID)] = i
 	}
-	// generated.at mirrors timestamp; a disagreement means one was hand-edited
-	// and consumers would disagree about when the content last changed.
-	if z.Generated != nil && z.Generated.At != "" && !z.Timestamp.IsZero() {
-		at, err := time.Parse(time.RFC3339, z.Generated.At)
-		if err != nil {
-			return fmt.Errorf("generated.at is not an RFC 3339 datetime: %q", z.Generated.At)
-		}
-		if !at.Equal(z.Timestamp) {
-			return fmt.Errorf("generated.at (%s) and timestamp (%s) disagree; they record the same event",
-				at.Format(time.RFC3339), z.Timestamp.Format(time.RFC3339))
+	// generated.at no longer mirrors timestamp. In v0.3 it is the last
+	// *meaningful* change, which a tag edit or link repair must not move, while
+	// timestamp records every write; they are allowed to differ.
+	return nil
+}
+
+// ConceptWarnings reports what OKF v0.3 lets a concept hold but okfw flags:
+// values a consumer ignores or reads in a way the author probably did not
+// mean. None of them makes the concept invalid.
+func ConceptWarnings(z *Concept) []string {
+	var w []string
+	if z.SupersededBy != "" && z.LifecycleStatus() != "deprecated" {
+		w = append(w, "superseded_by is set but status is not deprecated; it has a meaning only for a deprecated concept (OKF section 5.4)")
+	}
+	if s := z.LifecycleStatus(); !IsKnownStatus(s) {
+		w = append(w, fmt.Sprintf("status %q is not draft, stable or deprecated; consumers treat the concept as not current (OKF section 5.4)", s))
+	}
+	if IsMalformedTimestamp(z.StaleAfter) {
+		w = append(w, fmt.Sprintf("stale_after %q does not parse, so the concept reads as stale (OKF section 5.5)", z.StaleAfter))
+	}
+	for i, v := range z.Verified {
+		if strings.TrimSpace(v.By) == "" || v.At == "" {
+			w = append(w, fmt.Sprintf("verified[%d] lacks by or at and is ignored (OKF section 5.2)", i))
 		}
 	}
-	return nil
+	if len(z.Verified) > 0 && len(z.CurrentVerifications()) == 0 && z.Generated != nil && z.Generated.At != "" {
+		w = append(w, "every verified event predates generated.at, so none is current and the concept is unverified (OKF section 5.3)")
+	}
+	for i, s := range z.Sources {
+		if s.Author != "" && ValidateActor(s.Author) != nil {
+			w = append(w, fmt.Sprintf("sources[%d].author %q does not follow the actor convention (OKF section 7)", i, s.Author))
+		}
+	}
+	return w
 }
 
 // ValidateCitations rejects a footnote reference that resolves to nothing: a
@@ -384,6 +521,10 @@ func ValidateCitations(z *Concept, body string) error {
 func ParseAndValidate(content []byte) (*Concept, error) {
 	frontmatter, err := ExtractFrontmatter(content)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := checkDuplicateKeys(frontmatter); err != nil {
 		return nil, err
 	}
 

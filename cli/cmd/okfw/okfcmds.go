@@ -1,6 +1,6 @@
 package main
 
-// Writers for the OKF v0.2 metadata families: lifecycle (section 5.4-5.5),
+// Writers for the OKF v0.3 metadata families: lifecycle (section 5.4-5.5),
 // trust (section 5.2), and provenance (section 5.1).
 //
 // Every family gets a writer here on purpose. `resource` spent months modelled,
@@ -53,14 +53,10 @@ func editConcept(ref string, fn func(m *yaml.Node) error) (string, error) {
 		if err := fn(m); err != nil {
 			return err
 		}
-		// Any of these edits is a meaningful change.
-		stamp := time.Now().Format(time.RFC3339)
-		bundle.MapSetString(m, "timestamp", stamp)
-		if bundle.MapGet(m, "generated") != nil {
-			if err := bundle.SetPath(m, "generated.at", stamp); err != nil {
-				return err
-			}
-		}
+		// okfw's timestamp records every write. generated.at is left alone:
+		// these edit metadata, not the content a reviewer read (OKF v0.3
+		// section 5.2), so a verification stays current across them.
+		bundle.MapSetString(m, "timestamp", time.Now().Format(time.RFC3339))
 		return nil
 	})
 	if err != nil {
@@ -92,7 +88,8 @@ func defaultHumanActor() string {
 }
 
 func newSetLifecycleCmd() *cobra.Command {
-	return &cobra.Command{
+	var supersededBy string
+	cmd := &cobra.Command{
 		Use:   "set-lifecycle <id_or_file> <draft|stable|deprecated>",
 		Short: "Set a concept's OKF lifecycle status",
 		Long: `Set the OKF lifecycle status (spec section 5.4).
@@ -101,28 +98,123 @@ func newSetLifecycleCmd() *cobra.Command {
   stable      ready for consumption (the default when absent)
   deprecated  kept for links and history; no longer current
 
+--superseded-by names the concept that replaces a deprecated one (any
+reference okfw accepts: an id, an OKF concept ID or a path). It is written as
+a bundle-absolute path, and consumers filtering to current knowledge follow
+it to the replacement (okfw search --current does). It has a meaning only for
+a deprecated concept, so setting any other status removes it.
+
 Examples:
-  okfw set-lifecycle ./notes/old-api.md deprecated
+  okfw set-lifecycle ./notes/old-api.md deprecated --superseded-by ./notes/api-v2.md
   okfw set-lifecycle 019680f0 draft`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			status := args[1]
-			switch status {
-			case "draft", "stable", "deprecated":
-			default:
-				return fmt.Errorf("invalid status %q: want draft, stable, or deprecated", status)
-			}
-			path, err := editConcept(args[0], func(m *yaml.Node) error {
-				bundle.MapSetString(m, "status", status)
-				return nil
-			})
+			cfg, err := config.Discover("")
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Set status to %s: %s\n", status, path)
+			mut, err := lifecycleMutator(cfg, args[1], supersededBy)
+			if err != nil {
+				return err
+			}
+			path, err := editConcept(args[0], mut)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Set status to %s: %s\n", args[1], path)
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&supersededBy, "superseded-by", "", "With deprecated: the concept that replaces this one (id or path)")
+	return cmd
+}
+
+// lifecycleMutator sets status and, for a deprecated concept, superseded_by:
+// the replacing concept's bundle-absolute path (OKF v0.3 section 5.4), which
+// stays valid if the deprecated concept itself is later moved. The replacement
+// must exist. Any other status drops superseded_by, which means nothing
+// without deprecated.
+func lifecycleMutator(cfg *config.Config, status, supersededBy string) (func(*yaml.Node) error, error) {
+	switch status {
+	case "draft", "stable", "deprecated":
+	default:
+		return nil, fmt.Errorf("invalid status %q: want draft, stable, or deprecated", status)
+	}
+	target := ""
+	if supersededBy != "" {
+		if status != "deprecated" {
+			return nil, fmt.Errorf("superseded_by needs status deprecated (OKF section 5.4)")
+		}
+		p, err := bundle.ResolveConceptPath(cfg, supersededBy)
+		if err != nil {
+			return nil, fmt.Errorf("superseded_by: %w", err)
+		}
+		rel, err := filepath.Rel(cfg.RootPath, p)
+		if err != nil {
+			return nil, err
+		}
+		target = "/" + filepath.ToSlash(rel)
+	}
+	return func(m *yaml.Node) error {
+		bundle.MapSetString(m, "status", status)
+		switch {
+		case target != "":
+			bundle.MapSetString(m, "superseded_by", target)
+		case status != "deprecated":
+			bundle.MapDelete(m, "superseded_by")
+		}
+		return nil
+	}, nil
+}
+
+func newSetBundleMetaCmd() *cobra.Command {
+	var title, description, license string
+	cmd := &cobra.Command{
+		Use:   "set-bundle-meta",
+		Short: "Set the bundle's title, description or license",
+		Long: `Set the bundle metadata OKF v0.3 section 8.1 keeps in the frontmatter of the
+bundle-root index.md. Every other key there is kept as it is.
+
+  --title        a display name for the bundle
+  --description  one sentence on what the bundle covers and when to use it;
+                 an agent with access to several bundles selects one by it
+  --license      the license of the bundle content: an SPDX expression or a
+                 path to a license file in the bundle
+
+okfw validate requires a title and a description. Pass an empty value to
+remove a key. okf_version is not set here: okfw migrate moves it, since it
+decides how bare path fields read.
+
+Examples:
+  okfw set-bundle-meta --description "Runbooks and design decisions for billing."
+  okfw set-bundle-meta --title Billing --license CC-BY-4.0`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Discover("")
+			if err != nil {
+				return err
+			}
+			set := map[string]string{}
+			for flag, key := range map[string]string{"title": "title", "description": "description", "license": "license"} {
+				if cmd.Flags().Changed(flag) {
+					v, _ := cmd.Flags().GetString(flag)
+					set[key] = v
+				}
+			}
+			if len(set) == 0 {
+				return fmt.Errorf("nothing to set: pass --title, --description or --license")
+			}
+			if err := bundle.SetBundleMeta(cfg, set); err != nil {
+				return err
+			}
+			fmt.Printf("Updated %s\n", filepath.Join(cfg.RootPath, "index.md"))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "Bundle title")
+	cmd.Flags().StringVar(&description, "description", "", "One sentence: what the bundle covers and when to use it")
+	cmd.Flags().StringVar(&license, "license", "", "SPDX expression, or a path to a license file in the bundle")
+	return cmd
 }
 
 func newSetStaleAfterCmd() *cobra.Command {
@@ -213,8 +305,8 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
-	cmd.Flags().StringVar(&at, "at", "", "RFC 3339 datetime (default now)")
+	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
+	cmd.Flags().StringVar(&at, "at", "", "When it was verified: an RFC 3339 datetime or a date (default now)")
 	return cmd
 }
 
@@ -301,13 +393,21 @@ Examples:
 }
 
 func newSetGeneratedCmd() *cobra.Command {
-	var by string
+	var by, at string
 	cmd := &cobra.Command{
 		Use:   "set-generated <id_or_file>",
 		Short: "Record who generated a concept",
-		Long: `Set ` + "`generated.by`" + ` (OKF spec section 5.2), the actor that produced the
-concept's content. generated.at is kept equal to the concept's timestamp — both
-record when the content last meaningfully changed — so it is not set directly.
+		Long: `Record a generation (OKF spec section 5.2): generated.by, the actor that
+produced the concept's content, and generated.at, when it last meaningfully
+changed (now, unless --at says otherwise).
+
+generated.at is what decides whether a verification still counts: OKF v0.3
+section 5.3 counts only verified events at or after it. Recording a new
+generation therefore makes earlier reviews history, which is the point — the
+reviewer did not read the new text. okfw moves generated.at itself only when a
+concept's body is rewritten through okfw (the MCP update tool's append and
+set_body); tag, lifecycle, source and verify edits, and the link repair okfw
+move does, leave it alone. okfw's own timestamp still records every write.
 
 --by defaults to human:<your login>. okfw does not stamp this on create: a note
 you wrote by hand was authored by you, not by the tool, and inventing an
@@ -322,7 +422,11 @@ Examples:
 			if actor == "" {
 				actor = defaultHumanActor()
 			}
-			path, err := editConcept(args[0], setGeneratedMutator(actor))
+			stamp, err := normalizeOptionalDateTime("--at", at)
+			if err != nil {
+				return err
+			}
+			path, err := editConcept(args[0], setGeneratedMutator(actor, stamp))
 			if err != nil {
 				return err
 			}
@@ -330,7 +434,8 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
+	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
+	cmd.Flags().StringVar(&at, "at", "", "When the content last meaningfully changed: an RFC 3339 datetime or a date (default now)")
 	return cmd
 }
 
@@ -444,14 +549,22 @@ func setResourceMutator(uri string) func(*yaml.Node) error {
 	}
 }
 
-// setGeneratedMutator records who produced the concept's content.
-// generated.at is kept equal to timestamp by editConcept, not set here.
-func setGeneratedMutator(actor string) func(*yaml.Node) error {
+// setGeneratedMutator records a generation: generated.by, and generated.at at
+// the given instant (now when empty). Recording a generation is the explicit
+// statement that the content was (re)produced, so it moves generated.at, and a
+// verification made before it stops counting (OKF v0.3 section 5.3).
+func setGeneratedMutator(actor, at string) func(*yaml.Node) error {
 	return func(m *yaml.Node) error {
 		if err := config.ValidateActor(actor); err != nil {
 			return err
 		}
-		return bundle.SetPath(m, "generated.by", actor)
+		if at == "" {
+			at = time.Now().Format(time.RFC3339)
+		}
+		if err := bundle.SetPath(m, "generated.by", actor); err != nil {
+			return err
+		}
+		return bundle.SetPath(m, "generated.at", at)
 	}
 }
 

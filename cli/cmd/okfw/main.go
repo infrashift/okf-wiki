@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/infrashift/okf-wiki/cli/internal/bundle"
 	"github.com/infrashift/okf-wiki/cli/internal/gitctx"
@@ -135,6 +137,7 @@ is found.`,
 		},
 	}
 
+	var initMeta bundle.BundleMeta
 	var initCmd = &cobra.Command{
 		Use:   "init",
 		Short: "Initialize an OKF wiki (.okfw/) for the current project",
@@ -142,11 +145,22 @@ is found.`,
 when inside a repo, otherwise the current directory.
 
 All other commands find the wiki automatically by searching upward from the
-working directory. The one generated directory, ephemeral/ (okfw export's
+working directory. The one generated directory, .ephemeral/ (okfw export's
 output), is gitignored via .okfw/.gitignore; concept markdown and the index.md
 listings are meant to be committed with the project.
 
-Running init on an already-initialized project is a no-op.`,
+The bundle-root index.md carries the bundle metadata of OKF v0.3 section 8.1:
+okf_version, and the title, description and license given here. okfw
+validate requires a title and a description; the title defaults to the project
+directory's name, and the description — one sentence on what the bundle covers
+and when to use it, which an agent holding several bundles selects by — can
+be set later with okfw set-bundle-meta.
+
+Running init on an already-initialized project is a no-op.
+
+Examples:
+  okfw init --description "Design decisions and runbooks for the billing service."
+  okfw init --title "Billing" --license CC-BY-4.0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cwd, err := os.Getwd()
@@ -157,9 +171,12 @@ Running init on an already-initialized project is a no-op.`,
 			if target == "" {
 				target = cwd
 			}
-			return runInit(target)
+			return runInitWith(target, initMeta)
 		},
 	}
+	initCmd.Flags().StringVar(&initMeta.Title, "title", "", "Bundle title (default: the project directory's name)")
+	initCmd.Flags().StringVar(&initMeta.Description, "description", "", "One sentence: what the bundle covers and when to use it")
+	initCmd.Flags().StringVar(&initMeta.License, "license", "", "License of the bundle content: an SPDX expression or a path in the bundle")
 
 	var connectCmd = &cobra.Command{
 		Use:   "connect",
@@ -271,6 +288,7 @@ Use with: okfw create "title" --template <name>`,
 	var typeFlag string
 	var kindFlag string
 	var staleFlag bool
+	var currentFlag bool
 
 	var searchCmd = &cobra.Command{
 		Use:   "search [query]",
@@ -285,6 +303,8 @@ Examples:
   okfw search --type Playbook               # Filter by OKF free-form type
   okfw search --status draft                # Filter by lifecycle status
   okfw search --stale                       # Concepts past their stale_after
+  okfw search "margin" --current            # Current knowledge only; a deprecated
+                                            # hit gives way to its superseded_by
   okfw search --path issues --tag open      # Only the issues/ directory, recursively
   okfw search "auth" --project myproject    # Combined search`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -302,6 +322,7 @@ Examples:
 				Offset:  offsetFlag,
 				Status:  statusFlag,
 				Stale:   staleFlag,
+				Current: currentFlag,
 				Dir:     pathFlag,
 			}
 
@@ -506,15 +527,17 @@ Examples:
 
 	var exportCmd = &cobra.Command{
 		Use:   "export [path]",
-		Short: "Export graph subset as portable markdown to ephemeral/",
+		Short: "Export graph subset as portable markdown to .ephemeral/",
 		Long: `Export a subset of the bundle as portable markdown files.
 
 Runs the same graph query as 'okfw graph' (BFS, --limit, --depth, --start),
-then copies each concept into <root>/ephemeral/ as <id>.md, rewriting links
+then copies each concept into <root>/.ephemeral/ as <id>.md, rewriting links
 between exported concepts to point at those files, so the set reads in any
 markdown viewer.
 
-The ephemeral/ directory has a .gitignore that ignores all its contents.
+The .ephemeral/ directory has a .gitignore that ignores all its contents. It
+is dot-named so that no OKF consumer reads the copies as concepts (OKF v0.3
+section 3.2).
 
 Examples:
   okfw export                             # Export from bundle root
@@ -544,6 +567,7 @@ Examples:
 
 			// Map each exported concept's bundle-relative path to its ID so that
 			// in-bundle markdown links can be flattened to <id>.md in the export.
+			refExists := bundle.RefExists(cfg.RootPath)
 			pathToID := make(map[string]string, len(nodes))
 			exported := 0
 			for _, n := range nodes {
@@ -556,7 +580,7 @@ Examples:
 			}
 
 			// Prepare ephemeral directory
-			ephemeralDir := filepath.Join(cfg.RootPath, "ephemeral")
+			ephemeralDir := filepath.Join(cfg.RootPath, config.EphemeralDir)
 			if err := prepareEphemeralDir(ephemeralDir); err != nil {
 				return err
 			}
@@ -591,7 +615,7 @@ Examples:
 				}
 				transformed := []byte(graph.RewriteLinks(string(content), toExported))
 				// Frontmatter paths are links too, and name files the export renames.
-				if out, err := bundle.RewritePathRefs(transformed, fromDir, toExported); err == nil {
+				if out, err := bundle.RewritePathRefs(transformed, fromDir, toExported, refExists); err == nil {
 					transformed = out
 				}
 				outPath := filepath.Join(ephemeralDir, node.ID+".md")
@@ -602,7 +626,7 @@ Examples:
 				exported++
 			}
 
-			fmt.Fprintf(os.Stderr, "Exported %d files to ephemeral/\n", exported)
+			fmt.Fprintf(os.Stderr, "Exported %d files to %s/\n", exported, config.EphemeralDir)
 			return nil
 		},
 	}
@@ -626,9 +650,10 @@ Examples:
 	// limit was to raise it.
 	searchCmd.Flags().IntVar(&offsetFlag, "offset", 0, "Skip this many results (pagination)")
 	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
-	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated)")
+	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated, or a raw unknown value)")
 	searchCmd.Flags().StringVar(&pathFlag, "path", "", "Search only this bundle subdirectory, recursively (e.g. issues)")
 	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
+	searchCmd.Flags().BoolVar(&currentFlag, "current", false, "Only current knowledge: no deprecated or unknown-status concept; a deprecated hit is replaced by its superseded_by")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
 	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
 
@@ -872,14 +897,28 @@ rewrites a legacy 'status':
 The free-form OKF 'type' is left alone: the spec does not register type values,
 so an existing type: "todo" stays until you change it.
 
-OKF also moved stale_after, sources[].last_modified and usage_window from bare
-dates to ISO 8601 datetimes with a UTC offset. A bare date is rewritten as
-midnight UTC — the reading okfw already gave it, so staleness does not shift:
+OKF v0.3 (okfw migrate moves a bundle from v0.2 to it):
 
-  stale_after: 2026-12-31     ->  stale_after: 2026-12-31T00:00:00Z
+  - A bare path field ("skills/run.md") now resolves from the concept's own
+    directory, not the bundle root (section 6.2, a breaking change). okfw read
+    such paths from the root, so each one that names a file from the root and
+    none from the concept's directory gains a leading "/":
 
-A timestamp that is neither (say, a datetime with no offset) is reported for
-you to fix by hand, since only its author knows which instant it meant.
+      executor.resource: skills/run.md  ->  executor.resource: /skills/run.md
+
+    URLs, "./" and "../" paths, and scope descriptors are left alone. This step
+    runs only while the bundle still declares okf_version 0.2 or none.
+  - The root index.md's okf_version becomes "0.3"; its other keys are kept.
+    A missing title or description is reported: okfw validate requires both
+    (set them with okfw set-bundle-meta).
+  - okfw export's scratch directory moves from ephemeral/ to .ephemeral/,
+    which no OKF consumer reads as part of the bundle.
+  - A verified event without an at is reported: v0.3 ignores it.
+
+Bare dates (stale_after: 2026-12-31) are valid again in v0.3, meaning the start
+of that day in UTC, and are left as written. A timestamp in neither of the two
+v0.3 forms (say, a datetime with no offset) is reported for you to fix by hand,
+since only its author knows which instant it meant.
 
 Examples:
   okfw migrate --dry-run     # report what would change
@@ -907,9 +946,12 @@ okfw's schema is deliberately stricter than OKF requires.
              schema — required id/title/type/tags/created/timestamp, and no
              undeclared fields.
   --all      The same strict check over every concept in the bundle.
-  --okf      OKF conformance only (spec section 11): every non-reserved .md has
-             parseable frontmatter with a non-empty 'type'. Permissive by
-             design, so a bundle okfw did not author can still pass.
+  --okf      OKF v0.3 conformance only (spec section 11): every frontmatter
+             block parses as a YAML mapping with no duplicate keys, and
+             index.md / log.md follow sections 8 and 9. A .md with no type
+             is not a concept and only earns a warning. Permissive by design,
+             so a bundle okfw did not author can pass; it needs no .okfw, so
+             it can check any directory holding a bundle.
 
 Examples:
   okfw validate ./path/to/note.md
@@ -925,7 +967,18 @@ Examples:
 			if validateOKF || validateAll {
 				cfg, err := config.Discover("")
 				if err != nil {
-					return err
+					// --okf assesses a bundle on the spec's own terms, and a
+					// bundle okfw did not write has no .okfw around it: the
+					// path given is the bundle root.
+					var noWiki *config.ErrNoWiki
+					if !validateOKF || len(args) == 0 || !errors.As(err, &noWiki) {
+						return err
+					}
+					abs, aerr := filepath.Abs(args[0])
+					if aerr != nil {
+						return aerr
+					}
+					cfg = config.ConfigFor(abs)
 				}
 				root := cfg.RootPath
 				if len(args) > 0 {
@@ -1185,6 +1238,7 @@ Example client configuration (Claude Code):
 
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(initCmd)
+	rootCmd.AddCommand(newSetBundleMetaCmd())
 	rootCmd.AddCommand(connectCmd)
 	rootCmd.AddCommand(rootPathCmd)
 	rootCmd.AddCommand(indexMdCmd)
@@ -1217,7 +1271,11 @@ Example client configuration (Claude Code):
 // runInit creates the .okfw wiki directory under target (a project root),
 // with a .gitignore for generated artifacts and an OKF root index.md.
 // A no-op with a message when the wiki already exists.
-func runInit(target string) error {
+func runInit(target string) error { return runInitWith(target, bundle.BundleMeta{}) }
+
+// runInitWith creates the wiki with the given bundle metadata (OKF v0.3
+// section 8.1). An empty title defaults to the project directory's name.
+func runInitWith(target string, meta bundle.BundleMeta) error {
 	wikiDir := filepath.Join(target, config.WikiDirName)
 	if fi, err := os.Stat(wikiDir); err == nil && fi.IsDir() {
 		fmt.Printf("OKF wiki already initialized at %s\n", wikiDir)
@@ -1229,18 +1287,35 @@ func runInit(target string) error {
 	}
 
 	gitignore := "# okfw generated artifacts\n" +
-		"ephemeral/\n"
+		config.EphemeralDir + "/\n"
 	if err := os.WriteFile(filepath.Join(wikiDir, ".gitignore"), []byte(gitignore), 0644); err != nil {
 		return fmt.Errorf("failed to write .gitignore: %w", err)
 	}
 
-	// Start OKF-conformant: root index.md with the okf_version declaration.
+	// Start OKF-conformant: root index.md with the okf_version declaration
+	// and the bundle metadata.
 	cfg := config.ConfigFor(wikiDir)
 	if _, err := bundle.WriteIndexFiles(cfg, wikiDir); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to generate index.md: %v\n", err)
 	}
+	if strings.TrimSpace(meta.Title) == "" {
+		meta.Title = filepath.Base(target)
+	}
+	set := map[string]string{"title": meta.Title}
+	if meta.Description != "" {
+		set["description"] = meta.Description
+	}
+	if meta.License != "" {
+		set["license"] = meta.License
+	}
+	if err := bundle.SetBundleMeta(cfg, set); err != nil {
+		return err
+	}
 
 	fmt.Printf("Initialized OKF wiki at %s\n", wikiDir)
+	if meta.Description == "" {
+		fmt.Println(`Next: describe the bundle — okfw set-bundle-meta --description "<what it covers and when to use it>" (okfw validate requires it).`)
+	}
 	return nil
 }
 
@@ -1276,11 +1351,16 @@ func prepareEphemeralDir(dir string) error {
 	return nil
 }
 
-// runMigrate brings older concepts up to the current frontmatter shape: it
-// strips the removed todo feature's fields and upgrades bare dates to OKF
-// datetimes. Idempotent: a second run reports nothing to do.
+// runMigrate brings older concepts up to the current frontmatter shape and the
+// bundle up to OKF v0.3: it strips the removed todo feature's fields, gives the
+// path fields v0.2 okfw read from the bundle root a leading "/", stamps
+// okf_version "0.3" and moves the export scratch directory. Idempotent: a
+// second run reports nothing to do.
 func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 	var scanned, changed, repair int
+	// Decided once, before anything is written: the declared version is what
+	// says how a bare path field reads, and this run is what moves it.
+	legacyPaths := config.LegacyPathFallback(config.ReadDeclaredOKFVersion(cfg.RootPath))
 
 	err := filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
@@ -1300,6 +1380,9 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 		if err != nil {
 			return err
 		}
+		if z, perr := config.ParseFrontmatter(content); perr != nil || !config.IsConcept(z) {
+			return nil // not a concept (OKF section 3.2): nothing to migrate
+		}
 		scanned++
 
 		var notes []string
@@ -1311,17 +1394,33 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 			out = stripped
 			notes = append(notes, "dropped "+strings.Join(dropped, ", "))
 		}
-		if upgraded, keys, err := bundle.UpgradeDateOnlyTimestamps(out); err != nil {
-			fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
-			return nil
-		} else if upgraded != nil {
-			out = upgraded
-			notes = append(notes, "dates to datetimes: "+strings.Join(keys, ", "))
+		if legacyPaths {
+			bundleRel, _ := filepath.Rel(cfg.RootPath, p)
+			fromDir := bundle.RelDir(filepath.ToSlash(bundleRel))
+			upgraded, fields, warns, err := bundle.UpgradeBarePathRefs(out, cfg.RootPath, fromDir)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "  ! %s: %v\n", rel, err)
+				return nil
+			}
+			for _, w := range warns {
+				fmt.Fprintf(os.Stderr, "  ! %s: %s\n", rel, w)
+			}
+			if upgraded != nil {
+				out = upgraded
+				notes = append(notes, "root-relative paths gain a leading /: "+strings.Join(fields, ", "))
+			}
 		}
 		if bad, err := bundle.TimestampsNeedingRepair(out); err == nil && len(bad) > 0 {
 			repair++
-			fmt.Fprintf(os.Stderr, "  ! %s: fix by hand, not an ISO 8601 datetime with an offset: %s\n",
+			fmt.Fprintf(os.Stderr, "  ! %s: fix by hand, neither an RFC 3339 date-time with an offset nor a date: %s\n",
 				rel, strings.Join(bad, ", "))
+		}
+		if z, perr := config.ParseFrontmatter(out); perr == nil {
+			for i, v := range z.Verified {
+				if v.At == "" {
+					fmt.Fprintf(os.Stderr, "  ! %s: verified[%d] has no at, so OKF v0.3 ignores it (re-run okfw verify)\n", rel, i)
+				}
+			}
 		}
 		if len(notes) == 0 {
 			return nil
@@ -1339,7 +1438,38 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 	if repair > 0 {
 		fmt.Fprintf(os.Stderr, "%d concept(s) carry a timestamp migrate cannot repair.\n", repair)
 	}
-	if changed > 0 && !dryRun {
+
+	// The bundle-level steps.
+	bundleChanged := false
+	if meta, err := bundle.ReadBundleMeta(cfg.RootPath); err == nil && meta.OKFVersion != config.OKFVersion {
+		bundleChanged = true
+		fmt.Printf("  index.md: okf_version %q -> %q\n", meta.OKFVersion, config.OKFVersion)
+		if !dryRun {
+			if _, err := bundle.StampOKFVersion(cfg); err != nil {
+				return err
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(cfg.RootPath, config.LegacyEphemeralDir)); err == nil {
+		bundleChanged = true
+		fmt.Printf("  %s/: export scratch moves to %s/\n", config.LegacyEphemeralDir, config.EphemeralDir)
+		if !dryRun {
+			if _, warn, err := bundle.UpgradeScratchDir(cfg); err != nil {
+				return err
+			} else if warn != "" {
+				fmt.Fprintf(os.Stderr, "  ! %s\n", warn)
+			}
+		}
+	} else if !dryRun {
+		_, _, _ = bundle.UpgradeScratchDir(cfg) // the .gitignore line alone
+	}
+	for _, problem := range bundle.CheckBundleMeta(cfg.RootPath) {
+		if !strings.Contains(problem, "okf_version") {
+			fmt.Fprintf(os.Stderr, "  ! %s\n", problem)
+		}
+	}
+
+	if (changed > 0 || bundleChanged) && !dryRun {
 		// One refresh for the whole run: the index walk covers the bundle, so
 		// refreshing per file made migrating 300 concepts take 28 seconds.
 		// Adopting also brings listings written before IndexMarker existed
@@ -1349,7 +1479,7 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 		}
 	}
 
-	if changed == 0 {
+	if changed == 0 && !bundleChanged {
 		fmt.Printf("Nothing to migrate: %d concept(s) already clean.\n", scanned)
 		return nil
 	}
@@ -1370,7 +1500,7 @@ func runMigrate(cfg *config.Config, root string, dryRun bool) error {
 // a template keeps its id — which no per-file check can see. Lookup by such
 // an id refuses rather than guessing, so the copies have to be told apart.
 func runValidateAll(cfg *config.Config, path string) error {
-	var concepts, invalid int
+	var concepts, invalid, warnings int
 	var problems []string
 	pathsByID := map[string][]string{}
 
@@ -1381,6 +1511,9 @@ func runValidateAll(cfg *config.Config, path string) error {
 	err = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 && !bundle.Within(bundleRoot, p) {
+			return nil // section 3.2: never follow a link out of the bundle
 		}
 		if fi.IsDir() {
 			if p != root && bundle.SkipWalkDir(bundleRoot, p) {
@@ -1398,10 +1531,24 @@ func runValidateAll(cfg *config.Config, path string) error {
 			problems = append(problems, fmt.Sprintf("  ✗ %s: %v", rel, err))
 			return nil
 		}
+		// OKF v0.3 section 3.2: a file with no frontmatter or no type is not a
+		// concept — a README.md, a SKILL.md. Only one okfw wrote (it carries
+		// an id) is still held to the schema: its type went missing.
+		lenient, lerr := config.ParseFrontmatter(content)
+		if lerr != nil || (!config.IsConcept(lenient) && lenient.ID == "") {
+			warnings++
+			problems = append(problems, fmt.Sprintf("  ⚠ %s: no frontmatter or no type, so not a concept (OKF section 3.2)", rel))
+			return nil
+		}
 		concepts++
-		if _, err := config.ParseAndValidate(content); err != nil {
+		if z, err := config.ParseAndValidate(content); err != nil {
 			invalid++
 			problems = append(problems, fmt.Sprintf("  ✗ %s: %v", rel, err))
+		} else {
+			for _, m := range config.ConceptWarnings(z) {
+				warnings++
+				problems = append(problems, fmt.Sprintf("  ⚠ %s: %s", rel, m))
+			}
 		}
 		// Leniently, so an otherwise invalid copy still counts as a duplicate.
 		if z, err := config.ParseFrontmatter(content); err == nil && z.ID != "" {
@@ -1425,11 +1572,25 @@ func runValidateAll(cfg *config.Config, path string) error {
 			id, len(pathsByID[id]), strings.Join(pathsByID[id], ", ")))
 	}
 
+	// okfw requires a title and a description of the bundles it authors
+	// (OKF v0.3 section 8.1 makes them optional). Checked only when the whole
+	// bundle is validated.
+	var bundleProblems []string
+	if root == bundleRoot {
+		bundleProblems = bundle.CheckBundleMeta(bundleRoot)
+		for _, m := range bundleProblems {
+			problems = append(problems, "  ✗ "+m)
+		}
+	}
+
 	for _, pmsg := range problems {
 		fmt.Println(pmsg)
 	}
-	fmt.Printf("\nokfw schema: %d concept(s), %d invalid, %d duplicated id(s).\n", concepts, invalid, len(duplicated))
+	fmt.Printf("\nokfw schema: %d concept(s), %d invalid, %d duplicated id(s), %d bundle problem(s), %d warning(s).\n",
+		concepts, invalid, len(duplicated), len(bundleProblems), warnings)
 	switch {
+	case len(bundleProblems) > 0 && invalid == 0 && len(duplicated) == 0:
+		return fmt.Errorf("the bundle metadata is incomplete: %s", strings.Join(bundleProblems, "; "))
 	case invalid > 0 && len(duplicated) > 0:
 		return fmt.Errorf("%d concept(s) failed schema validation and %d id(s) are duplicated", invalid, len(duplicated))
 	case invalid > 0:
@@ -1440,10 +1601,13 @@ func runValidateAll(cfg *config.Config, path string) error {
 	return nil
 }
 
-// runValidateOKF checks a bundle for OKF conformance: every non-reserved .md has
-// parseable frontmatter with a non-empty `type`. Unresolved links are reported as
-// warnings (OKF tolerates broken links). Returns an error if any hard violation
-// is found.
+// runValidateOKF checks a bundle for OKF v0.3 conformance (section 11.1):
+// every frontmatter block parses as a YAML mapping, with no duplicate keys
+// (section 4), and the reserved files follow sections 8 and 9. A .md file with
+// no frontmatter or no `type` is not a concept (section 3.2) and only earns a
+// warning. Unresolved links are warnings too (section 6.1 tolerates them), as
+// is anything section 11.2 tells a consumer to ignore. Returns an error if any
+// hard violation is found.
 func runValidateOKF(cfg *config.Config, path string) error {
 	var concepts, violations, brokenLinks, warnings int
 	var problems []string
@@ -1452,9 +1616,13 @@ func runValidateOKF(cfg *config.Config, path string) error {
 	if err != nil {
 		return err
 	}
+	refExists := bundle.RefExists(bundleRoot)
 	err = filepath.Walk(root, func(p string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
+		}
+		if fi.Mode()&os.ModeSymlink != 0 && !bundle.Within(bundleRoot, p) {
+			return nil // section 3.2: never follow a link out of the bundle
 		}
 		if fi.IsDir() {
 			if p != root && bundle.SkipWalkDir(bundleRoot, p) {
@@ -1490,6 +1658,13 @@ func runValidateOKF(cfg *config.Config, path string) error {
 			}
 			return nil
 		}
+		// Section 3.2: a file with no frontmatter is not a concept, and does
+		// not affect conformance. Validators SHOULD warn.
+		if !bytes.HasPrefix(content, []byte("---")) {
+			warnings++
+			problems = append(problems, fmt.Sprintf("  ⚠ %s: no frontmatter, so not a concept (OKF section 3.2)", rel))
+			return nil
+		}
 		// Section 11.1 asks only for parseable YAML frontmatter, so a field of
 		// the wrong shape is not a violation here; `okfw validate` is strict.
 		z, err := config.ParseFrontmatter(content)
@@ -1498,10 +1673,21 @@ func runValidateOKF(cfg *config.Config, path string) error {
 			problems = append(problems, fmt.Sprintf("  ✗ %s: unparseable frontmatter (%v)", rel, err))
 			return nil
 		}
+		if fm, ferr := config.ExtractFrontmatter(content); ferr == nil {
+			if d := config.DuplicateKeys(fm); len(d) > 0 {
+				violations++
+				problems = append(problems, fmt.Sprintf("  ✗ %s: duplicate frontmatter key(s): %s (OKF section 4)", rel, strings.Join(d, ", ")))
+			}
+		}
+		if !config.IsConcept(z) {
+			warnings++
+			problems = append(problems, fmt.Sprintf("  ⚠ %s: no `type`, so not a concept (OKF section 3.2)", rel))
+			return nil
+		}
 		concepts++
-		if strings.TrimSpace(z.Type) == "" {
-			violations++
-			problems = append(problems, fmt.Sprintf("  ✗ %s: missing required non-empty `type`", rel))
+		for _, m := range config.ConceptWarnings(z) {
+			warnings++
+			problems = append(problems, fmt.Sprintf("  ⚠ %s: %s", rel, m))
 		}
 		// Warn on unresolved internal links. They resolve against the bundle
 		// root, not the directory being checked, as in every other command.
@@ -1524,14 +1710,24 @@ func runValidateOKF(cfg *config.Config, path string) error {
 			}
 		}
 		// A path-valued field naming a concept is a link as well (section 6.2).
+		// In a bundle declaring 0.2 or no version, a bare path that resolves
+		// only from the root still resolves (section 12.1), with a warning
+		// asking for the leading "/" that makes it unambiguous.
 		for _, r := range z.PathRefs() {
-			tr := graph.NormalizeRef(r.Value, fromDir)
+			tr := graph.ResolveRef(r.Value, fromDir, refExists)
 			if tr == "" {
 				continue
 			}
 			if _, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(tr))); err != nil {
 				brokenLinks++
 				problems = append(problems, fmt.Sprintf("  ⚠ %s: %s target not found: %s", rel, r.Field, r.Value))
+				continue
+			}
+			if tr != graph.NormalizeRef(r.Value, fromDir) {
+				warnings++
+				problems = append(problems, fmt.Sprintf(
+					"  ⚠ %s: %s %q resolves only from the bundle root, through the v0.2 fallback; write it as /%s (OKF section 6.2)",
+					rel, r.Field, r.Value, tr))
 			}
 		}
 		return nil

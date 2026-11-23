@@ -38,10 +38,13 @@ Search before you:
 - write an **orientation** to unfamiliar code.
 
 Each hit carries `trust` (`unverified`, `machine-confirmed`,
-`human-reviewed`), plus `status` when it is `draft` or `deprecated` and `stale`
-when its `stale_after` has passed. Weigh a hit by them: prefer a reviewed,
-current concept, and treat a stale or deprecated one as a lead to check rather
-than as the answer.
+`human-reviewed`), plus `status` when it is not `stable` and `stale` when its
+`stale_after` has passed. Weigh a hit by them: prefer a reviewed, current
+concept, and treat a stale or deprecated one as a lead to check rather than as
+the answer. Trust counts only reviews made since the content last changed, so
+a rewritten concept reads as unverified until someone checks it again. To see
+current knowledge only, add `--current` / `"current":true`: a deprecated hit
+is then replaced by the concept its `superseded_by` names.
 
 If the search returns nothing relevant, derive the answer normally — and
 consider capturing what you learned.
@@ -60,12 +63,14 @@ use whichever surface you have.
 | create one | `okfw create "Title" --body "..." --json` | `okfw_create {"title":"Title","body":"..."}` |
 | create an issue | `okfw create "Title" --kind issue --json` | `okfw_create {"kind":"issue","title":"Title"}` |
 | today's journal | `okfw daily` | `okfw_create {"kind":"daily"}` |
+| current knowledge only | `okfw search "query" --current --json` | `okfw_search {"q":"query","current":true}` |
 | edit metadata or body | `okfw set-lifecycle` / `verify` / `add-source` / … | `okfw_update {"ref":…,"action":…,"value":…}` |
+| retire a concept | `okfw set-lifecycle <ref> deprecated --superseded-by <new>` | `okfw_update {"ref":…,"action":"set_lifecycle","value":"deprecated","superseded_by":<new>}` |
 | swap a tag | `okfw remove-tags <ref> open` then `okfw add-tags <ref> resolved` | `okfw_update` actions `remove_tags`, `add_tags` |
 | what links here | `okfw backlinks <ref> --json` | `okfw_graph {"action":"backlinks","ref":…}` |
 
-CLI only: `okfw init`, `okfw move`, `okfw delete`, `okfw validate --all`,
-`okfw graph`, `okfw graph-query`, `okfw install`. Every command is
+CLI only: `okfw init`, `okfw set-bundle-meta`, `okfw move`, `okfw delete`,
+`okfw validate --all`, `okfw graph`, `okfw graph-query`, `okfw install`. Every command is
 self-documenting (`okfw <cmd> --help`) and read commands support `--json`.
 
 Results are capped and say so. A `truncated` field, or a `… N more` line,
@@ -80,7 +85,9 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
    Connect related concepts with
    plain markdown links using wiki-relative targets:
    `[Display Title](/research/protocols/deep-note--019f23d3.md)` (leading `/`
-   = wiki root; `./relative.md` also works). Links power `backlinks` and the
+   = wiki root; any other path is relative to the linking file, as in plain
+   markdown). Frontmatter paths (`resource`, `superseded_by`, …) follow the
+   same rule, so write them with a leading `/`. Links power `backlinks` and the
    graph. A new concept should link to at least one existing concept when a
    relation exists — search first to find candidates.
 2. **One idea per concept.** Small, atomic, densely linked notes beat long
@@ -96,13 +103,17 @@ means you did not see everything — raise `--limit` / `"limit"`, or page with
 6. **Mark superseded knowledge rather than deleting it.** `status` is the OKF
    lifecycle field — `draft`, `stable` (the default when absent), or
    `deprecated`. Set it with `okfw set-lifecycle` / `okfw_update` action
-   `set_lifecycle`, and `stale_after` when a concept has a known shelf life.
-   okfw has **no task-tracking fields**; `status` is lifecycle only.
+   `set_lifecycle`, naming the replacement with `--superseded-by` /
+   `"superseded_by"` when there is one, and `stale_after` when a concept has a
+   known shelf life. okfw has **no task-tracking fields**; `status` is
+   lifecycle only.
 7. **Cite where knowledge came from** with `okfw add-source --resource <uri>`
    / `okfw_update` action `add_source`, and record review with `okfw verify` /
-   action `verify`. Custom metadata goes under the `x:` frontmatter block — it
-   is the only place unrecognized keys are accepted, as the schema is
-   otherwise closed and will reject a typo'd field.
+   action `verify`. Record a rewrite with `okfw set-generated` / action
+   `set_generated`: it moves `generated.at`, and only reviews made after it
+   count. Custom metadata goes in keys named `x-<producer>-<name>` (OKF
+   section 4.1) — the schema is otherwise closed and will reject a typo'd
+   field.
 8. **Never blend what a source says with what you concluded from it** unless the
    boundary is visible on the page. A concept recording a decision, an incident
    or a measurement is read later as *the record*, by people and agents alike,
