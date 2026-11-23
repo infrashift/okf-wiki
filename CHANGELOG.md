@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Deprecated
+- **`--project` is deprecated in favor of `--path`.** `okfw create --project` (`-p`), `okfw search --project` and `okfw set-project` still work. They now print a warning and are left out of `--help`, the man pages and the agent skill. The MCP server no longer advertises `project` (search and create) or the `set_project` action; it still honours them for older clients. That makes the per-turn context 170 bytes smaller (read-write 6,587 → 6,417 bytes; read-only 3,790 → 3,720). `project` dates from okfw's single global `~/okfw` wiki, where it told repositories apart. Each repository now has its own wiki, and a directory does the same job in a form every OKF tool reads, where `x-okfw-project` means nothing outside okfw. To refile a concept, run `okfw move <ref> <dir>/`, which repairs the links to it. Concepts that already carry `x-okfw-project` keep it, and search hits still show it. The Neovim plugin takes `--path` / `opts.path`, and its project features warn once per session.
+
+### Added
+- **A generated CLI Flags page** on the docs site lists every command's flags with their values and defaults. It is built from the command tree, the same source as `--help` and the man pages (`make docs-flags`), and a test fails when it is stale. The hand-written tables it replaces had drifted: `okfw export` and `okfw man` had no entry, the `okfw site` and `okfw graph-query cluster` flags were listed on the wrong command, and 30 rows only restated `--help`.
+
+### Changed
+- **Clearer flag help.** Many flags' help text now gives the accepted values and the default. `add-source --last-modified` no longer says "ISO 8601 datetime" (it also takes a date), `validate --okf` names what it checks, and `daily --date` says it defaults to today. A test holds every flag's help to one style.
+
 ## v2026.11.3 — 2026-11-23
 
 ### Fixed

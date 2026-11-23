@@ -104,10 +104,11 @@ if is_concept() then
     -- Let native gf also resolve bare relative .md paths
     vim.opt_local.suffixesadd:prepend(".md")
 
-    -- Set project (plain notes only)
+    -- Set project (plain notes only). Deprecated: set_project() warns and
+    -- points to move_note(); the keymap stays so existing habits still work.
     if get_kind() == "note" then
         vim.keymap.set("n", "<localleader>p", function()
             require("okfw").set_project()
-        end, vim.tbl_extend("force", opts, { desc = "Set project" }))
+        end, vim.tbl_extend("force", opts, { desc = "Set project (deprecated: use move_note)" }))
     end
 end

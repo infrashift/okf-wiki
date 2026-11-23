@@ -125,7 +125,7 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&supersededBy, "superseded-by", "", "With deprecated: the concept that replaces this one (id or path)")
+	cmd.Flags().StringVar(&supersededBy, "superseded-by", "", "With deprecated: the concept that replaces this one, by id or path")
 	return cmd
 }
 
@@ -211,9 +211,9 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&title, "title", "", "Bundle title")
-	cmd.Flags().StringVar(&description, "description", "", "One sentence: what the bundle covers and when to use it")
-	cmd.Flags().StringVar(&license, "license", "", "SPDX expression, or a path to a license file in the bundle")
+	cmd.Flags().StringVar(&title, "title", "", "Bundle title; an empty value removes it")
+	cmd.Flags().StringVar(&description, "description", "", "One sentence: what the bundle covers and when to use it (required by validate --all)")
+	cmd.Flags().StringVar(&license, "license", "", "SPDX expression, or a path to a license file in the bundle; an empty value removes it")
 	return cmd
 }
 
@@ -272,7 +272,7 @@ func newVerifyCmd() *cobra.Command {
 	var by, at string
 	cmd := &cobra.Command{
 		Use:   "verify <id_or_file>",
-		Short: "Record a verification event on a concept",
+		Short: "Record that someone verified a concept",
 		Long: `Append an entry to the concept's ` + "`verified`" + ` list (OKF spec section 5.2).
 
 Consumers derive a trust tier from these entries: no verified key means
@@ -305,8 +305,8 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
-	cmd.Flags().StringVar(&at, "at", "", "When it was verified: an RFC 3339 datetime or a date (default now)")
+	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id> or <producer>/<version> (default: human:<login>)")
+	cmd.Flags().StringVar(&at, "at", "", "When it was verified: an RFC 3339 date-time or a date (default: now)")
 	return cmd
 }
 
@@ -315,7 +315,7 @@ func newAddSourceCmd() *cobra.Command {
 	var usageCount int
 	cmd := &cobra.Command{
 		Use:   "add-source <id_or_file>",
-		Short: "Append a provenance source to a concept",
+		Short: "Add a source to a concept",
 		Long: `Append an entry to the concept's ` + "`sources`" + ` list (OKF spec section 5.1).
 
 --resource is required and names either a concrete artifact a consumer can
@@ -359,13 +359,13 @@ is accepted and written as midnight UTC.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&resource, "resource", "", "URL, bundle-relative path, or scope descriptor (required)")
-	cmd.Flags().StringVar(&id, "id", "", "Join key for [^id] body footnotes")
-	cmd.Flags().StringVar(&title, "title", "", "Human-readable label")
-	cmd.Flags().StringVar(&author, "author", "", "Actor who produced the source")
-	cmd.Flags().IntVar(&usageCount, "usage-count", 0, "How often the resource was exercised")
-	cmd.Flags().StringVar(&lastModified, "last-modified", "", "When the source itself last changed (ISO 8601 datetime)")
-	cmd.Flags().StringVar(&usageWindow, "usage-window", "", "Datetime range framing usage-count, as FROM..TO")
+	cmd.Flags().StringVar(&resource, "resource", "", "Required. A URL, a bundle path such as /dir/file.md, or a scope descriptor")
+	cmd.Flags().StringVar(&id, "id", "", "Label the body's [^label] footnotes cite this source by")
+	cmd.Flags().StringVar(&title, "title", "", "Human-readable label for the source")
+	cmd.Flags().StringVar(&author, "author", "", "Actor who produced the source: <scheme>:<id> or <producer>/<version>")
+	cmd.Flags().IntVar(&usageCount, "usage-count", 0, "How often the resource was exercised, within --usage-window")
+	cmd.Flags().StringVar(&lastModified, "last-modified", "", "When the source itself last changed: an RFC 3339 date-time with offset, or a date (midnight UTC)")
+	cmd.Flags().StringVar(&usageWindow, "usage-window", "", "The period --usage-count covers, as FROM..TO (two timestamps)")
 	return cmd
 }
 
@@ -434,8 +434,8 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id>, or <producer>/<version> (default human:<login>)")
-	cmd.Flags().StringVar(&at, "at", "", "When the content last meaningfully changed: an RFC 3339 datetime or a date (default now)")
+	cmd.Flags().StringVar(&by, "by", "", "Actor: human:<id>, team:<id>, process:<id> or <producer>/<version> (default: human:<login>)")
+	cmd.Flags().StringVar(&at, "at", "", "When the content last meaningfully changed: an RFC 3339 date-time or a date (default: now)")
 	return cmd
 }
 
@@ -610,7 +610,7 @@ func newInstallCmd() *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
 		Use:   "install",
-		Short: "Install the okfw skill for an AI coding assistant",
+		Short: "Install the okfw skill for an AI agent",
 		Long: `Registers okfw with an agent platform so it captures and links project
 knowledge in the wiki instead of scattering notes. Supported platforms: claude
 (Claude Code: skill + CLAUDE.md block), gemini (GEMINI.md block), codex
@@ -642,7 +642,7 @@ Run from anywhere inside the project; the wiki's parent directory is the root.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&platform, "platform", "claude", "agent platform: claude, gemini, or codex")
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing skill file")
+	cmd.Flags().StringVar(&platform, "platform", "claude", "Agent platform: claude, gemini or codex")
+	cmd.Flags().BoolVar(&force, "force", false, "Overwrite an existing skill file")
 	return cmd
 }

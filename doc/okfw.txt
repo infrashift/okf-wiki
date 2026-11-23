@@ -108,13 +108,16 @@ Daily Notes ~
 
 Note Creation ~
                                                                    *:OkfwNote*
-:OkfwNote [--project NAME]
+:OkfwNote [--path DIR]
                         Create a new concept: prompts for the title, then
                         opens the new file.
-                        --project {NAME}: optional project name
+                        --path {DIR}: wiki subdirectory to place it in
+                        (created if missing; default: the wiki root).
+                        --project {NAME} is deprecated: it still works but
+                        warns; use --path.
 
                                                                *:OkfwTemplate*
-:OkfwTemplate [name] [--project NAME]
+:OkfwTemplate [name] [--path DIR]
                         Create note from template, prompting for the title.
                         Without a name: opens the template picker (with
                         snacks.nvim) or prompts for a template name
@@ -128,7 +131,7 @@ Search ~
                         Without snacks.nvim the hits are printed.
 
                         Flags: ~
-                          --project {val}    filter by project name
+                          --path {dir}       only this wiki subdirectory
                           --type {val}       free-form OKF type (e.g. note)
                           --kind {val}       note, daily-note, issue
                           --status {val}     draft, stable, deprecated
@@ -138,10 +141,12 @@ Search ~
                         Examples: >vim
                           :OkfwSearch authentication
                           :OkfwSearch --status draft
-                          :OkfwSearch --project my-project --stale
+                          :OkfwSearch --path research --stale
                           :OkfwSearch! --kind issue
                           :OkfwSearch! auth      " live, starting from "auth"
 <
+                        --project {val} is deprecated: it still works but
+                        warns; use --path.
 
 Delete and move ~
                                                                  *:OkfwDelete*
@@ -249,24 +254,29 @@ Note Creation ~
                                                           *okfw.create_note()*
 create_note({opts})     Create a new concept.
                         opts.title: optional title (prompted if omitted)
-                        opts.project: optional project name
+                        opts.path: optional wiki subdirectory to place it in
+                        opts.project: deprecated (warns once); use opts.path
 
                                                  *okfw.create_from_template()*
 create_from_template({opts})
                         Create note from template.
                         opts.template: template name (picker if omitted)
-                        opts.project: project name
+                        opts.path: wiki subdirectory for the new note
+                        opts.project: deprecated (warns once); use opts.path
 
                                                       *okfw.template_picker()*
 template_picker({opts}) Open picker for templates.
-                        opts.project: project name for the new note
+                        opts.path: wiki subdirectory for the new note
+                        opts.project: deprecated (warns once); use opts.path
 
 Note Management ~
                                                           *okfw.set_project()*
 set_project({path}, {project})
-                        Set project for a concept. Both optional: {path}
-                        defaults to the current buffer, {project} is
-                        prompted for.
+                        Deprecated: organize concepts by directory instead,
+                        and refile one with |okfw.move_note()|. Still sets
+                        x-okfw-project (`okfw set-project`), warning once
+                        per session. Both optional: {path} defaults to the
+                        current buffer, {project} is prompted for.
 
                                                           *okfw.delete_note()*
 delete_note({path})     Delete a concept after confirming (what
@@ -283,8 +293,10 @@ Search ~
                                                                *okfw.search()*
 search({query}, {opts}) Search concepts and print the hits, or pass them
                         to opts.on_results. No picker; see |okfw-picker|.
-                        opts.project, opts.tags, opts.type, opts.kind,
+                        opts.path, opts.tags, opts.type, opts.kind,
                         opts.status, opts.stale, opts.limit
+                        (opts.project is deprecated: it warns; use
+                        opts.path)
                         opts.on_results: callback function
 
                                                                 *okfw.index()*
@@ -419,7 +431,8 @@ require("okfw.picker").live_search({opts}) Live search
     Search opts: ~
         {query}       Full-text query (search() only; live_search() takes
                       the text you type)
-        {project}     Filter by project name
+        {path}        Only this wiki subdirectory, recursively
+        {project}     Deprecated (warns once); use {path}
         {type}        Filter by the free-form OKF type
         {kind}        Filter by kind (note/daily-note/issue)
         {status}      Filter by OKF lifecycle status (draft/stable/deprecated)
@@ -446,8 +459,8 @@ automatically sets up:
   - <localleader>b for backlinks toggle
   - <localleader>a for adding tags (all concept types)
   - <localleader>v for validating frontmatter (all concept types)
-  - <localleader>p for set project (plain notes only: no kind, or
-    kind: note)
+  - <localleader>p for set project (deprecated, like |okfw.set_project()|;
+    plain notes only: no kind, or kind: note)
   - gf to follow the markdown link under the cursor
   - a BufWritePost hook that refreshes the index.md listings
 

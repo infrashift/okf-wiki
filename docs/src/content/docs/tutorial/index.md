@@ -449,18 +449,20 @@ shows a preview pane beside the list instead), or preview the current buffer:
 A floating preview window shows the note content. Inside the preview, press
 `Enter` to open it for editing or `q` to close.
 
-## 13. Set a Project
+## 13. File the Note in a Directory
 
-The `Linked Note-Taking Method` note has been refined and linked. Give it a
-project context so it's easy to find later. With the note open, press `\p`:
+The `Linked Note-Taking Method` note has been refined and linked. File it in a
+directory so it's easy to find later. With the note open, run:
 
+```vim
+:OkfwMove knowledge-management/
 ```
-\p  →  Project: _
-```
 
-Enter `knowledge-management`. The note's frontmatter updates: the `project`
-field is set. You can set or change a project on any note the same way, or from
-the CLI with `okfw set-project`.
+The note moves to `.okfw/knowledge-management/`, keeping its id, and every
+link to it is rewritten to the new path; the buffer follows it. The new
+directory gets its own `index.md` listing. From the CLI, the same move is
+`okfw move <note> knowledge-management/`, and `okfw create --path
+knowledge-management` creates a note there directly.
 
 ## 14. Search Your Notes
 
@@ -495,8 +497,8 @@ okfw search "atomic notes"
 # JSON output (for scripting)
 okfw search --json --limit 5
 
-# Filter by project
-okfw search --project knowledge-management
+# Search one directory
+okfw search --path knowledge-management
 
 # Filter by tag
 okfw search --tag daily
@@ -612,7 +614,7 @@ Beyond the meeting and snippet templates shown earlier, try these:
 **Book review:**
 
 ```vim
-:OkfwTemplate book-review --project reading-list
+:OkfwTemplate book-review --path reading-list
 ```
 
 Sections: author, rating, summary, key takeaways, favorite quotes.
@@ -720,7 +722,6 @@ okfw index-md
 | `okfw daily` | Create/open daily note |
 | `okfw search [query]` | Search notes |
 | `okfw graph [path]` | Render a Mermaid diagram (`--ascii` for a text tree) |
-| `okfw set-project [file] [project]` | Set project on a note |
 | `okfw delete <ref>` | Delete a concept and its `index.md` entry |
 | `okfw move <ref> <dest>` | Move or rename a concept, repairing links |
 | `okfw backlinks [file]` | Show backlinks |

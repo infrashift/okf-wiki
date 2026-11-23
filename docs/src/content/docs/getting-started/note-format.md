@@ -64,7 +64,7 @@ wrote is that tool's, and okfw leaves it alone.
 | `x-okfw-kind` | No | `note`, `daily-note`, or `issue` | Structured kind that drives behavior. Omitted when it equals `note` (default). |
 | `description` | No | One-sentence string | OKF summary, used in `index.md` listings and search snippets |
 | `resource` | No | URI | OKF reference to the underlying asset the concept describes. Set with `okfw set-resource`. |
-| `x-okfw-project` | No | Non-empty string | Optional project metadata (set with `--project`). Never derived from git. |
+| `x-okfw-project` | No | Non-empty string | **Deprecated.** Project metadata from the deprecated `--project` flag. Still read and shown; organize by directory (`--path`) instead. |
 | `tags` | Yes | List of non-empty strings | Categorization tags |
 | `x-okfw-created` | Yes | ISO 8601 datetime with offset | Creation time |
 | `x-okfw-timestamp` | Yes | ISO 8601 datetime with offset | okfw's last-write time, updated by the CLI on every mutation. Not the same as `generated.at` — see [Trust fields](#trust-fields). |
@@ -245,5 +245,5 @@ Every command that takes a concept accepts any of: the full `x-okfw-id`, a uniqu
 Links between concepts are vanilla markdown links pointing at file paths. See the [Notes Workflow](/okf-wiki/neovim/notes-workflow/) for how linking works.
 
 :::note
-Notes can be created without a project context for quick idea capture. Assign a project later with `okfw set-project`.
+Notes can be created at the wiki root for quick idea capture. File one in a directory later with `okfw move <note> <dir>/`, which repairs the links to it.
 :::

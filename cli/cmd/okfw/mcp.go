@@ -176,10 +176,9 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "okfw_search",
-			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only when not stable, stale only when stale_after has passed (or does not parse). Prefer a current, reviewed hit over a stale or deprecated one, but unverified is the default, not a defect: an unverified hit that answers the question is the answer.",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only when not stable, stale only when stale_after has passed (or does not parse). Prefer a current, reviewed hit over a stale or deprecated one, but unverified is the default, not a defect: an unverified hit that answers the question is the answer.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
-				"project": str("filter by project"),
 				"tag":     str("filter by tag"),
 				"kind":    enum("filter by kind", "note", "daily-note", "issue"),
 				"type":    str("filter by OKF free-form type, e.g. Playbook, Metric"),
@@ -198,7 +197,6 @@ func mcpTools() []map[string]interface{} {
 			"inputSchema": obj(map[string]interface{}{
 				"kind":         enum("what to create (default note)", "note", "issue", "daily"),
 				"title":        str("title (required for note)"),
-				"project":      str("optional project metadata (also used as folder)"),
 				"dir":          str("wiki subdirectory, e.g. research/protocols"),
 				"tags":         strs("tags"),
 				"description":  str("one-sentence OKF description"),
@@ -227,9 +225,9 @@ func mcpTools() []map[string]interface{} {
 			"description": "Update a concept: metadata, OKF trust/provenance (verify, set_generated, set_resource, add_source), or its markdown body (append / set_body).",
 			"inputSchema": obj(map[string]interface{}{
 				"ref":           str("concept id or path"),
-				"action":        enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "remove_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
+				"action":        enum("what to change", "set_lifecycle", "set_stale_after", "add_tags", "remove_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
 				"superseded_by": str("set_lifecycle deprecated only: the replacing concept's id or path"),
-				"value":         str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags (add_tags, remove_tags) | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
+				"value":         str("draft|stable|deprecated (set_lifecycle) | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags (add_tags, remove_tags) | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
 			}, "ref", "action", "value"),
 		},
 		{
@@ -421,7 +419,7 @@ const maxSearchLimit = 100
 func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
 		Q       string   `json:"q"`
-		Project string   `json:"project"`
+		Project string   `json:"project"` // deprecated: not advertised, still honoured
 		Tag     string   `json:"tag"`
 		Tags    []string `json:"tags"`
 		Dir     string   `json:"dir"`
@@ -481,7 +479,7 @@ func (s *mcpServer) toolCreate(cfg *config.Config, args json.RawMessage) *toolRe
 	var a struct {
 		Kind        string   `json:"kind"`
 		Title       string   `json:"title"`
-		Project     string   `json:"project"`
+		Project     string   `json:"project"` // deprecated: not advertised, still honoured
 		Dir         string   `json:"dir"`
 		Tags        []string `json:"tags"`
 		Description string   `json:"description"`
@@ -815,7 +813,7 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 
 	var newContent []byte
 	switch a.Action {
-	case "set_project":
+	case "set_project": // deprecated: no longer advertised, still honoured for old clients
 		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{config.KeyProject: a.Value})
 	case "set_lifecycle":
 		mut, merr := lifecycleMutator(cfg, a.Value, a.SupersededBy)

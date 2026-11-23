@@ -78,7 +78,7 @@ use --json to get {"id": "...", "path": "..."} on stdout instead.
 Examples:
   okfw create "My Note"                                      # Basic note
   okfw create "Meeting Notes" --template meeting             # From template
-  okfw create "Feature Spec" -T feature -p myproj            # Template with project
+  okfw create "Feature Spec" -T feature --path specs        # Template, in specs/
   okfw create "Login fails" --kind issue --path issues       # An issue, without the template
   okfw create "Q3 revenue" --type Metric                     # Free-form OKF type
   okfw create "Scripted" --json                              # Machine-readable result`,
@@ -175,7 +175,7 @@ Examples:
 		},
 	}
 	initCmd.Flags().StringVar(&initMeta.Title, "title", "", "Bundle title (default: the project directory's name)")
-	initCmd.Flags().StringVar(&initMeta.Description, "description", "", "One sentence: what the bundle covers and when to use it")
+	initCmd.Flags().StringVar(&initMeta.Description, "description", "", "One sentence: what the bundle covers and when to use it (required by validate --all)")
 	initCmd.Flags().StringVar(&initMeta.License, "license", "", "License of the bundle content: an SPDX expression or a path in the bundle")
 
 	var connectCmd = &cobra.Command{
@@ -241,7 +241,7 @@ okfw write does. Editors use it after saving a concept by hand.`,
 			return runIndexMd(cfg, cfg.RootPath, !indexNoAdoptFlag)
 		},
 	}
-	indexMdCmd.Flags().BoolVar(&indexNoAdoptFlag, "no-adopt", false, "Refresh only listings okfw already maintains; never take over an unmarked index.md")
+	indexMdCmd.Flags().BoolVar(&indexNoAdoptFlag, "no-adopt", false, "Refresh only the listings okfw already maintains; never take over an unmarked index.md")
 
 	var logCmd = &cobra.Command{
 		Use:   "log [path]",
@@ -297,7 +297,6 @@ Use with: okfw create "title" --template <name>`,
 
 Examples:
   okfw search "authentication"              # Full-text search
-  okfw search --project myproject           # Filter by project
   okfw search --tag golang --tag api        # Filter by tags (AND)
   okfw search --kind note                   # Notes only (no daily notes or issues)
   okfw search --type Playbook               # Filter by OKF free-form type
@@ -306,7 +305,7 @@ Examples:
   okfw search "margin" --current            # Current knowledge only; a deprecated
                                             # hit gives way to its superseded_by
   okfw search --path issues --tag open      # Only the issues/ directory, recursively
-  okfw search "auth" --project myproject    # Combined search`,
+  okfw search "auth" --path research --tag open   # Combined search`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
 			if err != nil {
@@ -414,8 +413,12 @@ Examples:
 
 	var setProjectCmd = &cobra.Command{
 		Use:   "set-project [id_or_file] [project]",
-		Short: "Set or update the project for a concept",
-		Args:  cobra.ExactArgs(2),
+		Short: "Set or update the project for a concept (deprecated)",
+		// Deprecated keeps it working and hides it from help, the man pages
+		// and the skill. Directories do the job project did, and every OKF
+		// consumer reads them; x-okfw-project means nothing outside okfw.
+		Deprecated: "organize concepts by directory instead: move one with okfw move, and create one in place with okfw create --path",
+		Args:       cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, filePath, err := resolveRefArg(args[0])
 			if err != nil {
@@ -640,40 +643,45 @@ Examples:
 
 	// Flags
 	createCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Optional project metadata (also used as the note's folder)")
-	createCmd.Flags().StringVarP(&templateFlag, "template", "T", "", "Use a template (see 'okfw templates' for list)")
-	createCmd.Flags().StringVarP(&descriptionFlag, "description", "d", "", "One-sentence summary (OKF description)")
-	createCmd.Flags().StringVar(&pathFlag, "path", "", "Place the concept in a bundle subdirectory (e.g. projects/okf)")
-	createCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Additional tags (comma-separated)")
+	// --project predates per-repo wikis, when one global bundle held every
+	// repository's notes and project told them apart. A directory now does
+	// that, in a form every OKF consumer reads. The flag still works.
+	deprecateFlag(createCmd, "project", "use --path <dir> to place the concept in a directory")
+	createCmd.Flags().StringVarP(&templateFlag, "template", "T", "", "Start from a template; okfw templates lists them")
+	createCmd.Flags().StringVarP(&descriptionFlag, "description", "d", "", "One-sentence summary, shown in search hits and index.md listings")
+	createCmd.Flags().StringVar(&pathFlag, "path", "", "Place the concept in a bundle subdirectory, created if missing (e.g. research/protocols)")
+	createCmd.Flags().StringSliceVar(&tagsFlag, "tags", nil, "Tags to add, comma-separated or repeated")
 	createCmd.Flags().BoolVar(&createJSONFlag, "json", false, "Print {\"id\",\"path\"} as JSON instead of prose")
-	createCmd.Flags().StringVar(&bodyFlag, "body", "", "Markdown body content for the note")
-	createCmd.Flags().StringVar(&createTypeFlag, "type", "", "OKF free-form type (default: the kind)")
-	createCmd.Flags().StringVar(&createKindFlag, "kind", "", "Structured kind: note or issue (default: the template's, else note)")
+	createCmd.Flags().StringVar(&bodyFlag, "body", "", "Markdown body, written after the template's body if there is one")
+	createCmd.Flags().StringVar(&createTypeFlag, "type", "", "Free-form OKF type, such as Playbook or Metric (default: the kind)")
+	createCmd.Flags().StringVar(&createKindFlag, "kind", "", "Kind: note or issue (default: the template's, else note)")
 
 	searchCmd.Flags().StringVarP(&projectFlag, "project", "p", "", "Filter by project")
-	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by OKF type (free-form)")
-	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by structured kind (note/daily-note/issue)")
+	deprecateFlag(searchCmd, "project", "use --path <dir> to search one directory")
+	searchCmd.Flags().StringVarP(&typeFlag, "type", "t", "", "Filter by free-form OKF type, such as Playbook")
+	searchCmd.Flags().StringVar(&kindFlag, "kind", "", "Filter by kind: note, daily-note or issue")
 	// Offset has been honoured by index.Search since it was written; nothing
 	// ever set it, so pagination was unreachable and the only way past the
 	// limit was to raise it.
-	searchCmd.Flags().IntVar(&offsetFlag, "offset", 0, "Skip this many results (pagination)")
-	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag (can be repeated)")
-	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by OKF lifecycle status (draft/stable/deprecated, or a raw unknown value)")
+	searchCmd.Flags().IntVar(&offsetFlag, "offset", 0, "Skip this many results, to page past --limit")
+	searchCmd.Flags().StringSliceVarP(&tagsFlag, "tag", "T", nil, "Filter by tag; repeat it to require several")
+	searchCmd.Flags().StringVar(&statusFlag, "status", "", "Filter by lifecycle status: draft, stable or deprecated (another value matches as written)")
 	searchCmd.Flags().StringVar(&pathFlag, "path", "", "Search only this bundle subdirectory, recursively (e.g. issues)")
-	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after date has passed")
-	searchCmd.Flags().BoolVar(&currentFlag, "current", false, "Only current knowledge: no deprecated or unknown-status concept; a deprecated hit is replaced by its superseded_by")
+	searchCmd.Flags().BoolVar(&staleFlag, "stale", false, "Only concepts whose stale_after has passed, or does not parse")
+	searchCmd.Flags().BoolVar(&currentFlag, "current", false, "Current knowledge only: drop deprecated and unknown-status concepts, and replace a deprecated hit with its superseded_by")
 	searchCmd.Flags().IntVarP(&limitFlag, "limit", "l", 20, "Maximum number of results")
-	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
+	searchCmd.Flags().BoolVar(&jsonFlag, "json", false, "Print the hits as a JSON array")
 
 	graphCmd.Flags().IntVarP(&graphLimitFlag, "limit", "l", 10, "Maximum number of nodes to display")
-	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Start graph from a specific concept ID")
+	graphCmd.Flags().StringVar(&graphStartFlag, "start", "", "Concept to start from, by id or path (default: the most connected)")
 	graphCmd.Flags().IntVar(&graphDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
 	graphCmd.Flags().BoolVar(&graphASCIIFlag, "ascii", false, "Render a plain-text tree instead of Mermaid")
 
-	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of notes to export")
-	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Start export from a specific concept ID")
+	exportCmd.Flags().IntVarP(&exportLimitFlag, "limit", "l", 10, "Maximum number of concepts to export")
+	exportCmd.Flags().StringVar(&exportStartFlag, "start", "", "Concept to start from, by id or path (default: the most connected)")
 	exportCmd.Flags().IntVar(&exportDepthFlag, "depth", 0, "Maximum BFS depth (hops) from start node (0 = unlimited)")
 
-	backlinksCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output results as JSON")
+	backlinksCmd.Flags().BoolVar(&jsonFlag, "json", false, "Print the hits as a JSON array")
 
 	// Daily notes flags
 	var dateFlag string
@@ -734,12 +742,12 @@ Examples:
 		},
 	}
 
-	dailyCmd.Flags().StringVar(&dateFlag, "date", "", "Target date (YYYY-MM-DD format)")
-	dailyCmd.Flags().BoolVar(&yesterdayFlag, "yesterday", false, "Use yesterday's date")
-	dailyCmd.Flags().BoolVar(&listFlag, "list", false, "List recent daily notes")
-	dailyCmd.Flags().BoolVar(&weekFlag, "week", false, "Show this week's notes (with --list)")
-	dailyCmd.Flags().BoolVar(&monthFlag, "month", false, "Show this month's notes (with --list)")
-	dailyCmd.Flags().BoolVar(&jsonFlag, "json", false, "Output as JSON (with --list)")
+	dailyCmd.Flags().StringVar(&dateFlag, "date", "", "Date of the note, YYYY-MM-DD (default: today)")
+	dailyCmd.Flags().BoolVar(&yesterdayFlag, "yesterday", false, "Yesterday's note instead of today's")
+	dailyCmd.Flags().BoolVar(&listFlag, "list", false, "List recent daily notes instead of opening one")
+	dailyCmd.Flags().BoolVar(&weekFlag, "week", false, "With --list: only this week's notes")
+	dailyCmd.Flags().BoolVar(&monthFlag, "month", false, "With --list: only this month's notes")
+	dailyCmd.Flags().BoolVar(&jsonFlag, "json", false, "With --list: print JSON")
 
 	var removeTagsCmd = &cobra.Command{
 		Use:   "remove-tags [id_or_file] [tags...]",
@@ -951,7 +959,7 @@ Examples:
 	var validateAll bool
 	var validateCmd = &cobra.Command{
 		Use:   "validate [id_or_file_or_path]",
-		Short: "Validate a concept's frontmatter, or a whole bundle",
+		Short: "Check a concept's frontmatter, or a whole bundle",
 		Long: `Validate concept frontmatter. There are two different checks, because
 okfw's schema is deliberately stricter than OKF requires.
 
@@ -1057,7 +1065,7 @@ Examples:
 
 	var gqBacklinksCmd = &cobra.Command{
 		Use:   "backlinks <id>",
-		Short: "Find all notes linking to a node",
+		Short: "Find all notes that link to a node",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
@@ -1145,8 +1153,8 @@ Examples:
 			return nil
 		},
 	}
-	gqClusterCmd.Flags().IntVar(&graphQueryDepthFlag, "depth", 0, "Maximum BFS depth (0 = unlimited)")
-	gqClusterCmd.Flags().IntVarP(&graphQueryLimitFlag, "limit", "l", 10, "Maximum number of nodes")
+	gqClusterCmd.Flags().IntVar(&graphQueryDepthFlag, "depth", 0, "Maximum hops from the concept (0 = unlimited)")
+	gqClusterCmd.Flags().IntVarP(&graphQueryLimitFlag, "limit", "l", 10, "Maximum number of concepts")
 
 	var gqTagCmd = &cobra.Command{
 		Use:   "tag <tag>",
@@ -1183,7 +1191,7 @@ Examples:
 
 	var gqDanglingCmd = &cobra.Command{
 		Use:   "dangling",
-		Short: "Find edges pointing to non-existent notes",
+		Short: "Find links to notes that do not exist",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := config.Discover("")
@@ -1256,7 +1264,7 @@ Example client configuration (Claude Code):
 			return server.serve(os.Stdin)
 		},
 	}
-	mcpCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "Serve only the search, read and graph tools")
+	mcpCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "Serve only the search, read and graph tools, with shorter instructions; create and update are refused")
 
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(initCmd)
@@ -1273,12 +1281,15 @@ Example client configuration (Claude Code):
 	rootCmd.AddCommand(graphQueryCmd)
 	rootCmd.AddCommand(exportCmd)
 	rootCmd.AddCommand(setProjectCmd)
+	// Declared here rather than left to cobra, whose default help text is
+	// "version for okfw".
+	rootCmd.Flags().BoolP("version", "v", false, "Print the version and exit")
 	rootCmd.AddCommand(backlinksCmd)
 	rootCmd.AddCommand(dailyCmd)
 	rootCmd.AddCommand(addTagsCmd)
 	rootCmd.AddCommand(removeTagsCmd)
-	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check the whole bundle for OKF conformance (permissive, spec section 11)")
-	validateCmd.Flags().BoolVar(&validateAll, "all", false, "Apply the strict okfw schema to every concept in the bundle")
+	validateCmd.Flags().BoolVar(&validateOKF, "okf", false, "Check only OKF v0.3 conformance (section 11.1): permissive, and works on any bundle directory, with or without .okfw")
+	validateCmd.Flags().BoolVar(&validateAll, "all", false, "Validate every concept against the strict okfw schema, and the bundle metadata")
 	for _, c := range fileCommands() {
 		rootCmd.AddCommand(c)
 	}
@@ -2194,4 +2205,12 @@ func listDailyNotes(cfg *config.Config, weekOnly, monthOnly, asJSON bool) error 
 	}
 
 	return nil
+}
+
+// deprecateFlag marks a flag deprecated: pflag hides it from help and prints
+// msg to stderr when it is used, by its long name or its shorthand.
+func deprecateFlag(cmd *cobra.Command, name, msg string) {
+	if err := cmd.Flags().MarkDeprecated(name, msg); err != nil {
+		panic(err)
+	}
 }

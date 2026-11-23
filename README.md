@@ -132,7 +132,7 @@ The layout inside `.okfw/` is fixed:
 
 | Path | Description |
 |------|-------------|
-| `*.md` (top level) | Concept markdown (subdirectories via `--path` or `--project`) |
+| `*.md` (top level) | Concept markdown (subdirectories via `--path`) |
 | `daily/YYYY/MM/` | Daily notes |
 | `.ephemeral/` | Export scratch dir |
 | `.gitignore` | Ignores `.ephemeral/` |

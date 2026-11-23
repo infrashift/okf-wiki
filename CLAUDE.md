@@ -44,6 +44,7 @@ make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works beca
 make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
 make build-darwin-arm64 # Cross-compiles bin/okfw-darwin-arm64 (macOS, Apple silicon)
 make man             # Man pages from the command tree (okfw man) into bin/man/man1
+make docs-flags      # Regenerate the docs site's CLI Flags page from the command tree
 make build VERSION=v2026.10.0 # Overrides the stamped version (default: git describe --tags)
 make dist            # dist/: okfw-<version>-{linux-amd64,linux-arm64,darwin-arm64}.tar.gz (bin/okfw + share/man/man1), SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
 make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
@@ -65,7 +66,12 @@ go test ./... -count=1       # Run all tests
 break shows. The macOS binary is cosign-signed but not Apple-notarized.
 Man pages are generated from `rootCmd()` (`okfw man`, `cobra/doc`), never
 hand-written, so they cannot drift; `TestEveryCommandHasAManPage` checks every
-command gets one.
+command gets one. The docs site's flag reference
+(`reference/cli-flags.md`) is generated the same way (`genFlagReference`,
+`make docs-flags`); `TestCLIFlagReferenceIsCurrent` fails when it is stale, so
+improve a flag's help text in the Go source, never on the page.
+`TestEveryFlagHasHelpText` holds help text to one style: present, capitalized,
+no trailing period.
 
 **The ZMakefile mirrors the Makefile** for [zmake](https://github.com/infrashift/zmake)
 (modern syntax: `@name:` tasks, no `.PHONY`; zmake reads it before the
@@ -118,8 +124,13 @@ file holds both spellings — but only in a concept okfw wrote
 
 Placement: an explicit `--path` wins, else an explicit `--project` name as a
 top-level folder, else the wiki root. Concepts may live in any directory and
-are still found by id (lookup scans the whole bundle). `project` is optional
-metadata, never auto-derived.
+are still found by id (lookup scans the whole bundle). **`project` is
+deprecated** (after v2026.11.3): `create`/`search --project` and `set-project` still
+work but warn and are hidden from help, and MCP no longer advertises `project`
+or `set_project` (it still honours them). They date from one global `~/okfw`
+bundle, where `project` (then derived from the git repo) told repositories
+apart; per-repo wikis made that a directory's job, which every OKF consumer
+reads and `x-okfw-project` is not. Reads keep the key. Do not re-promote it.
 Kinds (`kind`): `note` (default), `daily-note`, `issue`. OKF's required
 free-form `type` field is also written on every concept, and `--type` filters
 on it.
@@ -277,7 +288,7 @@ and confuse; `x-okfw-` is the spec's own form), or okfw-owned keys inside
 
 ## Wiki Layout (fixed, inside `.okfw/`)
 
-- Concept markdown at the top level (subdirs via `--path` or an explicit `--project`); `daily/YYYY/MM/` for daily notes
+- Concept markdown at the top level (subdirs via `--path`); `daily/YYYY/MM/` for daily notes
 - `.ephemeral/` (export scratch, `config.EphemeralDir`) is the only generated directory, gitignored via `.okfw/.gitignore` written by `okfw init`. It is dot-named because v0.3 §3.2 leaves only dot-named paths outside the bundle: as `ephemeral/` every exported copy was a second concept to any other consumer. Walks still skip a legacy root `ephemeral/` until `okfw migrate` removes it. There is no search index and no graph database: both were removed, and `okfw init` must not reintroduce them to the ignore list
 - `okfw connect` / `okfw root` verify or print the discovered wiki; commands error with "run `okfw init`" advice when none is found
 - No concept is ever written into a dot-directory, where it would be invisible to every walk (`SkipWalkDir` skips dot-directories): `--path` refuses any segment starting with `.`, and a `--project` name that cannot be a folder (a leading `.`, for one) places the concept at the wiki root while still recording `project`

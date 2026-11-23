@@ -2,7 +2,7 @@
 # zmake reads it before this file. Change both together: TestZMakefileMatches
 # Makefile checks they declare the same tasks, and `make zmake-check` that each
 # task's recipe is the same under make and zmake.
-.PHONY: build build-linux-amd64 build-linux-arm64 build-darwin-arm64 man zmake-check dist signing-key sign verify-signatures test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev-up docs-dev-down docs-build build-image run-container stop-container
+.PHONY: build build-linux-amd64 build-linux-arm64 build-darwin-arm64 man zmake-check dist signing-key sign verify-signatures test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev-up docs-dev-down docs-build docs-flags build-image run-container stop-container
 
 # Recipes use bash: zmake-check diffs with process substitution.
 SHELL=/bin/bash
@@ -135,7 +135,7 @@ verify-signatures:
 # a recipe changed in one fails this.
 ZMAKE ?= zmake
 ZMAKE_CHECK_TASKS=build build-linux-amd64 build-linux-arm64 build-darwin-arm64 man dist signing-key sign verify-signatures \
-	test test-race lint fmt install ui-check integration-test e2e clean tidy docs-dev-up docs-dev-down docs-build \
+	test test-race lint fmt install ui-check integration-test e2e clean tidy docs-dev-up docs-dev-down docs-build docs-flags \
 	build-image run-container stop-container
 zmake-check:
 	@command -v $(ZMAKE) >/dev/null || { echo "zmake-check needs zmake: https://github.com/infrashift/zmake/releases" >&2; exit 1; }
@@ -221,6 +221,11 @@ docs-dev-down:
 
 docs-build:
 	cd docs && $(BUN) install --frozen-lockfile && $(BUN) --bun run build
+
+# The CLI Flags page is generated from the command tree, like the man pages;
+# TestCLIFlagReferenceIsCurrent fails when it is stale.
+docs-flags:
+	OKFW_UPDATE_DOCS=1 go test ./cli/cmd/okfw -run '^TestCLIFlagReferenceIsCurrent$$' -count=1
 
 build-image:
 	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) --build-arg VERSION=$(VERSION) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .

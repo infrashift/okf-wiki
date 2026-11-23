@@ -82,10 +82,8 @@ end
 local function build_search_args(opts, query)
     local args = { "search", "--json" }
 
-    if opts.project and opts.project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, opts.project)
-    end
+    -- --path scopes to one directory; opts.project (deprecated) warns once.
+    require("okfw")._dir_args(args, opts, "search")
     if opts.type and opts.type ~= "" then
         table.insert(args, "--type")
         table.insert(args, opts.type)
@@ -297,8 +295,10 @@ M.live_search = function(opts)
     })
 end
 
--- Browse by project
+-- Browse by project. Deprecated, like project itself: scope a search to a
+-- directory with search({ path = "<dir>" }) instead.
 M.projects = function(opts)
+    require("okfw")._deprecated("the projects picker", "search one directory with search({ path = \"<dir>\" })")
     M.search(vim.tbl_extend("force", opts or {}, {
         prompt_title = "Concepts by Project",
     }))

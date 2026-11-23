@@ -11,20 +11,17 @@ okfw init                       # Creates .okfw/ at the project root
 # Every command discovers the wiki automatically from any subdirectory
 okfw connect                    # Verify: prints the wiki path and a summary
 
-# Create a note (project context optional)
+# Create a note (at the wiki root)
 okfw create "My first idea"
-
-# Create a note with an explicit project
-okfw create "Project-specific idea" --project my-project
 
 # Create with a one-sentence OKF description
 okfw create "OAuth notes" -d "How our OAuth flow works"
 
-# Place a note in a specific subdirectory of the wiki
-okfw create "Spec draft" --path projects/okf
+# Place a note in a subdirectory of the wiki (created if missing)
+okfw create "Spec draft" --path specs/auth
 
-# Set project on an existing note
-okfw set-project path/to/note.md my-project
+# Move an existing note into a directory, repairing links to it
+okfw move path/to/note.md specs/auth/
 
 # Add tags to a concept
 okfw add-tags path/to/note.md golang          # Add a single tag
@@ -42,11 +39,11 @@ okfw log                                  # Generate OKF log.md from git history
 
 # Search notes
 okfw search "authentication"              # Full-text search
-okfw search --project my-project          # Filter by project
 okfw search --tag golang --tag api        # Filter by tags
 okfw search --kind issue                  # Filter by structured kind
 okfw search --type note                   # Filter by the free-form OKF type
-okfw search "auth" --project my-project   # Combined search
+okfw search --path specs                  # Only the specs/ directory
+okfw search "auth" --path specs --tag api # Combined search
 okfw search --json                        # JSON output for tooling
 
 # Generate graph visualization (search and the graph read the files directly;
