@@ -44,7 +44,7 @@ const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown 
 - Search before you derive or write: okfw_search. Weigh each hit by trust, status and stale.
 - Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
 - Write one idea per concept, with a one-sentence description and at least one link, [Title](/dir/file.md) from the wiki root. Set type, kind, status and provenance in the okfw_create call itself.
-- status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it. Custom keys go under x:.
+- status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it, with superseded_by naming the replacement. Custom keys are named x-<producer>-<name>.
 - Never edit index.md or log.md; okfw generates them.
 - Results are capped: truncated or next_offset means there is more.`
 
@@ -267,17 +267,37 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 	return resp
 }
 
-// instructions returns mcpInstructions plus this wiki's top-level directories,
-// so the first listing an agent opens is one it chose rather than guessed. With
-// no wiki yet, the static text alone is still correct.
+// maxBundleDescription bounds the bundle description quoted in the
+// instructions, which ride in the agent's context all session.
+const maxBundleDescription = 240
+
+// instructions returns mcpInstructions plus what this wiki is — its OKF v0.3
+// section 8.1 title and description, the sentence an agent is meant to choose
+// a bundle by — and its top-level directories, so the first listing an agent
+// opens is one it chose rather than guessed. With no wiki yet, the static text
+// alone is still correct.
 func (s *mcpServer) instructions() string {
 	cfg, err := s.cfg()
 	if err != nil {
 		return mcpInstructions
 	}
+	out := mcpInstructions
+	if meta, err := bundle.ReadBundleMeta(cfg.RootPath); err == nil && (meta.Title != "" || meta.Description != "") {
+		line := "\n\nThis wiki"
+		if meta.Title != "" {
+			line += ", " + strings.Join(strings.Fields(meta.Title), " ")
+		}
+		if d := strings.Join(strings.Fields(meta.Description), " "); d != "" {
+			if len(d) > maxBundleDescription {
+				d = strings.TrimSpace(d[:maxBundleDescription]) + "…"
+			}
+			line += ": " + d
+		}
+		out += line
+	}
 	entries, err := os.ReadDir(cfg.RootPath)
 	if err != nil {
-		return mcpInstructions
+		return out
 	}
 	var dirs []string
 	for _, e := range entries {
@@ -287,14 +307,14 @@ func (s *mcpServer) instructions() string {
 		dirs = append(dirs, e.Name()+"/")
 	}
 	if len(dirs) == 0 {
-		return mcpInstructions
+		return out
 	}
 	more := ""
 	if len(dirs) > maxInstructionDirs {
 		more = fmt.Sprintf(" … %d more", len(dirs)-maxInstructionDirs)
 		dirs = dirs[:maxInstructionDirs]
 	}
-	return mcpInstructions + "\n\nThis wiki's top-level directories: " + strings.Join(dirs, ", ") + more + "."
+	return out + "\n\nThis wiki's top-level directories: " + strings.Join(dirs, ", ") + more + "."
 }
 
 func (s *mcpServer) cfg() (*config.Config, error) {

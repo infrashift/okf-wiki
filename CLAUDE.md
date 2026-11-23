@@ -1,7 +1,9 @@
 # OKF Wiki (`okfw`)
 
 A Go CLI for managing a local-first, file-based knowledge base that conforms to
-the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md).
+the [Open Knowledge Format (OKF)](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md)
+v0.3. (The spec moved: the `knowledge-catalog/okf/SPEC.md` copy is frozen at
+v0.2, and `GoogleCloudPlatform/open-knowledge-format` is deprecated.)
 Concepts are markdown files with YAML frontmatter, stored in a per-project OKF
 **bundle**: a `.okfw/` directory at the project root, created by `okfw init`
 and discovered by every command walking upward from the cwd (like `.git`).
@@ -81,58 +83,90 @@ Kinds (`kind`): `note` (default), `daily-note`, `issue`. OKF's required
 free-form `type` field is also written on every concept, and `--type` filters
 on it.
 Links: vanilla markdown links to bundle-relative (`/dir/file.md`) or relative
-(`./file.md`) paths, **and** the path-valued frontmatter fields of OKF §6.2
-(`resource`, `sources[].resource`, `computation`, `executor.resource`,
-`attester.resource`) when they name a `.md` file in the bundle
-(`graph.NormalizeRef`). Every link consumer handles both: the graph, delete's
-inbound report, move at both ends, export and `validate --okf`.
-`Concept.PathRefs` reads the five fields and `bundle.pathRefNodes` rewrites
+(`./file.md`, `file.md`) paths, **and** the path-valued frontmatter fields of
+OKF §6.2 (`resource`, `sources[].resource`, `computation`, `executor.resource`,
+`attester.resource`, `superseded_by`) when they name a `.md` file in the bundle
+(§6.4: both are graph edges). Every link consumer handles both: the graph,
+delete's inbound report, move at both ends, export and `validate --okf`.
+`Concept.PathRefs` reads the six fields and `bundle.pathRefNodes` rewrites
 them; `TestPathRefFieldsMatchTheRewriter` keeps the two lists in step.
-§6.2 never says what a frontmatter path is relative to, so okfw reads it by
-prefix (`graph.RefLink`): `./` and `../` resolve from the concept's directory,
-and any other path, bare `skills/x.md` included, from the bundle root. That is
-the one reading under which every example agrees: §6.2's
-`../computations/revenue.md`, Appendix A's `references/skills/run-on-bq.md`
-written from `computations/`, and all 12 paths in the upstream `acme_retail`
-bundle. It is the rule proposed upstream (issues #245, #408), and OKF4net
-adopted it. Reading bare paths from the concept's directory, as okfw first
-did, left the spec's own example dangling. Body links keep §6.1's rule, where
-a bare path is relative, so `RewritePathRefs` translates between the two
-spellings: move and export pass it their body-link closures.
 
-**okfw targets OKF v0.2** (`okf_version: "0.2"`, stamped on the bundle-root
+**Path resolution is v0.3 §6's one rule, for links and path fields alike**
+(`graph.NormalizeRef`): a scheme is external, a leading `/` resolves from the
+bundle root, anything else from the directory of the file holding it. okfw
+v0.2 read a bare *frontmatter* path from the bundle root instead — §6.2 was
+silent then, that reading resolved the v0.2 spec's own examples, and it was
+proposed upstream (#245, #408). v0.3 ruled the other way and lists it as a
+breaking change (§13.1), so do not reintroduce the root reading. It survives
+only as §12.1's compatibility fallback (`graph.ResolveRef`, wired through
+`bundle.RefExists`): in a bundle declaring `okf_version` 0.2 or none, a bare
+value that names no file from its directory is tried from the root. Since the
+two spellings now agree, move and export hand path fields to their body-link
+closures as written. okfw's writers spell an in-bundle path field with a
+leading `/`, which survives moving the referring concept. `okfw migrate`
+prefixes the bare root-relative paths a v0.2 bundle holds, *before* it stamps
+`okf_version: "0.3"` — the version decides how a bare path reads, so nothing
+but migrate ever moves it (`WriteIndexFiles` keeps the root frontmatter byte
+for byte).
+
+**okfw targets OKF v0.3** (`okf_version: "0.3"`, stamped on the bundle-root
 `index.md` only — the sole place the spec permits frontmatter in an index file).
+That root frontmatter is bundle metadata (§8.1): `okf_version`, `title`,
+`description` (one sentence on what the bundle covers and when to use it, which
+an agent holding several bundles selects by), `license`, and `x-*` keys. A
+producer that regenerates `index.md` MUST keep it, so `rootFrontmatter` copies
+it verbatim. Writers: `okfw init --title/--description/--license` (title
+defaults to the project directory) and `okfw set-bundle-meta`. okfw requires a
+title and a description of the bundles it authors (`CheckBundleMeta`, strict
+`validate --all` only); the MCP `initialize` instructions quote them.
 Three optional metadata families are implemented, each with a writer, because a
 field nothing can write is indistinguishable from one that does not exist —
 `resource` sat modelled, schema'd, and documented for months with no way to set
 it, and that is the mistake to avoid repeating:
 
-- **Lifecycle** (§5.4–5.5): `status: draft|stable|deprecated` (absent ⇒ `stable`)
-  and `stale_after`, an absolute instant; stale means `now >= stale_after`
-  (`config.IsStale`, the one implementation). Writers: `set-lifecycle`,
-  `set-stale-after`. Filter: `search --stale`.
-- **Timestamps** (§5): every timestamp-valued key — `stale_after`,
-  `generated.at`, `verified[].at`, `sources[].last_modified`, `usage_window`,
-  and okfw's own `created`/`timestamp` — is an ISO 8601 datetime with an
-  explicit offset (`#DateTime` in the schema, `dateTimeRe` in Go; keep them in
-  step). A bare date is rejected on read and never treated as stale — the spec
-  moved off dates because one names a different instant in every timezone, and a
-  midnight-UTC fallback would bring that back. Writers accept a bare date and
-  store midnight UTC; `okfw migrate` upgrades the ones older okfw wrote.
-  Validation decodes frontmatter through `yaml.Node` and keeps timestamp scalars
-  as written: decoded into `map[string]interface{}`, yaml.v3 turns an unquoted
-  `2026-12-31` into a `time.Time` that reaches CUE as a valid datetime.
-- **Trust** (§5.2–5.3): `generated{by,at}` and `verified[]{by,at}`. A bare
-  `verified` mapping MUST normalize to a one-element list — done in
-  `VerifiedList.UnmarshalYAML`, pinned by a test. Trust tier keys **strictly** on
-  the `human:` actor prefix, so `team:` is machine-confirmed, not human-reviewed.
-  Because of that, `generated.by`/`verified[].by` must follow §7 exactly
-  (`actorRe` in Go, `#Actor` in CUE — one test table runs both): a misspelt
-  `Humna:`/`Human:` demoted a review without a word. Reads stay lenient, so a
-  third-party `team:` still loads. `sources[].author` is free-form, since the
-  spec's own examples use `team:` there.
-  Writers: `verify`, `set-generated`. `generated.at` mirrors `timestamp`; one code
-  path writes both (`syncGeneratedAt`) and validation rejects a disagreement.
+- **Lifecycle** (§5.4–5.5): `status: draft|stable|deprecated` (absent ⇒
+  `stable`; an unknown value is kept raw and is *not* current),
+  `superseded_by` (a path field naming the replacement, meaningful only under
+  `deprecated`) and `stale_after`, an absolute instant; stale means
+  `now >= stale_after`, and a value that does not parse is stale, never fresh
+  (`config.IsStale`, the one implementation). Writers: `set-lifecycle
+  [--superseded-by]` (leaving `deprecated` drops `superseded_by`),
+  `set-stale-after`. Filters: `search --stale`, and `search --current`, which
+  drops deprecated and unknown-status hits and gives a deprecated hit's
+  replacement in its place (§5.4's SHOULD).
+- **Timestamps** (§5): an OKF timestamp — `stale_after`, `generated.at`,
+  `verified[].at`, `sources[].last_modified`, `usage_window` — is an RFC 3339
+  date-time with an offset or a full-date meaning UTC midnight
+  (`#Timestamp`/`ParseTimestamp`); a date-time without an offset is invalid.
+  okfw's own `created`/`timestamp` keep the date-time-only rule
+  (`#DateTime`/`dateTimeRe`). Keep each CUE pattern in step with its regexp.
+  okfw rejected bare dates under v0.2, because a date named a different instant
+  in every timezone; v0.3 pins it to UTC midnight, which removed the objection,
+  so do not bring the rejection back. Writers still store the date-time form.
+  Validation decodes frontmatter through `yaml.Node` and keeps timestamp
+  scalars as written: decoded into `map[string]interface{}`, yaml.v3 turns an
+  unquoted `2026-12-31` into a `time.Time` that reaches CUE re-rendered.
+- **Trust** (§5.2–5.3): `generated{by,at}` and `verified[]{by,at}` (both keys
+  REQUIRED in an event; one missing either is ignored). A bare `verified`
+  mapping MUST normalize to a one-element list — done in
+  `VerifiedList.UnmarshalYAML`, pinned by a test. The tier counts only
+  **current** events, `at >= generated.at` (`Concept.CurrentVerifications`): a
+  review of text that was since rewritten is history. It keys **strictly** on
+  the `human:` scheme, so `team:` and any unknown scheme are machine-confirmed.
+  Actors follow §7: `<scheme>:<id>` with a lowercase scheme, or
+  `<producer>/<version>` (`actorRe` in Go, `#Actor` in CUE — one test table
+  runs both). Since any scheme is now valid, a misspelt `humna:` would pass the
+  shape check and silently demote a review, so `ValidateActor` also refuses a
+  scheme within edit distance 2 of `human` (Go-only; CUE has no edit distance,
+  so `ParseAndValidate` runs it before the schema). Reads stay lenient.
+  `sources[].author` follows §7 too, but only earns a warning.
+  **`generated.at` is the last meaningful change to the content and does not
+  mirror `timestamp`.** Only a body write through okfw (`TouchContentChange`:
+  MCP `append`/`set_body`) and `set-generated` (which takes `--at`) move it;
+  tag, lifecycle, source and verify edits and the link repair `move` does only
+  bump `timestamp`. okfw v0.2 kept the two equal on every write, which under
+  v0.3 would demote a human review whenever someone added a tag — do not
+  re-couple them.
 - **Provenance** (§5.1): `sources[]` (`resource` required in-entry) plus a sibling
   `usage_window`. Writer: `add-source`. `sources[].id` is the join key for
   `[^id]` body footnotes — keyed, not positional, so reordering cannot silently
@@ -148,22 +182,29 @@ Attested Computation (§10) is deliberately not *implemented* — the spec still
 defers its receipt/verdict wire formats, attester ABI, and sandboxing (§12) — but
 its keys (`runtime`, `parameters`, `computation`, `executor`, `attester`) are
 declared in the schema so okfw can hold such a concept; a closed schema that
-rejected them left no workaround, since `x:` cannot carry spec-defined keys.
+rejected them left no workaround, since an extension key cannot carry a
+spec-defined one.
 `type: Attested Computation` requires `runtime` (§10.2), enforced in
 `ValidateBusinessRules` because a CUE comprehension on the abstract `type` breaks
 the schema-compiles check.
 
 **Two deliberate divergences from OKF, both load-bearing — do not "fix" them
 toward the spec.** okfw requires six fields (`id`, `title`, `type`, `tags`,
-`created`, `timestamp`) where §11 requires only a non-empty `type`, and
-`#Concept` is a *closed* CUE definition that rejects undeclared top-level keys
-where §4.1 says consumers MUST NOT. The trade buys a hard guarantee about the
-bundles okfw authors. The open `x:` block is the escape hatch that keeps a closed
-schema liveable: anything under `x:` passes through untouched, and it is the only
-way to attach custom metadata. The consequence is that `okfw validate` rejects
-conformant *third-party* bundles, so there are two distinct checks:
-`validate`/`validate --all` apply the strict schema, `validate --okf` implements
-the permissive §11 conformance check and nothing more.
+`created`, `timestamp`) where §4.1 requires only a non-empty `type`, and
+`#Concept` is a *closed* CUE definition that rejects undeclared keys where §4.1
+and §11.2 say consumers MUST NOT. None of the six was deprecated by v0.3
+(`title` and `tags` went from "recommended" to "optional"). The trade buys a
+hard guarantee about the bundles okfw authors. Two escape hatches keep a
+closed schema liveable: every mapping accepts `x-*` keys (`#Ext`), the
+namespace v0.3 §4.1 promises never to claim and the one producers SHOULD use
+(`x-<producer>-<name>`), and the v0.2-era open `x:` block still passes
+anything through. The consequence is that `okfw validate` rejects conformant
+*third-party* bundles, so there are two distinct checks:
+`validate`/`validate --all` apply the strict schema (plus the bundle
+metadata), `validate --okf` implements the permissive §11.1 conformance check
+and nothing more — and needs no `.okfw`, so it can check any bundle directory.
+The divergences are explained for users in
+`docs/src/content/docs/reference/okf-divergences.md`; keep that page in step.
 
 **The divergences bind writes and `validate`, never reads.** `ParseFrontmatter`
 is lenient — a field with the wrong shape is left at its zero value rather than
@@ -173,6 +214,14 @@ graph and the listings. Strict decoding on reads made such a concept vanish from
 every view, so the one tool that could report it could not find it. Strictness
 lives in `ParseAndValidate`. `index-md`/`migrate` adopt an unmarked `index.md`
 only in a directory holding a concept okfw wrote (one with an `id`).
+Reads also apply v0.3's value rules (§11.2): null, `""` and `[]` mean absent,
+one item stands for a one-item list (`StringList`, `SourceList`,
+`VerifiedList`), and a scalar `tags` is one tag, never split at commas. A
+`.md` file with no frontmatter or no `type` is not a concept (§3.2,
+`config.IsConcept`): search, the graph and the listings skip it, `validate`
+warns. Duplicate keys are refused (`config.DuplicateKeys`): yaml.v3 keeps the
+last one silently when decoding into a struct or a node. Walks never follow a
+symbolic link out of the bundle (`bundle.Within`, `pkg/bundle.DirFS`).
 
 **okfw has no task tracking.** It once carried `status`/`due`/`completed`/
 `priority` for a `todo` kind, where `status` collided with the field v0.2 spec'd
@@ -182,12 +231,13 @@ older concepts (`status: closed` becomes `deprecated`; open/in_progress lose
 `status` entirely, since absent means stable). The free-form `type` is left
 alone, since the spec does not register type values. Do not reintroduce todo
 fields, an `okfw:` block (the name reads as "the OKF fields" and confuses), or
-okfw-owned keys inside `x:` (that block belongs to the user).
+okfw-owned keys inside `x:` or under `x-okfw-*` (extension keys belong to the
+user).
 
 ## Wiki Layout (fixed, inside `.okfw/`)
 
 - Concept markdown at the top level (subdirs via `--path` or an explicit `--project`); `daily/YYYY/MM/` for daily notes
-- `ephemeral/` (export scratch) is the only generated directory, gitignored via `.okfw/.gitignore` written by `okfw init`. There is no search index and no graph database: both were removed, and `okfw init` must not reintroduce them to the ignore list
+- `.ephemeral/` (export scratch, `config.EphemeralDir`) is the only generated directory, gitignored via `.okfw/.gitignore` written by `okfw init`. It is dot-named because v0.3 §3.2 leaves only dot-named paths outside the bundle: as `ephemeral/` every exported copy was a second concept to any other consumer. Walks still skip a legacy root `ephemeral/` until `okfw migrate` removes it. There is no search index and no graph database: both were removed, and `okfw init` must not reintroduce them to the ignore list
 - `okfw connect` / `okfw root` verify or print the discovered wiki; commands error with "run `okfw init`" advice when none is found
 - No concept is ever written into a dot-directory, where it would be invisible to every walk (`SkipWalkDir` skips dot-directories): `--path` refuses any segment starting with `.`, and a `--project` name that cannot be a folder (a leading `.`, for one) places the concept at the wiki root while still recording `project`
 

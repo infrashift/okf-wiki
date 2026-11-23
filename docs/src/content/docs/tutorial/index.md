@@ -159,14 +159,14 @@ project:
         2026-06-26-friday--019f04a10000.md
   any-other-folder/            Concepts may live in any directory you choose
     another-concept--019f04b80000.md
-  ephemeral/                   Export scratch dir (gitignored)
-  .gitignore                   Ignores ephemeral/
+  .ephemeral/                   Export scratch dir (gitignored)
+  .gitignore                   Ignores .ephemeral/
 ```
 
 Every `okfw` command **discovers** the wiki automatically by searching upward
 from the current working directory (the way git finds `.git`), so commands
 work from any subdirectory of the project. Concept markdown is meant to be
-committed with the project; only the `ephemeral/` export directory is
+committed with the project; only the `.ephemeral/` export directory is
 gitignored. There is no search index or graph database to maintain: search and
 the link graph are computed from the files on every call.
 
@@ -551,7 +551,7 @@ okfw set-stale-after infra/pricing--019f0494 2026-12-31T00:00:00Z
 ```
 
 A concept is stale once now is on or after that instant (a bare date such as
-`2026-12-31` is accepted and stored as midnight UTC). `okfw search --stale`
+`2026-12-31` means the start of that day in UTC). `okfw search --stale`
 lists everything that has expired, so review is a query rather than a memory
 exercise.
 
@@ -562,9 +562,11 @@ okfw verify infra/pricing--019f0494
 ```
 
 This appends an entry to the concept's `verified` list, defaulting to
-`human:<your login>`. A concept with no entries is *unverified*; one verified
-only by automation is *machine-confirmed*; one a human signed off on is
-*human-reviewed*.
+`human:<your login>`. A concept with no current entries is *unverified*; one
+verified only by automation is *machine-confirmed*; one a human signed off on
+is *human-reviewed*. "Current" means made at or after the concept's last
+meaningful change (`generated.at`): once the content is rewritten, an earlier
+review no longer counts, because nobody reviewed the new text.
 
 ### Cite where the knowledge came from
 
@@ -590,7 +592,16 @@ okfw validate --okf    # permissive OKF conformance check
 ```
 
 If you are opening a wiki created by an older okfw, run `okfw migrate` first: it
-removes the retired task-tracking fields and upgrades bare dates to datetimes.
+removes the retired task-tracking fields and moves the bundle to OKF v0.3 (see
+[Migrating to OKF v0.3](/okf-wiki/reference/migrating-to-okf-v0-3/)).
+
+### Retire a concept instead of deleting it
+
+```bash
+okfw set-lifecycle infra/old-method--019f0494 deprecated \
+    --superseded-by infra/new-method--019f0512
+okfw search "method" --current   # the deprecated one gives way to its replacement
+```
 
 
 
@@ -726,7 +737,7 @@ okfw index-md
 | `okfw set-resource <ref> <uri>` | Set the described asset's URI |
 | `okfw set-generated <ref>` | Record who generated a concept |
 | `okfw graph-query <query>` | Query the link graph (`backlinks`, `cluster`, `tag`, `dangling`) |
-| `okfw export [path]` | Export a portable subset to `ephemeral/` |
+| `okfw export [path]` | Export a portable subset to `.ephemeral/` |
 | `okfw index-md [path]` | Generate OKF `index.md` directory listings |
 | `okfw log [path]` | Generate OKF `log.md` from git history |
 | `okfw root` | Print the discovered `.okfw` path |

@@ -88,16 +88,16 @@ that.
 │           └── 2026-06-26-friday--019f04a10000.md
 ├── any-other-folder/              # Concepts may live in any directory you choose
 │   └── refined-concept--019f04b80000.md
-├── ephemeral/                     # Export scratch dir (gitignored)
-└── .gitignore                     # Ignores ephemeral/
+├── .ephemeral/                     # Export scratch dir (gitignored)
+└── .gitignore                     # Ignores .ephemeral/
 ```
 
 Concept markdown is meant to be **committed with the project**; the only
-generated directory, `ephemeral/`, is covered by the `.gitignore` that
+generated directory, `.ephemeral/`, is covered by the `.gitignore` that
 `okfw init` writes. There is no search index or graph database: search and the
 link graph are computed from the files on every call.
 
 `index.md` and `log.md` are **reserved filenames** that carry no concept
 frontmatter. `index.md` is a per-directory listing for progressive disclosure
-(the root `index.md` carries `okf_version: "0.2"`), and `log.md` is an update
+(the root `index.md` carries `okf_version: "0.3"`), and `log.md` is an update
 history generated from git. Generate them with `okfw index-md` and `okfw log`.
