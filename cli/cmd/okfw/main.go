@@ -1682,17 +1682,15 @@ func runValidateOKF(cfg *config.Config, path string) error {
 		}
 		// Section 11.1 asks only for parseable YAML frontmatter, so a field of
 		// the wrong shape is not a violation here; `okfw validate` is strict.
-		z, err := config.ParseFrontmatter(content)
+		z, node, err := config.ParseFrontmatterNode(content)
 		if err != nil {
 			violations++
 			problems = append(problems, fmt.Sprintf("  ✗ %s: unparseable frontmatter (%v)", rel, err))
 			return nil
 		}
-		if fm, ferr := config.ExtractFrontmatter(content); ferr == nil {
-			if d := config.DuplicateKeys(fm); len(d) > 0 {
-				violations++
-				problems = append(problems, fmt.Sprintf("  ✗ %s: duplicate frontmatter key(s): %s (OKF section 4)", rel, strings.Join(d, ", ")))
-			}
+		if d := config.DuplicateKeysNode(node); len(d) > 0 {
+			violations++
+			problems = append(problems, fmt.Sprintf("  ✗ %s: duplicate frontmatter key(s): %s (OKF section 4)", rel, strings.Join(d, ", ")))
 		}
 		if !config.IsConcept(z) {
 			warnings++

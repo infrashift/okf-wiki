@@ -308,36 +308,45 @@ func (z *Concept) IsStale(now time.Time) bool { return IsStale(z.StaleAfter, now
 // in ParseAndValidate, which `okfw validate` and every writer use. Unparseable
 // YAML, or frontmatter that is not a mapping, is still an error.
 func ParseFrontmatter(content []byte) (*Concept, error) {
+	z, _, err := ParseFrontmatterNode(content)
+	return z, err
+}
+
+// ParseFrontmatterNode is ParseFrontmatter that also returns the frontmatter's
+// top-level mapping node (nil for an empty block), parsed once. A caller that
+// needs more from the YAML than the Concept fields — the duplicate-key check,
+// say — reads it from the node rather than parsing the text again: a second
+// parse doubled the cost of validate --okf on a large bundle.
+func ParseFrontmatterNode(content []byte) (*Concept, *yaml.Node, error) {
 	frontmatter, err := ExtractFrontmatter(content)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-
-	var z Concept
-	if err := yaml.Unmarshal(frontmatter, &z); err == nil {
-		z.adoptLegacy()
-		return &z, nil
-	}
-
 	var doc yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
-		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
 	if doc.Kind == 0 || len(doc.Content) == 0 {
-		return &Concept{}, nil
+		return &Concept{}, nil, nil
 	}
 	m := doc.Content[0]
-	if m.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("failed to parse frontmatter: not a mapping")
+	if m.Kind == yaml.ScalarNode && m.Tag == "!!null" {
+		return &Concept{}, nil, nil // an empty block parses as null: no fields
 	}
-	// Decode one key at a time, so a bad value costs only its own field.
-	z = Concept{}
-	for i := 0; i+1 < len(m.Content); i += 2 {
-		one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: m.Content[i : i+2]}
-		_ = one.Decode(&z)
+	if m.Kind != yaml.MappingNode {
+		return nil, nil, fmt.Errorf("failed to parse frontmatter: not a mapping")
+	}
+	var z Concept
+	if err := m.Decode(&z); err != nil {
+		// Decode one key at a time, so a bad value costs only its own field.
+		z = Concept{}
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: m.Content[i : i+2]}
+			_ = one.Decode(&z)
+		}
 	}
 	z.adoptLegacy()
-	return &z, nil
+	return &z, m, nil
 }
 
 // IsConcept reports whether parsed frontmatter makes a file a concept: OKF
@@ -376,6 +385,11 @@ func ExtractFrontmatter(content []byte) ([]byte, error) {
 	} else if len(rest) > 1 && rest[0] == '\r' && rest[1] == '\n' {
 		rest = rest[2:]
 	}
+	// An empty block closes on the very next line; there is no newline before
+	// that ---, so the search below would run on to the next one in the body.
+	if closesHere(rest) {
+		return []byte{}, nil
+	}
 
 	endIdx := bytes.Index(rest, []byte("\n---"))
 	if endIdx == -1 {
@@ -406,12 +420,16 @@ func ExtractBody(content []byte) string {
 		rest = rest[2:]
 	}
 
-	endIdx := bytes.Index(rest, []byte("\n---"))
-	if endIdx == -1 {
-		return ""
+	var body []byte
+	if closesHere(rest) {
+		body = rest[3:] // an empty block
+	} else {
+		endIdx := bytes.Index(rest, []byte("\n---"))
+		if endIdx == -1 {
+			return ""
+		}
+		body = rest[endIdx+4:]
 	}
-
-	body := rest[endIdx+4:]
 	// Skip the line ending after the closing ---
 	if len(body) > 1 && body[0] == '\r' && body[1] == '\n' {
 		body = body[2:]
@@ -530,30 +548,40 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 	if err != nil {
 		return nil, err
 	}
+	// One parse feeds every check below; each used to parse the text again,
+	// five times per concept in all.
+	var doc yaml.Node
+	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
+		return nil, fmt.Errorf("failed to parse frontmatter YAML: %w", err)
+	}
+	var m *yaml.Node
+	if doc.Kind != 0 && len(doc.Content) > 0 && doc.Content[0].Kind == yaml.MappingNode {
+		m = doc.Content[0]
+	}
 
-	if err := checkDuplicateKeys(frontmatter); err != nil {
+	if err := checkDuplicateKeysNode(m); err != nil {
 		return nil, err
 	}
-	if err := checkLegacyKeys(frontmatter); err != nil {
+	if err := checkLegacyKeysNode(m); err != nil {
 		return nil, err
 	}
 
 	// Before the schema, which reports a bad actor inside verified's
 	// mapping-or-list disjunction only as "empty disjunction", and one in
 	// generated.by by printing the regular expression it failed.
-	if err := checkActors(frontmatter); err != nil {
+	if err := checkActorsNode(m); err != nil {
 		return nil, err
 	}
 
-	// Validate raw YAML against schema
-	if err := ValidateConceptYAML(frontmatter); err != nil {
+	if err := validateConceptNode(&doc); err != nil {
 		return nil, err
 	}
 
-	// Parse into struct
 	var z Concept
-	if err := yaml.Unmarshal(frontmatter, &z); err != nil {
-		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+	if m != nil {
+		if err := m.Decode(&z); err != nil {
+			return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
+		}
 	}
 	z.adoptLegacy()
 
@@ -565,4 +593,13 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 	}
 
 	return &z, nil
+}
+
+// closesHere reports whether rest begins with a closing --- line.
+func closesHere(rest []byte) bool {
+	if !bytes.HasPrefix(rest, []byte("---")) {
+		return false
+	}
+	tail := rest[3:]
+	return len(tail) == 0 || tail[0] == '\n' || bytes.HasPrefix(tail, []byte("\r\n"))
 }

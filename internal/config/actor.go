@@ -73,12 +73,15 @@ func levenshtein(a, b string) int {
 // left for the schema to report. sources[].author also follows section 7, but
 // okfw only warns about it (ActorWarnings): the spec's own example bundles
 // hold free-form authors.
-func checkActors(frontmatter []byte) error {
+func checkActorsNode(m *yaml.Node) error {
+	if m == nil {
+		return nil
+	}
 	var doc struct {
 		Generated *Generated   `yaml:"generated"`
 		Verified  VerifiedList `yaml:"verified"`
 	}
-	if yaml.Unmarshal(frontmatter, &doc) != nil {
+	if m.Decode(&doc) != nil {
 		return nil
 	}
 	if g := doc.Generated; g != nil && g.By != "" {

@@ -19,6 +19,14 @@ func DuplicateKeys(frontmatter []byte) []string {
 	if err := yaml.Unmarshal(frontmatter, &doc); err != nil || len(doc.Content) == 0 {
 		return nil
 	}
+	return DuplicateKeysNode(doc.Content[0])
+}
+
+// DuplicateKeysNode is DuplicateKeys over an already parsed mapping node.
+func DuplicateKeysNode(m *yaml.Node) []string {
+	if m == nil {
+		return nil
+	}
 	var out []string
 	var walk func(n *yaml.Node, prefix string)
 	walk = func(n *yaml.Node, prefix string) {
@@ -43,12 +51,12 @@ func DuplicateKeys(frontmatter []byte) []string {
 			}
 		}
 	}
-	walk(doc.Content[0], "")
+	walk(m, "")
 	return out
 }
 
-func checkDuplicateKeys(frontmatter []byte) error {
-	if d := DuplicateKeys(frontmatter); len(d) > 0 {
+func checkDuplicateKeysNode(m *yaml.Node) error {
+	if d := DuplicateKeysNode(m); len(d) > 0 {
 		return fmt.Errorf("duplicate frontmatter key(s): %s (OKF section 4: producers MUST NOT write duplicate keys)", strings.Join(d, ", "))
 	}
 	return nil

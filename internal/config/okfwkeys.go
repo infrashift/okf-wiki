@@ -145,12 +145,8 @@ func UpgradeLegacyKeys(m *yaml.Node) []string {
 // checkLegacyKeys refuses, with the fix, a concept okfw wrote under the bare
 // key names. The closed schema would reject them too, but only as "field not
 // allowed", which does not say what to do.
-func checkLegacyKeys(frontmatter []byte) error {
-	var doc yaml.Node
-	if yaml.Unmarshal(frontmatter, &doc) != nil || len(doc.Content) == 0 {
-		return nil
-	}
-	if old := LegacyKeysToUpgrade(doc.Content[0]); len(old) > 0 {
+func checkLegacyKeysNode(m *yaml.Node) error {
+	if old := LegacyKeysToUpgrade(m); len(old) > 0 {
 		return fmt.Errorf("frontmatter uses okfw's pre-namespace keys (%s); okfw's keys are now x-okfw-*: run `okfw migrate`",
 			strings.Join(old, ", "))
 	}

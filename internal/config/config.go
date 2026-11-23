@@ -102,16 +102,21 @@ func LoadConceptSchema() (cue.Value, error) {
 
 // ValidateConceptYAML validates YAML frontmatter against the #Concept schema.
 func ValidateConceptYAML(frontmatter []byte) error {
-	schema, err := LoadConceptSchema()
-	if err != nil {
-		return err
-	}
-
 	var doc yaml.Node
 	if err := yaml.Unmarshal(frontmatter, &doc); err != nil {
 		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
 	}
-	data, err := frontmatterValue(&doc)
+	return validateConceptNode(&doc)
+}
+
+// validateConceptNode validates a parsed frontmatter document against the
+// #Concept schema.
+func validateConceptNode(doc *yaml.Node) error {
+	schema, err := LoadConceptSchema()
+	if err != nil {
+		return err
+	}
+	data, err := frontmatterValue(doc)
 	if err != nil {
 		return fmt.Errorf("failed to parse frontmatter YAML: %w", err)
 	}

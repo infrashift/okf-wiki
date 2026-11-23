@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here.
 
+## v2026.11.1 — 2026-11-23
+
+### Fixed
+- **`okfw validate --okf` passed a bundle whose root `index.md` frontmatter does not parse.** The unknown-key warning added in v2026.11.0 swallowed the parse failure. It is a conformance violation again (OKF v0.3 §11.1).
+- **An empty frontmatter block (`---` then `---`) failed conformance.** okfw read it as unclosed. It is a closed block with no `type`, so not a concept (§3.2), and validate only warns about it.
+- **`okfw validate --okf` is twice as fast again** (1.57 s → 0.89 s on 10,000 concepts). v2026.11.0's duplicate-key check parsed every file's YAML a second time, and strict validation parsed it five times. Both now parse once.
+- **Search and listing are about 15% faster** (10,000 concepts: 846 → 706 ms, 847 → 758 ms). The check that keeps reads inside the bundle resolved every path component on every file it opened. It now caches the answer per directory.
+
+These were found by benchmarking okfw against the OKF v0.3 reference implementation. okfw now gives the expected verdict on all 36 of its conformance fixtures.
+
 ## v2026.11.0 — 2026-11-23
 
 ### Added — man pages, macOS, zmake
