@@ -116,14 +116,15 @@ func (g *Graph) FindConnected(startID string, limit int, maxDepth int) []*Node {
 	if limit <= 0 {
 		limit = 10
 	}
-
-	startNode := g.nodes[startID]
-	if startNode == nil {
+	if g.nodes[startID] == nil {
 		return nil
 	}
+	return g.bfs(startID, limit, maxDepth, make(map[string]bool), make([]*Node, 0, limit))
+}
 
-	visited := make(map[string]bool)
-	result := make([]*Node, 0, limit)
+// bfs appends to result the nodes reachable from startID, breadth first, up
+// to limit nodes and maxDepth hops (0 = unbounded), skipping visited ones.
+func (g *Graph) bfs(startID string, limit, maxDepth int, visited map[string]bool, result []*Node) []*Node {
 	queue := []bfsItem{{id: startID, depth: 0}}
 
 	for len(queue) > 0 && len(result) < limit {
@@ -177,21 +178,44 @@ func (g *Graph) FindConnected(startID string, limit int, maxDepth int) []*Node {
 	return result
 }
 
-// FindAllConnected returns all connected components starting from any node.
+// FindAllConnected returns up to limit nodes covering the whole graph, a
+// connected component at a time. It starts from the most connected node, so
+// the default view is the busiest neighbourhood; once that component is
+// exhausted it continues from the most connected node not yet shown, and so on,
+// so a high enough limit reaches every node. maxDepth bounds each component's
+// search from its own start.
+//
+// It used to search from the most connected node only. A concept that links to
+// nothing and that nothing links to — common in a young wiki — could never be
+// shown at any limit, and `okfw export` silently left it out, although the
+// help promised "all concepts in a directory".
 func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 	if limit <= 0 {
 		limit = 10
 	}
-
 	if len(g.nodes) == 0 {
 		return nil
 	}
+	visited := make(map[string]bool)
+	result := make([]*Node, 0, min(limit, len(g.nodes)))
+	for len(result) < limit {
+		startID := g.mostConnected(visited)
+		if startID == "" {
+			break
+		}
+		result = g.bfs(startID, limit, maxDepth, visited, result)
+	}
+	return result
+}
 
-	// Start from the node with the most connections for a meaningful graph;
-	// among equals, the lowest id.
-	var startID string
-	maxConns := -1
+// mostConnected returns the unvisited node with the most live connections,
+// the lowest id among equals, or "" when every node is visited.
+func (g *Graph) mostConnected(visited map[string]bool) string {
+	startID, maxConns := "", -1
 	for _, id := range g.sortedIDs() {
+		if visited[id] {
+			continue
+		}
 		node := g.nodes[id]
 		// Live links only: a link to a missing concept connects nothing.
 		conns := len(node.Children)
@@ -208,8 +232,7 @@ func (g *Graph) FindAllConnected(limit int, maxDepth int) []*Node {
 			startID = id
 		}
 	}
-
-	return g.FindConnected(startID, limit, maxDepth)
+	return startID
 }
 
 // Edge represents a directed edge in the graph.

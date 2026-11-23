@@ -7,6 +7,9 @@ All notable changes to this project are documented here.
 ### Added
 - **`okfw mcp --read-only`** serves only the search, read and graph tools, with instructions to match, for an agent that only looks things up. It cuts the context the server costs on every turn by about 45% (6.4 KB → 3.5 KB). A benchmark of agents answering questions over OKF bundles (Claude Sonnet 5.5 and Haiku 5.5) measured that fixed cost at 60–80% of okfw's input tokens. In the same benchmark, okfw was already 23–28% cheaper per correct answer than the OKF reference implementation's tools. `okfw_create` and `okfw_update` are refused on a read-only server.
 
+### Fixed
+- **`okfw graph` and `okfw export` reach every concept.** Without `--start`, they searched outward from the most connected concept and never left its group of linked concepts. A concept that links to nothing, and that nothing links to, never appeared at any `--limit`, and `okfw export` dropped it without a word, though the help promised "all concepts in a directory". Both now continue with the most connected concept not yet shown until `--limit` is reached; the default view is unchanged. Both also say how many concepts `--limit` left out.
+
 ### Changed
 - **`okfw search --json` is half the size**, and now prints the same hit the MCP search tool returns. It is a compact array of `{id, title, path, kind, type, project, tags, snippet, trust, status, stale, superseded_by, replaces}`. Empty fields are left out; `status` appears only when it isn't `stable`, and `stale` only when it is `true`. **Breaking for scripts:** `file_path` (absolute) is replaced by `path` (relative to `.okfw/`; every command accepts it), and `score`, `description` and `stale_after` are gone. Agents that follow okfw's skill use this form, and paid about 2,900 tokens per search where the MCP tool costs about 1,400. The Neovim plugin resolves `path` itself, and its new `entry_file(hit)` does the same for scripts.
 

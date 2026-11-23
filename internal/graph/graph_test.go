@@ -88,16 +88,31 @@ func TestFindConnected_ParentChild(t *testing.T) {
 
 func TestFindAllConnected_PicksMostConnected(t *testing.T) {
 	g := buildTestGraph()
-	// A has 2 links (most connections), so FindAllConnected should start from A
+	// A has the most connections, so its component comes first; the isolated
+	// F follows once that component is exhausted. It used to be left out at
+	// any limit, so `okfw export` silently dropped every unlinked concept.
 	nodes := g.FindAllConnected(100, 0)
-	if len(nodes) != 5 {
-		t.Errorf("Expected 5 connected nodes, got %d", len(nodes))
+	if len(nodes) != 6 {
+		t.Fatalf("Expected all 6 nodes, got %d", len(nodes))
 	}
-	// F is isolated and should not be included
-	ids := nodeIDs(nodes)
-	if ids["F"] {
-		t.Error("Isolated node F should not be in results")
+	if nodes[0].ID != "A" {
+		t.Errorf("the first node = %s, want the most connected, A", nodes[0].ID)
 	}
+	if nodes[len(nodes)-1].ID != "F" {
+		t.Errorf("the isolated F should come after A's component, got order %v", nodeOrder(nodes))
+	}
+	// A limit still takes the busiest neighbourhood first.
+	if got := g.FindAllConnected(5, 0); nodeIDs(got)["F"] {
+		t.Errorf("limit 5 should be filled from A's component, got %v", nodeOrder(got))
+	}
+}
+
+func nodeOrder(nodes []*Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.ID
+	}
+	return out
 }
 
 // --- GenerateASCIITree tests ---

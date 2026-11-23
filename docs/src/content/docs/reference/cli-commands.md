@@ -518,7 +518,11 @@ okfw graph --start 019f0494                           # id prefix
 okfw graph --start infra/my-first-idea--019f049400a8  # or OKF concept ID
 ```
 
-Without `--start`, the graph starts from the most connected concept.
+Without `--start`, the graph starts from the most connected concept and shows
+its neighbourhood first. When that runs out, it continues from the most
+connected concept not yet shown, so with a high enough `--limit` it reaches
+every concept, including ones that link to nothing. When `--limit` leaves
+concepts out, the summary line says how many and how to see them.
 
 ### Control traversal depth
 ```bash
@@ -532,7 +536,8 @@ okfw graph --ascii
 
 `okfw graph` writes **Mermaid flowchart syntax** to stdout by default, suitable
 for pasting into markdown; `--ascii` renders a plain-text tree that reads
-directly in a terminal. A summary line (`N nodes, M edges`) goes to stderr, so
+directly in a terminal. A summary line (`N nodes, M edges`, plus how many
+concepts `--limit` left out) goes to stderr, so
 piped output stays clean. The graph is built from the concepts on disk each
 time, so it always matches them.
 
@@ -546,12 +551,16 @@ okfw export                              # Export from the wiki root
 okfw export path/to/dir                  # Export a specific directory
 okfw export --start 019f0494 --depth 2   # Export a neighbourhood
 okfw export --limit 50
+okfw export --limit 1000                 # Every concept, linked or not
 ```
 
-Writes a self-contained copy of a connected subset of concepts into
+Writes a self-contained copy of up to `--limit` concepts into
 `.okfw/.ephemeral/`, one file per concept named `<id>.md`, with links rewritten to
-match (an in-bundle link becomes `<id>.md`). Useful for handing a slice of the wiki to something that has no access to
-the bundle. `.ephemeral/` is gitignored and safe to delete.
+match (an in-bundle link becomes `<id>.md`). Concepts are taken in the same
+order as `okfw graph`: the busiest neighbourhood first, then the rest, linked
+or not. The summary says how many `--limit` left out. Useful for handing a
+slice of the wiki to something that has no access to the bundle. `.ephemeral/`
+is gitignored and safe to delete.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
