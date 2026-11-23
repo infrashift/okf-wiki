@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.11.0 — 2026-11-23
 
 ### Added — man pages, macOS, zmake
 - **Man pages.** `okfw man` writes okfw(1) and one page per subcommand, such as okfw-search(1), generated from the commands themselves. They go to `~/.local/share/man/man1` by default. `make install` installs them beside the binary under `PREFIX`, and release archives ship them in `share/man/man1`.
