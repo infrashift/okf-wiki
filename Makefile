@@ -1,4 +1,4 @@
-.PHONY: build build-linux-amd64 build-linux-arm64 dist signing-key sign verify-signatures test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev build-image run-container stop-container
+.PHONY: build build-linux-amd64 build-linux-arm64 dist signing-key sign verify-signatures test test-race lint fmt clean install tidy ui-check integration-test e2e docs-dev-up docs-dev-down docs-build build-image run-container stop-container
 
 BINARY_NAME=okfw
 CMD_PATH=./cli/cmd/okfw
@@ -162,8 +162,22 @@ clean:
 tidy:
 	go mod tidy
 
-docs-dev:
-	cd docs && bun --bun run dev
+BUN ?= bun
+
+# The project's own documentation site (docs/). docs-dev-up starts the Astro
+# dev server in the background and docs-dev-down stops it, freeing the port;
+# Astro records the server in docs/.astro/dev.json, so no pid file is needed.
+# Starlight's search runs only on a built site, so use docs-build (or
+# `bun run preview` after it) to try search. A wiki's own site is a different
+# thing: `okfw site up` / `okfw site down`.
+docs-dev-up:
+	cd docs && $(BUN) install --frozen-lockfile && $(BUN) --bun run astro dev --background
+
+docs-dev-down:
+	cd docs && $(BUN) --bun run astro dev stop
+
+docs-build:
+	cd docs && $(BUN) install --frozen-lockfile && $(BUN) --bun run build
 
 build-image:
 	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) --build-arg VERSION=$(VERSION) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .

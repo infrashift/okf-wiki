@@ -26,6 +26,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'getting-started/quick-start' },
             { label: 'Configuration', slug: 'getting-started/configuration' },
             { label: 'Note Format', slug: 'getting-started/note-format' },
+            { label: 'Browsing the Wiki as a Site', slug: 'getting-started/site' },
           ],
         },
         {

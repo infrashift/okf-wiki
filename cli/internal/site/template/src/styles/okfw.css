@@ -1,0 +1,9 @@
+.okf-meta { margin-top: 0.75rem; }
+.okf-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0; }
+.okf-tag { font-size: var(--sl-text-xs); color: var(--sl-color-gray-3); }
+.okf-details { margin-top: 0.75rem; font-size: var(--sl-text-sm); }
+.okf-details summary { cursor: pointer; color: var(--sl-color-gray-3); }
+.okf-details dl { margin-top: 0.5rem; }
+.okf-details dt { font-weight: 600; margin-top: 0.4rem; }
+.okf-details dd { margin-inline-start: 0; }
+.okf-details ul { margin: 0; padding-inline-start: 1.2rem; }

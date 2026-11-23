@@ -1239,6 +1239,7 @@ Example client configuration (Claude Code):
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(newSetBundleMetaCmd())
+	rootCmd.AddCommand(newSiteCmd())
 	rootCmd.AddCommand(connectCmd)
 	rootCmd.AddCommand(rootPathCmd)
 	rootCmd.AddCommand(indexMdCmd)
