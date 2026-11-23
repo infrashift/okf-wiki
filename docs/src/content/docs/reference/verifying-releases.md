@@ -26,7 +26,7 @@ later (checked with v2.6.5, v3.0.4 and v3.1.4).
 ## 1. Download
 
 ```bash
-VERSION=v2026.10.2
+VERSION=v2026.11.0
 mkdir okfw-$VERSION && cd okfw-$VERSION
 gh release download $VERSION -R infrashift/okf-wiki
 ```
@@ -113,7 +113,7 @@ Unpack the tarball and confirm the binary is the version you verified:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
-okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.10.2
+okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.0
 ```
 
 With Go installed, `go version -m` prints what the binary records about its

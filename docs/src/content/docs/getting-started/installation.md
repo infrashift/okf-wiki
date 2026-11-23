@@ -20,13 +20,13 @@ both into `~/.local` installs the command and its manual. `man` searches the
 without setting `MANPATH`.
 
 ```bash
-VERSION=v2026.10.2
+VERSION=v2026.11.0
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
 tar -xzf $a.tar.gz
 mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
-okfw --version   # okfw version v2026.10.2
+okfw --version   # okfw version v2026.11.0
 man okfw
 ```
 
@@ -35,7 +35,7 @@ project's cosign key, but it is not notarized by Apple. A download through
 `curl` is not quarantined. After a download through a browser, run
 `xattr -d com.apple.quarantine ~/.local/bin/okfw`.
 
-A binary from releases before v2026.11 has no man pages in its archive, and
+A binary from a release before v2026.11.0 has no man pages in its archive, and
 `okfw man` installs them for any okfw binary: it writes them to
 `~/.local/share/man/man1`, from the commands themselves.
 
