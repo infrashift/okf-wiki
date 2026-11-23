@@ -174,16 +174,21 @@ type Concept struct {
 	Sources     SourceList   `yaml:"sources,omitempty"`
 	UsageWindow *UsageWindow `yaml:"usage_window,omitempty"`
 
-	// okfw extensions
-	ID        string    `yaml:"id"`
-	Kind      string    `yaml:"kind,omitempty"` // "note" (default), "daily-note", "issue"
-	Project   string    `yaml:"project,omitempty"`
-	Parent    string    `yaml:"parent,omitempty"`
-	Created   time.Time `yaml:"created"`
-	Timestamp time.Time `yaml:"timestamp"` // okfw's last-write time; not generated.at
+	// okfw extensions, in OKF v0.3's extension namespace (see okfwkeys.go).
+	ID        string    `yaml:"x-okfw-id"`
+	Kind      string    `yaml:"x-okfw-kind,omitempty"` // "note" (default), "daily-note", "issue"
+	Project   string    `yaml:"x-okfw-project,omitempty"`
+	Parent    string    `yaml:"x-okfw-parent,omitempty"`
+	Created   time.Time `yaml:"x-okfw-created"`
+	Timestamp time.Time `yaml:"x-okfw-timestamp"` // okfw's last-write time; not generated.at
 
-	// X is the open extension block: user-defined metadata, passed through
-	// untouched. okfw claims no keys inside it.
+	// The same fields under the bare names okfw wrote before the namespace.
+	// Reads fill the fields above from them (adoptLegacy).
+	legacyKeys `yaml:",inline"`
+
+	// X is the legacy open extension block: user-defined metadata, passed
+	// through untouched. okfw claims no keys inside it; new user metadata
+	// belongs in x-<producer>-<name> keys.
 	X map[string]interface{} `yaml:"x,omitempty"`
 }
 
@@ -310,6 +315,7 @@ func ParseFrontmatter(content []byte) (*Concept, error) {
 
 	var z Concept
 	if err := yaml.Unmarshal(frontmatter, &z); err == nil {
+		z.adoptLegacy()
 		return &z, nil
 	}
 
@@ -330,6 +336,7 @@ func ParseFrontmatter(content []byte) (*Concept, error) {
 		one := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Content: m.Content[i : i+2]}
 		_ = one.Decode(&z)
 	}
+	z.adoptLegacy()
 	return &z, nil
 }
 
@@ -527,6 +534,9 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 	if err := checkDuplicateKeys(frontmatter); err != nil {
 		return nil, err
 	}
+	if err := checkLegacyKeys(frontmatter); err != nil {
+		return nil, err
+	}
 
 	// Before the schema, which reports a bad actor inside verified's
 	// mapping-or-list disjunction only as "empty disjunction", and one in
@@ -545,6 +555,7 @@ func ParseAndValidate(content []byte) (*Concept, error) {
 	if err := yaml.Unmarshal(frontmatter, &z); err != nil {
 		return nil, fmt.Errorf("failed to parse frontmatter: %w", err)
 	}
+	z.adoptLegacy()
 
 	if err := ValidateBusinessRules(&z); err != nil {
 		return nil, err

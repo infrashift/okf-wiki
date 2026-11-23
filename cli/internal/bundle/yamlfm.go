@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // This file holds the frontmatter editing primitives. Everything that mutates a
@@ -92,6 +94,11 @@ func Edit(content []byte, fn func(m *yaml.Node) error) ([]byte, error) {
 			return nil, fmt.Errorf("frontmatter must be a YAML mapping")
 		}
 	}
+
+	// A file okfw wrote before its keys moved to x-okfw-* is brought up to
+	// date by any okfw edit, before fn sees it, so a writer setting
+	// x-okfw-timestamp never leaves a stale bare timestamp beside it.
+	config.UpgradeLegacyKeys(m)
 
 	if err := fn(m); err != nil {
 		return nil, err

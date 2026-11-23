@@ -299,8 +299,8 @@ concept ID.
 
 The destination is relative to the wiki root, whatever the cwd, and follows
 `mv`: a path ending in `.md` is the new full path, anything else is a directory
-to move into. The concept keeps its `id`, so
-`parent` hierarchies survive, and the buffer follows the concept to its new path
+to move into. The concept keeps its `x-okfw-id`, so
+`x-okfw-parent` hierarchies survive, and the buffer follows the concept to its new path
 so you can carry on editing.
 
 Links are repaired at **both** ends — inbound links in other concepts, and the

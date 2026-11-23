@@ -23,6 +23,15 @@ before you run it, so `git diff` shows exactly what changed.
 
 ## What migrate changes
 
+**okfw's own keys move to `x-okfw-*`.** `id`, `kind`, `project`, `parent`,
+`created` and `timestamp` become `x-okfw-id`, `x-okfw-kind`, `x-okfw-project`,
+`x-okfw-parent`, `x-okfw-created` and `x-okfw-timestamp`. Each key keeps its
+place, value and quoting. This puts them in the namespace OKF v0.3 reserves for
+producers (§4.1), where no future OKF version can redefine them. Only concepts
+okfw wrote are changed: those with an okfw-shaped id, or with both `created`
+and `timestamp`. A bare `id` written by another tool is left alone. okfw still
+reads the old names, but `okfw validate` reports them until you migrate.
+
 **Bare path fields gain a leading `/`.**
 - **What changed:** okfw v0.2 read a frontmatter path without a leading `/`,
   such as `executor.resource: skills/run.md`, from the bundle root. v0.3 reads

@@ -57,7 +57,7 @@ func StripLegacyTodoFields(content []byte) ([]byte, []string, error) {
 	}
 	if z.Kind == "todo" {
 		dropped = append(dropped, "kind=todo")
-		remove = append(remove, "kind")
+		remove = append(remove, "kind", config.KeyKind)
 	}
 
 	// The removed fields are gone from the Concept struct, so read them off the
@@ -77,7 +77,7 @@ func StripLegacyTodoFields(content []byte) ([]byte, []string, error) {
 
 	// The timestamp records the last meaningful change; dropping retired
 	// bookkeeping is not one, so preserve it.
-	updates["timestamp"] = z.Timestamp.Format(time.RFC3339)
+	updates[config.KeyTimestamp] = z.Timestamp.Format(time.RFC3339)
 
 	out, err := UpdateFrontmatterRemove(content, updates, remove)
 	if err != nil {

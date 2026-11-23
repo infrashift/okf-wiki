@@ -17,9 +17,9 @@ import (
 func referrer(t *testing.T, cfg *config.Config, rel, extra string) string {
 	t.Helper()
 	conceptSeq++
-	content := fmt.Sprintf("---\nid: \"019680f0-7e00-7abc-8def-%012x\"\n", conceptSeq) +
+	content := fmt.Sprintf("---\nx-okfw-id: \"019680f0-7e00-7abc-8def-%012x\"\n", conceptSeq) +
 		"title: \"Referrer\"\ntype: \"note\"\ntags: []\n" +
-		"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n" +
+		"x-okfw-created: \"2026-01-01T00:00:00Z\"\nx-okfw-timestamp: \"2026-01-01T00:00:00Z\"\n" +
 		extra + "---\n\n# Referrer\n"
 	p := filepath.Join(cfg.RootPath, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {

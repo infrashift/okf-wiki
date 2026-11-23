@@ -135,3 +135,48 @@ func mustRead(t *testing.T, p string) []byte {
 	}
 	return b
 }
+
+// legacyKeyed is a concept as okfw wrote it before its keys moved to x-okfw-*.
+const legacyKeyed = "---\nid: \"019680f0-7e00-7abc-8def-d00000000001\"\ntitle: \"Old\"\ntype: \"note\"\n" +
+	"project: \"p\"\ntags: []\ncreated: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-02T00:00:00Z\"\n---\n\n# Old\n"
+
+// TestMigrateMovesOkfwKeysToTheNamespace: migrate renames the bare keys in
+// place, leaves the timestamp's value alone, and the result validates.
+func TestMigrateMovesOkfwKeysToTheNamespace(t *testing.T) {
+	cfg := bundleAt(t)
+	p := writeConceptFile(t, cfg.RootPath, "old.md", legacyKeyed)
+	foreign := writeConceptFile(t, cfg.RootPath, "foreign.md", "---\ntype: Table\nid: orders\n---\n\nx\n")
+	if _, err := captureStdout(t, func() error { return runMigrate(cfg, cfg.RootPath, false) }); err != nil {
+		t.Fatal(err)
+	}
+	got := string(mustRead(t, p))
+	want := strings.NewReplacer("\nid:", "\nx-okfw-id:", "\nproject:", "\nx-okfw-project:",
+		"\ncreated:", "\nx-okfw-created:", "\ntimestamp:", "\nx-okfw-timestamp:").Replace(legacyKeyed)
+	if got != want {
+		t.Errorf("migrated:\n%s\nwant:\n%s", got, want)
+	}
+	if _, err := config.ParseAndValidate([]byte(got)); err != nil {
+		t.Errorf("the migrated concept does not validate: %v", err)
+	}
+	if f := string(mustRead(t, foreign)); !strings.Contains(f, "\nid: orders\n") {
+		t.Errorf("another producer's id was relabelled:\n%s", f)
+	}
+}
+
+// TestAnEditUpgradesTheKeysOfItsFile: a writer touching an unmigrated
+// concept renames its keys rather than adding x-okfw-timestamp beside a
+// stale timestamp.
+func TestAnEditUpgradesTheKeysOfItsFile(t *testing.T) {
+	cfg := bundleAt(t)
+	p := writeConceptFile(t, cfg.RootPath, "old.md", legacyKeyed)
+	if _, err := runCmd(t, rootCmd(), "add-tags", "old.md", "kept"); err != nil {
+		t.Fatal(err)
+	}
+	got := string(mustRead(t, p))
+	if strings.Contains(got, "\ntimestamp:") || strings.Count(got, "x-okfw-timestamp:") != 1 || !strings.Contains(got, "x-okfw-id:") {
+		t.Errorf("keys not upgraded in place:\n%s", got)
+	}
+	if _, err := config.ParseAndValidate([]byte(got)); err != nil {
+		t.Errorf("edited concept does not validate: %v", err)
+	}
+}

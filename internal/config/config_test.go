@@ -77,14 +77,14 @@ func TestDiscover_IgnoresOkfwFile(t *testing.T) {
 
 func TestValidateConceptYAML_Valid(t *testing.T) {
 	validYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test Concept"
 type: "note"
-project: "test-project"
+x-okfw-project: "test-project"
 tags:
   - "test"
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
 		t.Errorf("ValidateConceptYAML() error = %v", err)
@@ -93,15 +93,15 @@ timestamp: "2026-02-13T10:45:00Z"
 
 func TestValidateConceptYAML_ValidWithParent(t *testing.T) {
 	validYAML := `
-id: "20260213110000-ffffffff-1111-2222-3333-444444444444"
+x-okfw-id: "20260213110000-ffffffff-1111-2222-3333-444444444444"
 title: "Child Concept"
 type: "note"
-project: "test-project"
+x-okfw-project: "test-project"
 tags:
   - "child"
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T10:45:00Z"
-parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 `
 	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
 		t.Errorf("ValidateConceptYAML() error = %v", err)
@@ -110,12 +110,12 @@ parent: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
 func TestValidateConceptYAML_ValidUUIDv7(t *testing.T) {
 	validYAML := `
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "UUIDv7 Concept"
 type: "note"
 tags: []
-created: "2026-04-10T12:00:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-04-10T12:00:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
 		t.Errorf("ValidateConceptYAML() UUIDv7 should be valid, got error = %v", err)
@@ -124,13 +124,13 @@ timestamp: "2026-02-13T10:45:00Z"
 
 func TestValidateConceptYAML_InvalidID(t *testing.T) {
 	invalidYAML := `
-id: "12345"
+x-okfw-id: "12345"
 title: "Test"
 type: "note"
-project: "test"
+x-okfw-project: "test"
 tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
 		t.Error("ValidateConceptYAML() expected error for invalid ID, got nil")
@@ -139,13 +139,13 @@ timestamp: "2026-02-13T10:45:00Z"
 
 func TestValidateConceptYAML_EmptyTitle(t *testing.T) {
 	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: ""
 type: "note"
-project: "test"
+x-okfw-project: "test"
 tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
 		t.Error("ValidateConceptYAML() expected error for empty title, got nil")
@@ -155,12 +155,12 @@ timestamp: "2026-02-13T10:45:00Z"
 func TestValidateConceptYAML_WithoutProject(t *testing.T) {
 	// Notes can omit project entirely
 	validYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Quick Idea"
 type: "note"
 tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(validYAML)); err != nil {
 		t.Errorf("ValidateConceptYAML() note without project should be valid, got error = %v", err)
@@ -171,14 +171,14 @@ func TestValidateConceptYAML_LegacyCategoryTolerated(t *testing.T) {
 	// Notes written before category removal may still carry the field; it is
 	// tolerated as an ignored legacy key (OKF permissive consumption).
 	legacyYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
-project: "test"
+x-okfw-project: "test"
 category: "untethered"
 tags: []
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 `
 	if err := ValidateConceptYAML([]byte(legacyYAML)); err != nil {
 		t.Errorf("ValidateConceptYAML() legacy category should be tolerated, got error = %v", err)
@@ -187,10 +187,10 @@ timestamp: "2026-02-13T10:45:00Z"
 
 func TestValidateConceptYAML_MissingCreated(t *testing.T) {
 	invalidYAML := `
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
-project: "test"
+x-okfw-project: "test"
 tags: []
 `
 	if err := ValidateConceptYAML([]byte(invalidYAML)); err == nil {
@@ -200,7 +200,7 @@ tags: []
 
 func TestExtractFrontmatter(t *testing.T) {
 	content := []byte(`---
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
 ---
@@ -212,7 +212,7 @@ type: "note"
 		t.Fatalf("ExtractFrontmatter() error = %v", err)
 	}
 
-	expected := `id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	expected := `x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"`
 	if string(frontmatter) != expected {
@@ -234,7 +234,7 @@ type: "note"
 
 func TestExtractFrontmatter_NoClosingDelimiter(t *testing.T) {
 	content := []byte(`---
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test"
 type: "note"
 `)
@@ -246,14 +246,14 @@ type: "note"
 
 func TestParseFrontmatter(t *testing.T) {
 	content := []byte(`---
-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+x-okfw-id: "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 title: "Test Concept"
 type: "note"
-project: "test-project"
+x-okfw-project: "test-project"
 tags:
   - "test"
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Content

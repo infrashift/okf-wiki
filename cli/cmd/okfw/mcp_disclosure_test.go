@@ -156,7 +156,7 @@ func TestMCPCreateSetsMetadataInOneWrite(t *testing.T) {
 		// timestamp, so the "at" half is already checked.
 		t.Errorf("generated should be claude-code/1.0 at the timestamp, got %+v (timestamp %v)", c.Generated, c.Timestamp)
 	}
-	if !strings.Contains(string(content), "type: \"issue\"\nkind: \"issue\"") {
+	if !strings.Contains(string(content), "type: \"issue\"\nx-okfw-kind: \"issue\"") {
 		t.Errorf("kind should sit after type, as the issue template writes it:\n%s", content)
 	}
 

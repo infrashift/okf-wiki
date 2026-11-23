@@ -205,7 +205,7 @@ func TestResolveConceptPathLegacyFilename(t *testing.T) {
 	cfg, root := testCfg(t)
 	const id = "20260213104500-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	want := filepath.Join(root, id+".md")
-	if err := os.WriteFile(want, []byte("---\nid: \""+id+"\"\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(want, []byte("---\nx-okfw-id: \""+id+"\"\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ResolveConceptPath(cfg, id)
@@ -229,13 +229,13 @@ func TestResolveConceptPathSkipsReservedAndHidden(t *testing.T) {
 	const id = "019680f0-7e00-7abc-8def-1234567890ab"
 	// A reserved file and a file inside a skipped dot-dir both carry the id;
 	// neither may be resolved.
-	if err := os.WriteFile(filepath.Join(root, "index.md"), []byte("---\nid: \""+id+"\"\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "index.md"), []byte("---\nx-okfw-id: \""+id+"\"\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(root, ".index"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, ".index", "x.md"), []byte("---\nid: \""+id+"\"\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, ".index", "x.md"), []byte("---\nx-okfw-id: \""+id+"\"\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := ResolveConceptPath(cfg, id); err == nil {
@@ -246,7 +246,7 @@ func TestResolveConceptPathSkipsReservedAndHidden(t *testing.T) {
 func TestResolveConceptPathAcceptsDirectFilePath(t *testing.T) {
 	cfg, root := testCfg(t)
 	p := filepath.Join(root, "direct--0001.md")
-	if err := os.WriteFile(p, []byte("---\nid: \"x\"\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(p, []byte("---\nx-okfw-id: \"x\"\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	got, err := ResolveConceptPath(cfg, p)
@@ -271,7 +271,7 @@ func TestResolveConceptPathAcceptsOKFConceptIDs(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(p, []byte("---\nid: \"x\"\n---\n"), 0644); err != nil {
+		if err := os.WriteFile(p, []byte("---\nx-okfw-id: \"x\"\n---\n"), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -307,7 +307,7 @@ func TestResolveConceptPathAcceptsOKFConceptIDs(t *testing.T) {
 func TestResolveConceptPathRefusesFilesOutsideTheBundle(t *testing.T) {
 	outside := t.TempDir()
 	secret := filepath.Join(outside, "secret.md")
-	if err := os.WriteFile(secret, []byte("---\nid: \"s\"\n---\n"), 0644); err != nil {
+	if err := os.WriteFile(secret, []byte("---\nx-okfw-id: \"s\"\n---\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cfg, root := testCfg(t)

@@ -9,17 +9,17 @@ A plain note looks like this:
 
 ```markdown
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "My Note Title"
 type: "note"
 description: "A one-sentence summary of the concept."  # Optional
-project: "my-project"
+x-okfw-project: "my-project"
 tags:
   - "idea"
   - "research"
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
-parent: "019f0312-4700-7def-9abc-ffffffffffff"  # Optional
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-parent: "019f0312-4700-7def-9abc-ffffffffffff"  # Optional
 ---
 
 # My Note Title
@@ -27,30 +27,48 @@ parent: "019f0312-4700-7def-9abc-ffffffffffff"  # Optional
 Your note content here...
 ```
 
-## `type` vs `kind`
+## `type` vs `x-okfw-kind`
 
 OKF Wiki separates two concerns that used to live in a single `type` field:
 
-- **`type`** is the OKF concept kind. It is **required**, non-empty, and free-form — you can use it to describe what a concept *is* in your own vocabulary (`note`, `Reference`, `BigQuery Table`, whatever fits). It is always written to frontmatter. By default it is set to the value of `kind`, so a plain note is written as `type: "note"`.
-- **`kind`** is a structured enum (`note` | `daily-note` | `issue`) that drives the CLI's daily-note and issue behavior. It is **omitted from frontmatter when it equals `note`** (the default), which keeps plain notes clean.
+- **`type`** is the OKF concept kind. It is **required**, non-empty, and free-form — you can use it to describe what a concept *is* in your own vocabulary (`note`, `Reference`, `BigQuery Table`, whatever fits). It is always written to frontmatter. By default it is set to the value of `x-okfw-kind`, so a plain note is written as `type: "note"`.
+- **`x-okfw-kind`** is a structured enum (`note` | `daily-note` | `issue`) that drives the CLI's daily-note and issue behavior. It is **omitted from frontmatter when it equals `note`** (the default), which keeps plain notes clean.
 
-If you previously saw a `type:` field holding `note`/`daily-note`/`issue`, that behavior now lives in `kind:`. The `type:` field is the free-form OKF kind.
+If you previously saw a `type:` field holding `note`/`daily-note`/`issue`, that behavior now lives in `x-okfw-kind:`. The `type:` field is the free-form OKF kind.
+
+## okfw's own keys: `x-okfw-*`
+
+The keys okfw adds for itself — `x-okfw-id`, `x-okfw-kind`, `x-okfw-project`,
+`x-okfw-parent`, `x-okfw-created` and `x-okfw-timestamp` — live in the
+extension namespace OKF v0.3 §4.1 sets aside for producers: future OKF
+versions will never define a key starting with `x-`, and producers are asked
+to name theirs `x-<producer>-<name>`. So no OKF version can ever give one of
+okfw's keys a different meaning, and other OKF tools read them as an
+extension and leave them alone.
+
+:::note[Renamed in this release]
+okfw used to write these keys bare: `id`, `kind`, `project`, `parent`,
+`created`, `timestamp`. It still reads them, but `okfw validate` asks you to
+run `okfw migrate`, which renames them in every concept okfw wrote. Any okfw
+edit of a concept also renames its keys. A bare `id` in a concept another tool
+wrote is that tool's, and okfw leaves it alone.
+:::
 
 ## Core fields
 
 | Field | Required | Format | Description |
 |-------|----------|--------|-------------|
-| `id` | Yes | UUIDv7 | Unique identifier (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`). Legacy `YYYYMMDDHHmmss-UUID` IDs are still accepted. An okfw extension — see [Concept IDs](#concept-ids-and-file-paths). |
+| `x-okfw-id` | Yes | UUIDv7 | Unique identifier (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`). Legacy `YYYYMMDDHHmmss-UUID` IDs are still accepted. An okfw extension — see [Concept IDs](#concept-ids-and-file-paths). |
 | `title` | Yes | Non-empty string | Concept title |
-| `type` | Yes | Non-empty string | OKF concept kind (free-form). Always written; defaults to the `kind` value. |
-| `kind` | No | `note`, `daily-note`, or `issue` | Structured kind that drives behavior. Omitted when it equals `note` (default). |
+| `type` | Yes | Non-empty string | OKF concept kind (free-form). Always written; defaults to the `x-okfw-kind` value. |
+| `x-okfw-kind` | No | `note`, `daily-note`, or `issue` | Structured kind that drives behavior. Omitted when it equals `note` (default). |
 | `description` | No | One-sentence string | OKF summary, used in `index.md` listings and search snippets |
 | `resource` | No | URI | OKF reference to the underlying asset the concept describes. Set with `okfw set-resource`. |
-| `project` | No | Non-empty string | Optional project metadata (set with `--project`). Never derived from git. |
+| `x-okfw-project` | No | Non-empty string | Optional project metadata (set with `--project`). Never derived from git. |
 | `tags` | Yes | List of non-empty strings | Categorization tags |
-| `created` | Yes | ISO 8601 datetime with offset | Creation time |
-| `timestamp` | Yes | ISO 8601 datetime with offset | okfw's last-write time, updated by the CLI on every mutation. Not the same as `generated.at` — see [Trust fields](#trust-fields). |
-| `parent` | No | Concept id (UUID) | Parent concept for hierarchies |
+| `x-okfw-created` | Yes | ISO 8601 datetime with offset | Creation time |
+| `x-okfw-timestamp` | Yes | ISO 8601 datetime with offset | okfw's last-write time, updated by the CLI on every mutation. Not the same as `generated.at` — see [Trust fields](#trust-fields). |
+| `x-okfw-parent` | No | Concept id (UUID) | Parent concept for hierarchies |
 | `x-<producer>-<name>` | No | Anything | Your own metadata, at any level — see [Custom fields](#custom-fields). |
 
 ## Lifecycle fields
@@ -78,7 +96,7 @@ An OKF **timestamp** — `stale_after`, `generated.at`, `verified[].at`,
 date-time with an explicit offset (`"2026-12-31T08:30:00+05:30"`) or a date
 (`"2026-12-31"`), which means the start of that day in UTC. A date-time with
 no offset is invalid. okfw's own writers store the date-time form. okfw's
-own `created` and `timestamp` always use the date-time form.
+own `x-okfw-created` and `x-okfw-timestamp` always use the date-time form.
 
 ## Trust fields
 
@@ -89,7 +107,7 @@ OKF spec §5.2–5.3. Both are optional; a concept with no trust metadata is per
 | `generated` | `{by, at}` | Who produced the content, and when it last *meaningfully* changed. `by` is required within the block. Set both with `okfw set-generated` (`--at` defaults to now). A format, whitespace or link-repair edit does not move `at`. |
 | `verified` | List of `{by, at}` | Verification events; both keys are required in an event, and one missing either is ignored. Multiple entries capture independent checks; "how recently" is the latest `at`. Append with `okfw verify`. |
 
-**`generated.at` is not `timestamp`.** okfw moves `timestamp` on every write,
+**`generated.at` is not `x-okfw-timestamp`.** okfw moves `x-okfw-timestamp` on every write,
 but `generated.at` only when the content changes: through `okfw
 set-generated`, or a body rewrite made through okfw (the MCP update tool's
 `append` and `set_body`). Adding a tag, changing the lifecycle, adding a source,
@@ -200,7 +218,7 @@ The `x:` block from earlier okfw versions is still accepted and passes anything 
 
 okfw knowingly breaks two of the spec's consumer rules, in exchange for a hard guarantee about the bundles it writes:
 
-1. **okfw requires six fields** — `id`, `title`, `type`, `tags`, `created`, `timestamp` — and a bundle `title` and `description`. OKF v0.3 requires only a non-empty `type`.
+1. **okfw requires six fields** — `type`, `title` and `tags`, and its own `x-okfw-id`, `x-okfw-created` and `x-okfw-timestamp` — and a bundle `title` and `description`. OKF v0.3 requires only a non-empty `type`.
 2. **The schema is closed.** Undeclared keys are rejected, except `x-*` extension keys, where OKF §4.1 says consumers MUST NOT reject documents with unknown keys.
 
 The consequence: `okfw validate` will reject a *conformant third-party* bundle. Two commands exist for the two questions:
@@ -220,9 +238,9 @@ Attested Computation (spec §10) is accepted but not executed: the schema declar
 
 OKF derives a concept's identity from the filesystem: its **id is its path within the wiki (relative to `.okfw/`) minus `.md`**. Concept files are named `slug--shortid.md` (for example `my-note-title--019f049400a8.md`), where the short id is the first 12 hex digits of the UUID (extended on a collision). So a note stored at `.okfw/infra/my-note-title--019f049400a8.md` has the OKF concept id `infra/my-note-title--019f049400a8`.
 
-The `id:` field in frontmatter is a separate, okfw-specific identifier: a UUIDv7 that stays stable when a file moves. `parent:` refers to that full UUID, not to a path or a short prefix.
+The `x-okfw-id:` field in frontmatter is a separate, okfw-specific identifier: a UUIDv7 that stays stable when a file moves. `x-okfw-parent:` refers to that full UUID, not to a path or a short prefix.
 
-Every command that takes a concept accepts any of: the full frontmatter `id`, a unique id prefix of at least 8 hex digits (`019f0494`), the OKF concept ID (`infra/my-note-title--019f049400a8`, optionally with `.md` or a leading `/`), or a file path.
+Every command that takes a concept accepts any of: the full `x-okfw-id`, a unique id prefix of at least 8 hex digits (`019f0494`), the OKF concept ID (`infra/my-note-title--019f049400a8`, optionally with `.md` or a leading `/`), or a file path.
 
 Links between concepts are vanilla markdown links pointing at file paths. See the [Notes Workflow](/okf-wiki/neovim/notes-workflow/) for how linking works.
 

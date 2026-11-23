@@ -1,13 +1,13 @@
 ---
-id: "01968109-4700-7def-9abc-ffffffffffff"
+x-okfw-id: "01968109-4700-7def-9abc-ffffffffffff"
 title: "Child Concept"
 type: "note"
-project: "okf-wiki"
+x-okfw-project: "okf-wiki"
 tags:
   - "child"
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
-parent: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-parent: "019680f0-7e00-7abc-8def-1234567890ab"
 ---
 
 # Child Concept

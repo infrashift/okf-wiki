@@ -101,7 +101,7 @@ The plugin creates the note and opens it in the current window. Files are named 
 ```
 
 **What just happened:**
-- A new markdown file was created with a UUIDv7 `id` and a `slug--shortid.md` filename
+- A new markdown file was created with a UUIDv7 `x-okfw-id` and a `slug--shortid.md` filename
 - YAML frontmatter was generated with metadata
 - No project context required - just capture the thought
 
@@ -117,12 +117,12 @@ Find your note in the picker and press `<CR>` to open it.
 The file looks like this:
 ```markdown
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
 type: "note"
 tags: []
-created: "2026-02-13T14:23:45-06:00"
-timestamp: "2026-02-13T14:23:45-06:00"
+x-okfw-created: "2026-02-13T14:23:45-06:00"
+x-okfw-timestamp: "2026-02-13T14:23:45-06:00"
 ---
 
 # Interesting error handling pattern in auth module
@@ -135,14 +135,14 @@ Fill in your thoughts while they're fresh:
 
 ```markdown
 ---
-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
+x-okfw-id: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 title: "Interesting error handling pattern in auth module"
 type: "note"
 tags:
   - "go"
   - "error-handling"
-created: "2026-02-13T14:23:45-06:00"
-timestamp: "2026-02-13T14:23:45-06:00"
+x-okfw-created: "2026-02-13T14:23:45-06:00"
+x-okfw-timestamp: "2026-02-13T14:23:45-06:00"
 ---
 
 # Interesting error handling pattern in auth module
@@ -183,7 +183,7 @@ the mapping exists on plain notes, not daily notes or issues):
 
 The note's frontmatter is updated:
 ```yaml
-project: "my-project"
+x-okfw-project: "my-project"
 ```
 
 **Why refine?**
@@ -250,13 +250,13 @@ The note opens with a pre-filled structure:
 
 ```markdown
 ---
-id: "019f04a1-2b3c-7456-8def-0123456789ab"
+x-okfw-id: "019f04a1-2b3c-7456-8def-0123456789ab"
 title: "Sprint 14 Planning"
 type: "note"
 tags:
   - "meeting"
-created: "2026-02-13T15:00:00-06:00"
-timestamp: "2026-02-13T15:00:00-06:00"
+x-okfw-created: "2026-02-13T15:00:00-06:00"
+x-okfw-timestamp: "2026-02-13T15:00:00-06:00"
 ---
 
 # Sprint 14 Planning
@@ -297,14 +297,14 @@ Filled in (abridged), it reads:
 
 ```markdown
 ---
-id: "019f04b8-7e9a-7012-3456-789abcdef012"
+x-okfw-id: "019f04b8-7e9a-7012-3456-789abcdef012"
 title: "Add password reset flow"
 type: "note"
 tags:
   - "user-story"
   - "requirements"
-created: "2026-02-13T15:30:00-06:00"
-timestamp: "2026-02-13T15:30:00-06:00"
+x-okfw-created: "2026-02-13T15:30:00-06:00"
+x-okfw-timestamp: "2026-02-13T15:30:00-06:00"
 ---
 
 # Add password reset flow

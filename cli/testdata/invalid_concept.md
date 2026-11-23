@@ -1,7 +1,7 @@
 ---
-id: "12345"
+x-okfw-id: "12345"
 title: ""
-project: ""
+x-okfw-project: ""
 tags:
   - ""
 ---

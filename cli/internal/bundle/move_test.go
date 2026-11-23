@@ -79,7 +79,7 @@ func TestReplaceBodyPreservesFrontmatterBytes(t *testing.T) {
 func TestReplaceBodyIsIdentityForSameBody(t *testing.T) {
 	for _, name := range []string{"lf", "crlf"} {
 		t.Run(name, func(t *testing.T) {
-			content := []byte("---\nid: \"x\"\ntitle: \"T\"\n---\n\n# T\n\nBody.\n")
+			content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\n---\n\n# T\n\nBody.\n")
 			if name == "crlf" {
 				content = []byte(strings.ReplaceAll(string(content), "\n", "\r\n"))
 			}

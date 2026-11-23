@@ -1,13 +1,13 @@
 ---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Test Concept"
 type: "note"
-project: "okf-wiki"
+x-okfw-project: "okf-wiki"
 tags:
   - "test"
   - "example"
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Test Concept

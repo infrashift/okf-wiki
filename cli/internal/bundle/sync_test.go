@@ -331,8 +331,8 @@ func TestWriteIndexFilesEnumeratesSmallDirectories(t *testing.T) {
 }
 
 func conceptWithType(id, title, typ string) string {
-	return "---\nid: \"" + id + "\"\ntitle: \"" + title + "\"\ntype: \"" + typ + "\"\n" +
-		"tags: []\ncreated: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n" +
+	return "---\nx-okfw-id: \"" + id + "\"\ntitle: \"" + title + "\"\ntype: \"" + typ + "\"\n" +
+		"tags: []\nx-okfw-created: \"2026-01-01T00:00:00Z\"\nx-okfw-timestamp: \"2026-01-01T00:00:00Z\"\n" +
 		"---\nbody\n"
 }
 

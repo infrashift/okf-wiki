@@ -155,12 +155,12 @@ func TestMCPGraphBacklinks(t *testing.T) {
 	_ = json.Unmarshal([]byte(text), &target)
 
 	linker := "---\n" +
-		"id: \"019680f0-7e00-7abc-8def-1234567890ab\"\n" +
+		"x-okfw-id: \"019680f0-7e00-7abc-8def-1234567890ab\"\n" +
 		"title: \"Linker\"\n" +
 		"type: \"note\"\n" +
 		"tags: []\n" +
-		"created: \"2026-02-13T10:45:00Z\"\n" +
-		"timestamp: \"2026-02-13T10:45:00Z\"\n" +
+		"x-okfw-created: \"2026-02-13T10:45:00Z\"\n" +
+		"x-okfw-timestamp: \"2026-02-13T10:45:00Z\"\n" +
 		"---\n\nSee [Target](/" + target.Path + ").\n"
 	writeConceptFile(t, cfg.RootPath, "linker--aaaa0001.md", linker)
 
@@ -334,9 +334,9 @@ func TestMCPSearchHitsSayHowFarToTrustThem(t *testing.T) {
 		{"a--0001.md", "Ledger Reviewed", "verified:\n  by: \"human:ryan\"\n  at: \"2026-02-14T00:00:00Z\"\n"},
 		{"b--0002.md", "Ledger Retired", "status: \"deprecated\"\nstale_after: \"2020-01-01T00:00:00Z\"\n"},
 	} {
-		writeConceptFile(t, cfg.RootPath, c.file, "---\nid: \"019680f0-7e00-7abc-8def-"+
+		writeConceptFile(t, cfg.RootPath, c.file, "---\nx-okfw-id: \"019680f0-7e00-7abc-8def-"+
 			strings.Repeat(c.file[:1], 12)+"\"\ntitle: \""+c.title+"\"\ntype: \"note\"\ntags: []\n"+
-			"created: \"2026-02-13T11:00:00Z\"\ntimestamp: \"2026-02-13T11:00:00Z\"\n"+c.extra+"---\n\nledger\n")
+			"x-okfw-created: \"2026-02-13T11:00:00Z\"\nx-okfw-timestamp: \"2026-02-13T11:00:00Z\"\n"+c.extra+"---\n\nledger\n")
 	}
 	text, isErr := callTool(t, s, "search", `{"q":"ledger"}`)
 	if isErr {
@@ -379,13 +379,13 @@ func TestMCPSearchFiltersByKindAndType(t *testing.T) {
 		t.Fatal("create failed")
 	}
 	p := writeConceptFile(t, cfg.RootPath, "alpha--0001.md", `---
-id: "019680f0-7e00-7abc-8def-100000000000"
+x-okfw-id: "019680f0-7e00-7abc-8def-100000000000"
 title: "Alpha Outage"
 type: "Incident"
-kind: "issue"
+x-okfw-kind: "issue"
 tags: []
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 # Alpha Outage
@@ -433,12 +433,12 @@ func TestMCPReadCapsAndSaysHowToContinue(t *testing.T) {
 		fmt.Fprintf(&body, "line %d\n", i)
 	}
 	p := writeConceptFile(t, cfg.RootPath, "long--0001.md", `---
-id: "019680f0-7e00-7abc-8def-100000000000"
+x-okfw-id: "019680f0-7e00-7abc-8def-100000000000"
 title: "Long"
 type: "note"
 tags: []
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 `+body.String())
@@ -477,13 +477,13 @@ func TestMCPReadSectionIsCappedAndFindsRealHeadings(t *testing.T) {
 		fmt.Fprintf(&long, "row %d\n", i)
 	}
 	writeConceptFile(t, cfg.RootPath, "sections--0001.md", `---
-id: "019680f0-7e00-7abc-8def-100000000001"
+x-okfw-id: "019680f0-7e00-7abc-8def-100000000001"
 title: "Sections"
 # Setup
 type: "note"
 tags: []
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 # Sections
@@ -538,13 +538,13 @@ func TestMCPGraphHonoursLimitOnEveryAction(t *testing.T) {
 
 	const target = "019680f0-7e00-7abc-8def-1000000000ff"
 	writeConceptFile(t, cfg.RootPath, "target--00ff.md", `---
-id: "`+target+`"
+x-okfw-id: "`+target+`"
 title: "Target"
 type: "note"
 tags:
   - "shared"
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 # Target
@@ -552,13 +552,13 @@ timestamp: "2026-02-13T11:00:00Z"
 	for i := 0; i < 15; i++ {
 		id := fmt.Sprintf("019680f0-7e00-7abc-8def-2000000000%02d", i)
 		writeConceptFile(t, cfg.RootPath, fmt.Sprintf("linker%d--%02d.md", i, i), `---
-id: "`+id+`"
+x-okfw-id: "`+id+`"
 title: "Linker`+fmt.Sprint(i)+`"
 type: "note"
 tags:
   - "shared"
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 # Linker
@@ -663,13 +663,13 @@ func TestEveryMCPToolIsCappedAndSaysSo(t *testing.T) {
 	}
 	for i := 0; i < 30; i++ {
 		writeConceptFile(t, cfg.RootPath, fmt.Sprintf("bulk%02d--%02d.md", i, i), fmt.Sprintf(`---
-id: "019680f0-7e00-7abc-8def-3000000000%02d"
+x-okfw-id: "019680f0-7e00-7abc-8def-3000000000%02d"
 title: "Bulk %d"
 type: "note"
 tags:
   - "bulk"
-created: "2026-02-13T11:00:00Z"
-timestamp: "2026-02-13T11:00:00Z"
+x-okfw-created: "2026-02-13T11:00:00Z"
+x-okfw-timestamp: "2026-02-13T11:00:00Z"
 ---
 
 # Bulk %d

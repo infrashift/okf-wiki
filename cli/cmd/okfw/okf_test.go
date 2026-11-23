@@ -25,12 +25,12 @@ const describedRoot = "---\nokf_version: \"0.3\"\ntitle: \"Test\"\ndescription: 
 
 func conceptContent(id, title, typ, body string) string {
 	return "---\n" +
-		"id: \"" + id + "\"\n" +
+		"x-okfw-id: \"" + id + "\"\n" +
 		"title: \"" + title + "\"\n" +
 		"type: \"" + typ + "\"\n" +
 		"tags: []\n" +
-		"created: \"2026-02-13T10:45:00Z\"\n" +
-		"timestamp: \"2026-02-13T10:45:00Z\"\n" +
+		"x-okfw-created: \"2026-02-13T10:45:00Z\"\n" +
+		"x-okfw-timestamp: \"2026-02-13T10:45:00Z\"\n" +
 		"---\n\n" + body + "\n"
 }
 
@@ -221,13 +221,13 @@ func TestListDailyNotes_SlugFilenames(t *testing.T) {
 	id := bundle.NewV7WithTime(now)
 	title := now.Format("2006-01-02") + " " + now.Format("Monday")
 	content := "---\n" +
-		"id: \"" + id + "\"\n" +
+		"x-okfw-id: \"" + id + "\"\n" +
 		"title: \"" + title + "\"\n" +
 		"type: \"daily-note\"\n" +
-		"kind: \"daily-note\"\n" +
+		"x-okfw-kind: \"daily-note\"\n" +
 		"tags: []\n" +
-		"created: \"" + now.Format(time.RFC3339) + "\"\n" +
-		"timestamp: \"" + now.Format(time.RFC3339) + "\"\n" +
+		"x-okfw-created: \"" + now.Format(time.RFC3339) + "\"\n" +
+		"x-okfw-timestamp: \"" + now.Format(time.RFC3339) + "\"\n" +
 		"---\n\n# " + title + "\n"
 	rel := "daily/" + now.Format("2006") + "/" + now.Format("01") + "/" +
 		bundle.Slugify(title) + "--" + bundle.ShortID(id, 8) + ".md"
@@ -480,17 +480,17 @@ func TestRunValidateAllReportsADuplicatedID(t *testing.T) {
 // --- runMigrate ---
 
 const legacyTodoConcept = `---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Ship it"
 type: "todo"
-kind: "todo"
+x-okfw-kind: "todo"
 status: "closed"
 due: "2026-08-01"
 completed: "2026-07-20"
 priority: "high"
 tags: []
-created: "2026-07-01T10:00:00Z"
-timestamp: "2026-07-20T10:00:00Z"
+x-okfw-created: "2026-07-01T10:00:00Z"
+x-okfw-timestamp: "2026-07-20T10:00:00Z"
 ---
 
 # Ship it
@@ -573,7 +573,7 @@ func TestRunMigrateLeavesCleanConceptsAlone(t *testing.T) {
 // legacyDatedConcept is what okfw wrote before OKF required datetimes: bare
 // dates in every field that is now an instant, quoted and unquoted.
 const legacyDatedConcept = `---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Pricing"
 type: "note"
 tags: []
@@ -585,8 +585,8 @@ sources:
   - resource: "https://example.com/schema"
     last_modified: "2026-05-01"
     usage_window: {from: "2026-02-01", to: "2026-03-01"}
-created: "2026-02-13T10:45:00Z"
-timestamp: "2026-02-13T10:45:00Z"
+x-okfw-created: "2026-02-13T10:45:00Z"
+x-okfw-timestamp: "2026-02-13T10:45:00Z"
 ---
 
 # Pricing

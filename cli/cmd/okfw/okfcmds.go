@@ -56,7 +56,7 @@ func editConcept(ref string, fn func(m *yaml.Node) error) (string, error) {
 		// okfw's timestamp records every write. generated.at is left alone:
 		// these edit metadata, not the content a reviewer read (OKF v0.3
 		// section 5.2), so a verification stays current across them.
-		bundle.MapSetString(m, "timestamp", time.Now().Format(time.RFC3339))
+		bundle.MapSetString(m, config.KeyTimestamp, time.Now().Format(time.RFC3339))
 		return nil
 	})
 	if err != nil {

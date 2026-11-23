@@ -1,5 +1,5 @@
 ---
-id: "019680f0-7e00-7abc-8def-aaaaaaaaaaaa"
+x-okfw-id: "019680f0-7e00-7abc-8def-aaaaaaaaaaaa"
 title: "Revenue for fiscal year"
 type: "Attested Computation"
 description: "Recognized revenue for a fiscal year, per Finance's definition."
@@ -19,8 +19,8 @@ sources:
   - id: rev-policy
     resource: https://wiki.acme/finance/revenue-recognition
     title: Revenue recognition policy
-created: "2026-06-28T14:00:00Z"
-timestamp: "2026-06-28T14:00:00Z"
+x-okfw-created: "2026-06-28T14:00:00Z"
+x-okfw-timestamp: "2026-06-28T14:00:00Z"
 ---
 
 # Computation

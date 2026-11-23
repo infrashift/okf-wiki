@@ -12,14 +12,14 @@ import (
 // open `x:` extension. Editing one of these is the case the old line-oriented
 // editor could not handle.
 const nestedConcept = `---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "ParseFrontmatter"
 type: "code-function"
 description: "Extracts YAML frontmatter."
 tags:
   - "code"
-created: "2026-07-25T11:30:18-05:00"
-timestamp: "2026-07-25T11:30:18-05:00"
+x-okfw-created: "2026-07-25T11:30:18-05:00"
+x-okfw-timestamp: "2026-07-25T11:30:18-05:00"
 x:
   source: "concept.go#ParseFrontmatter"
   language: "go"
@@ -34,7 +34,7 @@ Body text.
 func TestEditPreservesUnknownKeysAndComments(t *testing.T) {
 	content := []byte(`---
 # leading comment
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "Test"
 unknown_key: "kept"   # trailing comment
 nested:
@@ -43,7 +43,7 @@ nested:
 
 # Test
 `)
-	out, err := UpdateFrontmatter(content, map[string]string{"timestamp": "2026-07-25T12:00:00Z"})
+	out, err := UpdateFrontmatter(content, map[string]string{config.KeyTimestamp: "2026-07-25T12:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -63,11 +63,11 @@ nested:
 }
 
 func TestEditPreservesKeyOrder(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"timestamp": "2026-07-25T13:00:00Z"})
+	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{config.KeyTimestamp: "2026-07-25T13:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
-	want := []string{"id:", "title:", "type:", "description:", "tags:", "created:", "timestamp:", "x:"}
+	want := []string{"x-okfw-id:", "title:", "type:", "description:", "tags:", "x-okfw-created:", "x-okfw-timestamp:", "x:"}
 	s := string(out)
 	at := 0
 	for _, key := range want {
@@ -95,7 +95,7 @@ func TestEditKeepsHouseStyleIndent(t *testing.T) {
 
 func TestEditOnlyChangesTheTargetedLine(t *testing.T) {
 	before := []byte(nestedConcept)
-	after, err := UpdateFrontmatter(before, map[string]string{"timestamp": "2026-07-25T14:00:00Z"})
+	after, err := UpdateFrontmatter(before, map[string]string{config.KeyTimestamp: "2026-07-25T14:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestUpdateFrontmatterRefusesToBreakAValidConcept(t *testing.T) {
 // An already-invalid concept must stay editable, or the CLI could never be used
 // to repair one.
 func TestUpdateFrontmatterStillEditsAnAlreadyInvalidConcept(t *testing.T) {
-	broken := []byte("---\nid: \"12345\"\ntitle: \"\"\n---\n\n# Broken\n")
+	broken := []byte("---\nx-okfw-id: \"12345\"\ntitle: \"\"\n---\n\n# Broken\n")
 	out, err := UpdateFrontmatter(broken, map[string]string{"title": "Repaired"})
 	if err != nil {
 		t.Fatalf("editing an already-invalid concept should be allowed: %v", err)
@@ -177,7 +177,7 @@ func TestSetPathUpdatesExistingNestedKey(t *testing.T) {
 
 func TestDeletePathPrunesEmptyParent(t *testing.T) {
 	content := []byte(`---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "T"
 x:
   only_key: "v"
@@ -195,8 +195,8 @@ x:
 }
 
 func TestUpdateFrontmatterUpdatesExistingTopLevelField(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"Old Title\"\nproject: \"old-proj\"\n---\n\n# Old Title\n")
-	out, err := UpdateFrontmatter(content, map[string]string{"project": "new-proj"})
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"Old Title\"\nx-okfw-project: \"old-proj\"\n---\n\n# Old Title\n")
+	out, err := UpdateFrontmatter(content, map[string]string{config.KeyProject: "new-proj"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -213,8 +213,8 @@ func TestUpdateFrontmatterUpdatesExistingTopLevelField(t *testing.T) {
 }
 
 func TestUpdateFrontmatterAddsNewTopLevelField(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"Test\"\n---\n\n# Test\n")
-	out, err := UpdateFrontmatter(content, map[string]string{"project": "my-proj"})
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"Test\"\n---\n\n# Test\n")
+	out, err := UpdateFrontmatter(content, map[string]string{config.KeyProject: "my-proj"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestUpdateFrontmatterAddsNewTopLevelField(t *testing.T) {
 }
 
 func TestUpdateFrontmatterRemoveRemovesTopLevelField(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"Test\"\nstale_after: \"2026-02-01\"\nstatus: \"draft\"\n---\n\n# Test\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"Test\"\nstale_after: \"2026-02-01\"\nstatus: \"draft\"\n---\n\n# Test\n")
 	out, err := UpdateFrontmatterRemove(content, map[string]string{"status": "stable"}, []string{"stale_after"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatterRemove: %v", err)
@@ -239,7 +239,7 @@ func TestUpdateFrontmatterRemoveRemovesTopLevelField(t *testing.T) {
 }
 
 func TestAddFrontmatterTagsAppendsToExistingList(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"T\"\ntags:\n  - \"golang\"\ncreated: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\ntags:\n  - \"golang\"\nx-okfw-created: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
 	out, err := AddFrontmatterTags(content, []string{"api", "security"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
@@ -254,7 +254,7 @@ func TestAddFrontmatterTagsAppendsToExistingList(t *testing.T) {
 
 // "tags: []" must become a block list rather than gaining a second tags key.
 func TestAddFrontmatterTagsReplacesEmptyInlineArray(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"T\"\ntags: []\ncreated: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\ntags: []\nx-okfw-created: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
 	out, err := AddFrontmatterTags(content, []string{"newtag"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
@@ -275,7 +275,7 @@ func TestAddFrontmatterTagsReplacesEmptyInlineArray(t *testing.T) {
 }
 
 func TestAddFrontmatterTagsCreatesMissingTagsField(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"T\"\ncreated: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\nx-okfw-created: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
 	out, err := AddFrontmatterTags(content, []string{"first-tag"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
@@ -288,7 +288,7 @@ func TestAddFrontmatterTagsCreatesMissingTagsField(t *testing.T) {
 
 // "tags:" with no value parses as null, not as a sequence.
 func TestAddFrontmatterTagsHandlesNullTags(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"T\"\ntags:\ncreated: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\ntags:\nx-okfw-created: \"2026-02-01T10:00:00Z\"\n---\n\n# T\n")
 	out, err := AddFrontmatterTags(content, []string{"t"})
 	if err != nil {
 		t.Fatalf("AddFrontmatterTags: %v", err)
@@ -330,8 +330,8 @@ func TestAddFrontmatterTagsKeepsBodyByteIdentical(t *testing.T) {
 // scan silently, and the truncated block was written back over a good file.
 func TestLongFrontmatterLineSurvives(t *testing.T) {
 	long := strings.Repeat("x", 100_000)
-	content := []byte("---\nid: \"019680f0-7e00-7abc-8def-1234567890ab\"\ntitle: \"T\"\ndescription: \"" + long + "\"\ntags: []\n---\n\n# T\n")
-	out, err := UpdateFrontmatter(content, map[string]string{"project": "p"})
+	content := []byte("---\nx-okfw-id: \"019680f0-7e00-7abc-8def-1234567890ab\"\ntitle: \"T\"\ndescription: \"" + long + "\"\ntags: []\n---\n\n# T\n")
+	out, err := UpdateFrontmatter(content, map[string]string{config.KeyProject: "p"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestLongFrontmatterLineSurvives(t *testing.T) {
 	if got["description"] != long {
 		t.Errorf("long value truncated: got %d chars, want %d", len(got["description"].(string)), len(long))
 	}
-	if got["title"] != "T" || got["project"] != "p" {
+	if got["title"] != "T" || got[config.KeyProject] != "p" {
 		t.Errorf("fields lost after long line: %v", got)
 	}
 }
@@ -354,7 +354,7 @@ func TestLongFrontmatterLineSurvives(t *testing.T) {
 func TestNoFrontmatterIsAnError(t *testing.T) {
 	for _, tc := range []struct{ name, content string }{
 		{"no delimiter", "# Just a heading\n"},
-		{"unterminated", "---\nid: \"x\"\n\n# Body\n"},
+		{"unterminated", "---\nx-okfw-id: \"x\"\n\n# Body\n"},
 		{"not a mapping", "---\n- a\n- b\n---\n\n# Body\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -368,7 +368,7 @@ func TestNoFrontmatterIsAnError(t *testing.T) {
 // A body line of "---" must not be mistaken for the closing delimiter, and a
 // value containing "\n---" must not end the block early.
 func TestSplitFrontmatterRequiresDelimiterOnItsOwnLine(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ndescription: |\n  before\n  ---not-a-delimiter\n  after\n---\n\n# Body\n\n---\n\nAfter a rule.\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ndescription: |\n  before\n  ---not-a-delimiter\n  after\n---\n\n# Body\n\n---\n\nAfter a rule.\n")
 	fm, closing, rest, err := splitFrontmatter(content)
 	if err != nil {
 		t.Fatalf("splitFrontmatter: %v", err)
@@ -385,7 +385,7 @@ func TestSplitFrontmatterRequiresDelimiterOnItsOwnLine(t *testing.T) {
 }
 
 func TestSplitFrontmatterHandlesCRLF(t *testing.T) {
-	content := []byte("---\r\nid: \"x\"\r\ntitle: \"T\"\r\n---\r\n\r\n# Body\r\n")
+	content := []byte("---\r\nx-okfw-id: \"x\"\r\ntitle: \"T\"\r\n---\r\n\r\n# Body\r\n")
 	fm, closing, rest, err := splitFrontmatter(content)
 	if err != nil {
 		t.Fatalf("splitFrontmatter: %v", err)
@@ -402,11 +402,11 @@ func TestSplitFrontmatterHandlesCRLF(t *testing.T) {
 }
 
 func TestUpdateFrontmatterAppendsDeterministically(t *testing.T) {
-	content := []byte("---\nid: \"x\"\ntitle: \"T\"\n---\n\n# T\n")
+	content := []byte("---\nx-okfw-id: \"x\"\ntitle: \"T\"\n---\n\n# T\n")
 	updates := map[string]string{"alpha": "1", "beta": "2", "gamma": "3", "delta": "4", "epsilon": "5"}
 	var prev string
 	for i := 0; i < 8; i++ {
-		u := map[string]string{"timestamp": "t"}
+		u := map[string]string{config.KeyTimestamp: "t"}
 		for k, v := range updates {
 			u[k] = v
 		}
@@ -422,22 +422,22 @@ func TestUpdateFrontmatterAppendsDeterministically(t *testing.T) {
 }
 
 func TestTouchTimestampLeavesExplicitValue(t *testing.T) {
-	got := TouchTimestamp(map[string]string{"timestamp": "explicit"})
-	if got["timestamp"] != "explicit" {
-		t.Errorf("timestamp = %q, want explicit", got["timestamp"])
+	got := TouchTimestamp(map[string]string{config.KeyTimestamp: "explicit"})
+	if got[config.KeyTimestamp] != "explicit" {
+		t.Errorf("timestamp = %q, want explicit", got[config.KeyTimestamp])
 	}
-	if ts := TouchTimestamp(nil)["timestamp"]; ts == "" {
+	if ts := TouchTimestamp(nil)[config.KeyTimestamp]; ts == "" {
 		t.Error("TouchTimestamp(nil) should stamp a timestamp")
 	}
 }
 
 const generatedConcept = `---
-id: "019680f0-7e00-7abc-8def-1234567890ab"
+x-okfw-id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "T"
 type: "note"
 tags: []
-created: "2026-07-01T10:00:00Z"
-timestamp: "2026-07-01T10:00:00Z"
+x-okfw-created: "2026-07-01T10:00:00Z"
+x-okfw-timestamp: "2026-07-01T10:00:00Z"
 generated:
   by: "human:ryan"
   at: "2026-07-01T10:00:00Z"
@@ -453,7 +453,7 @@ verified:
 // content. A metadata edit moves okfw's timestamp but not generated.at, so a
 // human review stays current across it (section 5.3).
 func TestUpdateFrontmatterLeavesGeneratedAtAlone(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(generatedConcept), map[string]string{"timestamp": "2026-07-25T12:00:00Z", "project": "p"})
+	out, err := UpdateFrontmatter([]byte(generatedConcept), map[string]string{config.KeyTimestamp: "2026-07-25T12:00:00Z", config.KeyProject: "p"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
@@ -496,7 +496,7 @@ func TestTouchContentChangeMovesGeneratedAt(t *testing.T) {
 // Without an actor there is nothing truthful to put in generated.by, so no
 // generated block is invented.
 func TestUpdateFrontmatterDoesNotInventGeneratedBlock(t *testing.T) {
-	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{"timestamp": "2026-07-25T12:00:00Z"})
+	out, err := UpdateFrontmatter([]byte(nestedConcept), map[string]string{config.KeyTimestamp: "2026-07-25T12:00:00Z"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}

@@ -730,7 +730,7 @@ do
     if #matches == 1 then
         local id
         for _, l in ipairs(vim.fn.readfile(matches[1], "", 20)) do
-            id = id or l:match('^id:%s*"([^"]+)"')
+            id = id or l:match('^x%-okfw%-id:%s*"([^"]+)"')
         end
         okfw._bundle_roots = {}
         local real_cwd = vim.fn.getcwd()
@@ -778,7 +778,7 @@ do
     if #matches == 1 then
         local id
         for _, l in ipairs(vim.fn.readfile(matches[1], "", 20)) do
-            id = id or l:match('^id:%s*"([^"]+)"')
+            id = id or l:match('^x%-okfw%-id:%s*"([^"]+)"')
         end
         local moved = test_project .. "/.okfw/by-id/" .. vim.fn.fnamemodify(matches[1], ":t")
         vim.cmd("OkfwMove " .. id .. " by-id/")

@@ -21,9 +21,9 @@ func write(t *testing.T, root, rel, content string) {
 }
 
 func concept(id, title, desc, body string, extra string) string {
-	return "---\nid: \"" + id + "\"\ntitle: \"" + title + "\"\ntype: \"note\"\n" +
+	return "---\nx-okfw-id: \"" + id + "\"\ntitle: \"" + title + "\"\ntype: \"note\"\n" +
 		"description: \"" + desc + "\"\ntags: []\n" +
-		"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n" +
+		"x-okfw-created: \"2026-01-01T00:00:00Z\"\nx-okfw-timestamp: \"2026-01-01T00:00:00Z\"\n" +
 		extra + "---\n" + body
 }
 
@@ -94,9 +94,9 @@ func TestDeletedConceptIsGoneImmediately(t *testing.T) {
 func TestFiltersAndPaging(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "n--0001.md", concept("019680f0-7e00-7abc-8def-100000000000",
-		"Note one", "", "body\n", "project: \"p1\"\n"))
+		"Note one", "", "body\n", "x-okfw-project: \"p1\"\n"))
 	write(t, root, "n--0002.md", concept("019680f0-7e00-7abc-8def-200000000000",
-		"Note two", "", "body\n", "project: \"p2\"\n"))
+		"Note two", "", "body\n", "x-okfw-project: \"p2\"\n"))
 
 	if _, total, _ := Search(root, Options{Project: "p1"}); total != 1 {
 		t.Errorf("project filter: total = %d, want 1", total)
@@ -124,9 +124,9 @@ func TestStaleFilterReadsInstants(t *testing.T) {
 	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
 	for name, stale := range map[string]string{"past": past, "future": future, "dateonly": "2000-01-01", "Dfuture": "2999-01-01", "garbage": "soon"} {
-		write(t, root, name+".md", "---\nid: \"019680f0-7e00-7abc-8def-10000000000"+name[:1]+"\"\n"+
+		write(t, root, name+".md", "---\nx-okfw-id: \"019680f0-7e00-7abc-8def-10000000000"+name[:1]+"\"\n"+
 			"title: \""+name+"\"\ntype: \"note\"\ntags: []\nstale_after: \""+stale+"\"\n"+
-			"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
+			"x-okfw-created: \"2026-01-01T00:00:00Z\"\nx-okfw-timestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
 	}
 	hits, _, err := Search(root, Options{Stale: true})
 	if err != nil {
@@ -148,8 +148,8 @@ func TestStaleFilterReadsInstants(t *testing.T) {
 func TestSearchFindsConceptsOkfwWouldReject(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "metrics/revenue.md", "---\ntype: Metric\ntitle: Revenue\n---\nRecognized revenue.\n")
-	write(t, root, "scalar-tags.md", "---\nid: \"019680f0-7e00-7abc-8def-100000000001\"\ntitle: \"Scalar Revenue Tags\"\n"+
-		"type: \"note\"\ntags: revenue\ncreated: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
+	write(t, root, "scalar-tags.md", "---\nx-okfw-id: \"019680f0-7e00-7abc-8def-100000000001\"\ntitle: \"Scalar Revenue Tags\"\n"+
+		"type: \"note\"\ntags: revenue\nx-okfw-created: \"2026-01-01T00:00:00Z\"\nx-okfw-timestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
 	hits, total, err := Search(root, Options{Query: "revenue"})
 	if err != nil {
 		t.Fatal(err)

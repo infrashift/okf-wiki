@@ -71,3 +71,31 @@ func TimestampsNeedingRepair(content []byte) ([]string, error) {
 	sort.Strings(bad)
 	return bad, err
 }
+
+// UpgradeOkfwKeys renames the bare keys okfw wrote before its namespace — id,
+// kind, project, parent, created, timestamp — to x-okfw-*, keeping each
+// key's place, value and quoting. It returns the rewritten content and the
+// keys it renamed, or (nil, nil) when there is nothing to rename, including
+// for a concept another producer wrote (config.LegacyKeysToUpgrade).
+func UpgradeOkfwKeys(content []byte) ([]byte, []string, error) {
+	if !hasFrontmatter(content) {
+		return nil, nil, nil
+	}
+	fm, _, _, err := splitFrontmatter(content)
+	if err != nil {
+		return nil, nil, err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(fm, &doc); err != nil || len(doc.Content) == 0 {
+		return nil, nil, nil
+	}
+	old := config.LegacyKeysToUpgrade(doc.Content[0])
+	if len(old) == 0 {
+		return nil, nil, nil
+	}
+	out, err := Edit(content, func(*yaml.Node) error { return nil }) // Edit renames them
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, old, nil
+}

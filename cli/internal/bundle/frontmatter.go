@@ -5,16 +5,18 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
-// TouchTimestamp ensures the updates map stamps a fresh `timestamp` unless the
+// TouchTimestamp ensures the updates map stamps a fresh `x-okfw-timestamp` unless the
 // caller set one explicitly.
 func TouchTimestamp(updates map[string]string) map[string]string {
 	if updates == nil {
 		updates = map[string]string{}
 	}
-	if _, ok := updates["timestamp"]; !ok {
-		updates["timestamp"] = time.Now().Format(time.RFC3339)
+	if _, ok := updates[config.KeyTimestamp]; !ok {
+		updates[config.KeyTimestamp] = time.Now().Format(time.RFC3339)
 	}
 	return updates
 }
@@ -32,7 +34,7 @@ func sortedKeys(m map[string]string) []string {
 }
 
 // UpdateFrontmatter sets fields in a concept's YAML frontmatter, bumping
-// `timestamp` unless the caller supplied one. It never moves generated.at: a
+// `x-okfw-timestamp` unless the caller supplied one. It never moves generated.at: a
 // metadata edit is not a change to the content (see TouchContentChange). Keys may be dotted paths
 // ("okfw.status"); intermediate mappings are created as needed.
 func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error) {
@@ -55,7 +57,7 @@ func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error
 }
 
 // TouchContentChange records a meaningful change to a concept's content: it
-// bumps `timestamp` and, when the concept has a `generated` block, moves
+// bumps `x-okfw-timestamp` and, when the concept has a `generated` block, moves
 // generated.at to the same instant.
 //
 // OKF v0.3 section 5.2 gives generated.at one meaning — the last meaningful
@@ -71,7 +73,7 @@ func UpdateFrontmatter(content []byte, updates map[string]string) ([]byte, error
 func TouchContentChange(content []byte) ([]byte, error) {
 	stamp := time.Now().Format(time.RFC3339)
 	out, err := Edit(content, func(m *yaml.Node) error {
-		MapSetString(m, "timestamp", stamp)
+		MapSetString(m, config.KeyTimestamp, stamp)
 		if MapGet(m, "generated") == nil {
 			return nil
 		}
