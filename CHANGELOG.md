@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.11.4 — 2026-11-23
 
 ### Fixed
 - **Neovim: `gf` on a bare frontmatter path opened the wrong file.** `follow_link` read a path-valued field such as `resource: notes/a.md` from the wiki root, the OKF v0.2 rule, while the CLI has followed v0.3 since v2026.11.0: a bare path resolves from the concept's directory, as a body link does. In a v0.3 bundle, `gf` could open a different file than `okfw backlinks` and `okfw move` use, or open a file the CLI does not count as a link. `gf` now follows the CLI's rule, root fallback included: a bundle that declares `okf_version` 0.2 or none still tries the wiki root for a bare path that names no file beside the concept.

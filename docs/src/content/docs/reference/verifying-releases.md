@@ -26,7 +26,7 @@ later (checked with v2.6.5, v3.0.4 and v3.1.4).
 ## 1. Download
 
 ```bash
-VERSION=v2026.11.3
+VERSION=v2026.11.4
 mkdir okfw-$VERSION && cd okfw-$VERSION
 gh release download $VERSION -R infrashift/okf-wiki
 ```
@@ -115,7 +115,7 @@ checked:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
-okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.3
+okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.4
 ```
 
 If you have Go, `go version -m` prints the build data that the binary
