@@ -204,9 +204,10 @@ do
     end
 end
 
--- Test 8: Test set-project command via CLI
+-- Test 8: set-project is deprecated (organize by directory instead) but still
+-- works: exit 0, with the deprecation notice on stderr, not as a failure.
 log("")
-log("Test 8: CLI set-project command")
+log("Test 8: CLI set-project command (deprecated, still works)")
 do
     local Job = require("plenary.job")
     local function set_project(path)
@@ -831,6 +832,44 @@ do
         for _, h in ipairs(got or {}) do table.insert(titles, h.title) end
         assert_eq(table.concat(titles, ","), "Retired Subject", "--status keeps only the deprecated concept")
     end
+end
+
+-- Test 40: --path replaces the deprecated project. create_note and search
+-- take opts.path and pass --path; opts.project still works but warns once.
+log("")
+log("Test 40: opts.path places and scopes; opts.project warns once")
+do
+    local before = vim.fn.glob(test_project .. "/.okfw/specs/auth/*.md", false, true)
+    okfw.create_note({ title = "Path Placed Spec", path = "specs/auth" })
+    local placed
+    vim.wait(8000, function()
+        placed = vim.fn.glob(test_project .. "/.okfw/specs/auth/path-placed-spec--*.md", false, true)
+        return #placed == 1
+    end)
+    assert_eq(#placed, 1, "create_note({ path }) wrote the concept under specs/auth/")
+    assert_eq(#before, 0, "specs/auth/ held nothing before")
+
+    local got
+    okfw.search("", { path = "specs", on_results = function(r) got = r end })
+    vim.wait(8000, function() return got ~= nil end)
+    local titles = {}
+    for _, h in ipairs(got or {}) do table.insert(titles, h.title) end
+    assert_eq(table.concat(titles, ","), "Path Placed Spec", "search({ path }) scopes to the directory")
+
+    local real_notify = vim.notify
+    local warnings = 0
+    vim.notify = function(msg, level)
+        if level == vim.log.levels.WARN and msg:find("deprecated", 1, true) then
+            warnings = warnings + 1
+        end
+    end
+    okfw._deprecation_warned = {}
+    local args1, args2 = {}, {}
+    okfw._dir_args(args1, { project = "legacy" }, "place")
+    okfw._dir_args(args2, { project = "legacy" }, "search")
+    vim.notify = real_notify
+    assert_eq(table.concat(args1, " "), "--project legacy", "opts.project is still passed to okfw")
+    assert_eq(warnings, 1, "opts.project warns once per session")
 end
 
 -- Summary

@@ -46,7 +46,7 @@ The layout inside `.okfw/` is fixed:
 
 | Path | Description |
 |------|-------------|
-| `*.md` (top level) | Concept markdown files (subdirectories via `--path` or `--project`) |
+| `*.md` (top level) | Concept markdown files (subdirectories via `--path`) |
 | `index.md` (every directory) | OKF directory listing, auto-maintained on every note change |
 | `daily/YYYY/MM/` | Daily notes, grouped by year and month |
 | `.ephemeral/` | Export scratch directory (the only generated directory) |

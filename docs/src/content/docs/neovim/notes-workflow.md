@@ -175,20 +175,18 @@ listings. If you edited concepts outside NeoVim, regenerate the listings with:
 
 A week later, you've used this pattern successfully. Time to refine the note: review the content, sharpen the writing, and add any context you were missing at capture time.
 
-You can also set a project with `\p` (`\` is NeoVim's default `<localleader>`;
-the mapping exists on plain notes, not daily notes or issues):
-```
-\p  →  Project: _
+You can also file it in a directory with `:OkfwMove`, which keeps its id and
+repairs every link to it:
+```vim
+:OkfwMove patterns/
 ```
 
-The note's frontmatter is updated:
-```yaml
-x-okfw-project: "my-project"
-```
+(The `\p` mapping that set a project still works but is deprecated: a
+directory does the same job, and every OKF tool reads it.)
 
 **Why refine?**
 - Refined notes represent validated knowledge
-- Project context makes them easy to find later
+- A directory makes them easy to find later (`:OkfwSearch --path patterns`)
 - They're the building blocks of your knowledge base
 
 ### Step 6: Link Notes Together
@@ -388,8 +386,8 @@ Search as you type:
 `:OkfwSearch` supports flags for filtering by frontmatter fields:
 
 ```vim
-" Filter by project
-:OkfwSearch --project my-project
+" Search one directory, recursively
+:OkfwSearch --path research
 
 " Filter by structured kind (note/daily-note/issue)
 :OkfwSearch --kind issue
@@ -406,7 +404,7 @@ Search as you type:
 :OkfwSearch --stale
 
 " Combine flags with a text query
-:OkfwSearch --project my-project --kind issue authentication
+:OkfwSearch --path issues --kind issue authentication
 
 " Combine flags with live search
 :OkfwSearch! --kind issue
@@ -494,7 +492,6 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Refresh index.
 | Live search | `:OkfwSearch!` | `<leader>z/` |
 | Insert link | `\l` / `\L` (buffer-local) | Auto-mapped on concepts |
 | Toggle backlinks | `\b` (buffer-local) | Auto-mapped on concepts |
-| Set project | `\p` (buffer-local) | Auto-mapped on plain notes |
 | Add tags | `\a` (buffer-local) | Auto-mapped on all concepts |
 | Validate frontmatter | `\v` (buffer-local) | Auto-mapped on all concepts |
 | Generate graph | `:OkfwGraph` | `<leader>zg` |
@@ -550,7 +547,7 @@ okfw daily --help
 You've learned how to:
 
 1. **Capture** - Create notes for quick ideas
-2. **Refine** - Add content, tags, and project context
+2. **Refine** - Add content and tags, and file it in a directory
 3. **Link** - Connect validated insights to related notes
 4. **Search** - Find and connect your knowledge
 5. **Template** - Use structured formats for consistency

@@ -145,7 +145,7 @@ automatically provides buffer-local keymaps:
 | `<localleader>l` | Insert link |
 | `<localleader>L` | Insert link with title |
 | `<localleader>b` | Toggle backlinks |
-| `<localleader>p` | Set project (plain notes only, not daily notes or issues) |
+| `<localleader>p` | Set project (**deprecated**, see [`set_project`](#set_projectfile_path-project); plain notes only) |
 | `<localleader>a` | Add tags (all concept types) |
 | `<localleader>v` | Validate frontmatter (all concept types) |
 | `gf` | Follow the markdown link under the cursor (`/` resolves to the wiki root) |
@@ -169,10 +169,10 @@ vim.keymap.set("n", "<leader>zf", function()
     require("okfw").create_note()
 end, { desc = "Create note" })
 
--- Set project on current note
-vim.keymap.set("n", "<leader>zs", function()
-    require("okfw").set_project()
-end, { desc = "Set project" })
+-- Move the current note to another directory
+vim.keymap.set("n", "<leader>zM", function()
+    require("okfw").move_note()
+end, { desc = "Move note" })
 
 -- Search with picker
 vim.keymap.set("n", "<leader>zz", function()
@@ -258,7 +258,7 @@ wk.register({
     z = {
         name = "OKF Wiki",
         f = { function() require("okfw").create_note() end, "Create note" },
-        s = { function() require("okfw").set_project() end, "Set project" },
+        M = { function() require("okfw").move_note() end, "Move note" },
         g = { function() require("okfw").graph() end, "Generate graph" },
         v = { function() require("okfw").preview_note() end, "Preview note" },
         V = { function() require("okfw").preview_by_id() end, "Preview by ID" },
@@ -361,7 +361,8 @@ Create a new note.
 **Parameters:**
 - `opts` (table, optional):
   - `title` (string): Note title. Prompted for when omitted.
-  - `project` (string): Project metadata for the note. Omitted when nil.
+  - `path` (string): Wiki subdirectory to place the note in (`okfw create --path`; created if missing). Omitted when nil.
+  - `project` (string): **Deprecated**: still passed as `--project`, with a one-time warning. Use `path`.
 
 **Behavior:**
 1. Prompts for note title via `vim.fn.input()` (unless `title` is given)
@@ -370,12 +371,14 @@ Create a new note.
 
 ```lua
 require("okfw").create_note()
-require("okfw").create_note({ project = "my-project" })
+require("okfw").create_note({ path = "research/auth" })
 ```
 
 ### `set_project(file_path, project)`
 
-Set or update the project for a concept.
+**Deprecated.** Organize concepts by directory instead, and refile one with
+[`move_note`](#move_notefile_path-dest) (`okfw move`). `set_project` still sets
+`x-okfw-project` through `okfw set-project`, warning once per session.
 
 **Parameters:**
 - `file_path` (string, optional): Path to the note. Defaults to current buffer.
@@ -430,7 +433,8 @@ Search concepts with optional filters. This prints the hits (or hands them to
 **Parameters:**
 - `query` (string, optional): Full-text search query.
 - `opts` (table, optional):
-  - `project` (string): Filter by project
+  - `path` (string): Search only this wiki subdirectory, recursively
+  - `project` (string): **Deprecated** (warns once); use `path`
   - `tags` (table): Filter by tags (AND logic)
   - `type` (string): Filter by the free-form OKF `type`
   - `kind` (string): Filter by kind (`note`, `daily-note`, `issue`)
@@ -441,7 +445,7 @@ Search concepts with optional filters. This prints the hits (or hands them to
 
 ```lua
 require("okfw").search("authentication")
-require("okfw").search("query", { project = "my-project", on_results = function(r) ... end })
+require("okfw").search("query", { path = "research", on_results = function(r) ... end })
 ```
 
 ### `index(path)`
@@ -821,7 +825,8 @@ Create a note from a template.
 **Parameters:**
 - `opts` (table, optional):
   - `template` (string): Template name (e.g., `"meeting"`, `"user-story"`). Opens the template picker when omitted.
-  - `project` (string): Project metadata for the note. Omitted when nil.
+  - `path` (string): Wiki subdirectory to place the note in. Omitted when nil.
+  - `project` (string): **Deprecated** (warns once); use `path`.
 
 **Behavior:**
 1. Prompts for note title
@@ -830,7 +835,7 @@ Create a note from a template.
 
 ```lua
 require("okfw").create_from_template({ template = "meeting" })
-require("okfw").create_from_template({ template = "feature", project = "my-project" })
+require("okfw").create_from_template({ template = "feature", path = "specs" })
 ```
 
 ### `template_picker(opts)`
@@ -839,7 +844,8 @@ Open a picker to select a template and create a note. Requires snacks.nvim.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `project` (string): Project context for the new note
+  - `path` (string): Wiki subdirectory for the new note
+  - `project` (string): **Deprecated** (warns once); use `path`
 
 **Behavior:**
 1. Displays all available templates with descriptions
@@ -848,7 +854,7 @@ Open a picker to select a template and create a note. Requires snacks.nvim.
 
 ```lua
 require("okfw").template_picker()
-require("okfw").template_picker({ project = "my-project" })
+require("okfw").template_picker({ path = "specs" })
 ```
 
 ### `daily(opts)`
@@ -936,7 +942,8 @@ Open picker with live search (results update as you type).
 
 **Common opts:**
 - `query` (string): Full-text query (`search()` only; `live_search()` uses what you type)
-- `project` (string): Filter by project
+- `path` (string): Search only this wiki subdirectory, recursively
+- `project` (string): **Deprecated** (warns once); use `path`
 - `type` (string): Filter by the free-form OKF `type`
 - `kind` (string): `note`, `daily-note`, or `issue`
 - `status` (string): `draft`, `stable`, or `deprecated`
@@ -959,4 +966,4 @@ Open picker specifically for inserting links. Same as `require("okfw").link_pick
 
 ## Future Features
 
-- Project completion
+- Directory completion for `--path`

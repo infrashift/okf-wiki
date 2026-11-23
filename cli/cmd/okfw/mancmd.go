@@ -92,6 +92,6 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&dir, "dir", "", "Directory to write the pages to (default ~/.local/share/man/man1)")
+	cmd.Flags().StringVar(&dir, "dir", "", "Directory to write the pages to (default: $XDG_DATA_HOME/man/man1, else ~/.local/share/man/man1)")
 	return cmd
 }

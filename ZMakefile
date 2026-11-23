@@ -137,7 +137,7 @@ build-linux-amd64 build-linux-arm64 build-darwin-arm64: build-%:
 # a recipe changed in one fails this.
 ZMAKE ?= zmake
 ZMAKE_CHECK_TASKS=build build-linux-amd64 build-linux-arm64 build-darwin-arm64 man dist signing-key sign verify-signatures \
-	test test-race lint fmt install ui-check integration-test e2e clean tidy docs-dev-up docs-dev-down docs-build \
+	test test-race lint fmt install ui-check integration-test e2e clean tidy docs-dev-up docs-dev-down docs-build docs-flags \
 	build-image run-container stop-container
 @zmake-check:
 	@command -v $(ZMAKE) >/dev/null || { echo "zmake-check needs zmake: https://github.com/infrashift/zmake/releases" >&2; exit 1; }
@@ -223,6 +223,11 @@ BUN ?= bun
 
 @docs-build:
 	cd docs && $(BUN) install --frozen-lockfile && $(BUN) --bun run build
+
+# The CLI Flags page is generated from the command tree, like the man pages;
+# TestCLIFlagReferenceIsCurrent fails when it is stale.
+@docs-flags:
+	OKFW_UPDATE_DOCS=1 go test ./cli/cmd/okfw -run '^TestCLIFlagReferenceIsCurrent$$' -count=1
 
 @build-image:
 	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) --build-arg VERSION=$(VERSION) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .

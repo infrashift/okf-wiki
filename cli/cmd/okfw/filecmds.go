@@ -82,7 +82,7 @@ Examples:
 			return nil
 		},
 	}
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "Delete without confirming")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Delete without asking for confirmation")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "Output the result as JSON")
 	return cmd
 }
@@ -92,7 +92,7 @@ func newMoveCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "move <id_or_file> <destination>",
 		Aliases: []string{"rename", "mv"},
-		Short:   "Move or rename a concept, repairing links at both ends",
+		Short:   "Move or rename a concept, and repair the links at both ends",
 		Long: `Relocate a concept within the bundle. Its ` + "`id`" + ` does not change, so
 hierarchies built with ` + "`parent`" + ` survive untouched.
 

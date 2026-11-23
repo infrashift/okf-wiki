@@ -41,16 +41,10 @@ the `okfw init` advice when no wiki is found.
 
 ## Note Creation
 
-### Create a note (no project required)
+### Create a note
 ```bash
 okfw create "Quick idea about X"
 okfw create "My note title"
-```
-
-### Create a note with a project
-```bash
-okfw create "Project idea" --project my-project
-okfw create "Project idea" -p my-project
 ```
 
 ### Create a note with a description
@@ -75,24 +69,30 @@ kind.
 
 ### Place a note in a specific wiki subdirectory
 ```bash
-okfw create "Spec draft" --path projects/okf
+okfw create "Spec draft" --path specs/auth
 ```
 
-`--path <subdir>` places the new concept at an arbitrary path under the wiki
-root (here, `.okfw/projects/okf/`). A `--path` that would escape the wiki or
-name a dot-directory (`.hidden`, `../out`) is refused. With no `--path`,
-placement falls back to a top-level folder named after the project, or the wiki
-root when no project is set (or when the project name is not a usable folder
-name).
+`--path <subdir>` places the new concept at any path under the wiki root (here,
+`.okfw/specs/auth/`), creating the directory if it is missing. A `--path` that
+would escape the wiki or name a dot-directory (`.hidden`, `../out`) is refused.
+With no `--path`, the concept lands at the wiki root.
+
+Directories are how a wiki is organized: every OKF tool reads them, each one
+gets an `index.md` listing, and `okfw search --path` scopes a search to one.
+Use tags for anything that cuts across directories.
+
+:::note[`--project` is deprecated]
+`okfw create --project <name>` (`-p`) and `okfw search --project` still work,
+but print a warning; use `--path` instead. They date from when one global wiki
+held every repository's notes and `project` told them apart. A wiki now lives
+in each repository, and a directory does the same job in a form every OKF tool
+reads, where `x-okfw-project` means nothing outside okfw. Concepts that already
+carry `x-okfw-project` keep it, and search hits still show it.
+:::
 
 ---
 
 ## Note Management
-
-### Set project on a note
-```bash
-okfw set-project path/to/note.md my-project
-```
 
 ### Delete a concept
 ```bash
@@ -294,10 +294,10 @@ checked before anything is written: a refused create leaves nothing behind.
 
 | Tool | Parameters | Bounds |
 |------|------------|--------|
-| `okfw_search` | `q`, `project`, `tag`, `tags` (all must match), `dir`, `kind`, `type`, `status`, `stale`, `limit`, `offset` | 10 hits by default, at most 100 per page; `truncated` and `next_offset` say there are more |
-| `okfw_create` | `kind` (`note`/`issue`/`daily`), `title`, `project`, `dir`, `tags`, `description`, `body`, `template`, `date`, and for a note or issue `type`, `status`, `stale_after`, `resource`, `generated_by` | Returns `{id,path}` (a daily note returns `{path}`) |
+| `okfw_search` | `q`, `tag`, `tags` (all must match), `dir`, `kind`, `type`, `status`, `stale`, `limit`, `offset` | 10 hits by default, at most 100 per page; `truncated` and `next_offset` say there are more |
+| `okfw_create` | `kind` (`note`/`issue`/`daily`), `title`, `dir`, `tags`, `description`, `body`, `template`, `date`, and for a note or issue `type`, `status`, `stale_after`, `resource`, `generated_by` | Returns `{id,path}` (a daily note returns `{path}`) |
 | `okfw_read` | `ref` (required: a concept, or a directory such as `/` or `issues/`), `section`, `offset`, `limit` | 200 lines by default; narrow with `section` or page with `offset`/`limit` |
-| `okfw_update` | `ref`, `action`, `value` (all required; an empty `value` on `verify`/`set_generated` means `human:<login>`) | Actions: `set_project`, `set_lifecycle`, `set_stale_after`, `add_tags`, `remove_tags`, `append`, `set_body`, `verify`, `set_generated`, `set_resource`, `add_source` — the same writers as the CLI |
+| `okfw_update` | `ref`, `action`, `value` (all required; an empty `value` on `verify`/`set_generated` means `human:<login>`) | Actions: `set_lifecycle`, `set_stale_after`, `add_tags`, `remove_tags`, `append`, `set_body`, `verify`, `set_generated`, `set_resource`, `add_source` — the same writers as the CLI |
 | `okfw_graph` | `action` (`backlinks`/`cluster`/`tag`/`dangling`), `ref`, `depth`, `limit` | 10 nodes by default; `truncated` means more exist |
 
 Every search hit carries `trust`, plus `status` and `stale` when they are the
@@ -345,7 +345,7 @@ include each concept's description.
 
 You rarely need to run this by hand: creating or updating a note keeps every
 `index.md` fresh automatically — including a new `index.md` for any
-subdirectory a `--path`/`--project` note just created. okfw marks the listings
+subdirectory a `--path` note just created. okfw marks the listings
 it generates with an `<!-- okfw:generated ... -->` comment and maintains only
 those; hand edits to a marked listing will not survive. `okfw index-md` also
 adopts an unmarked `index.md` in a directory holding okfw concepts (that is how
@@ -376,13 +376,6 @@ commit's subject. Pass a directory inside the bundle to give it its own
 ```bash
 okfw search "authentication patterns"
 okfw search "golang error handling"
-```
-
-### Filter by project
-```bash
-okfw search --project my-project
-okfw search -p my-project
-okfw search "query" --project my-project  # Combined
 ```
 
 ### Filter by tags
@@ -452,7 +445,7 @@ longer looks like the reviewed, current answer:
 
 ```
 1. Ledger reconciliation
-   ID: 019f0494-... | Project: finance
+   ID: 019f0494-...
    Trust: human-reviewed | draft | stale since 2026-06-30T00:00:00Z
 ```
 
@@ -489,8 +482,8 @@ the same results.
 
 ### Combined filters
 ```bash
-okfw search "authentication" --project my-project --tag security
-okfw search --kind issue --status draft --project my-project
+okfw search "authentication" --path research --tag security
+okfw search --kind issue --status draft --path issues
 ```
 
 ---
@@ -865,303 +858,10 @@ To check a downloaded release, see
 
 ## Flags Reference
 
-All commands other than `okfw init` and `okfw templates` require a discovered
-wiki; they exit non-zero with the `okfw init` advice when none is found.
-(`okfw mcp` starts without one and looks for it on every tool call.)
-
-### Global flags
-
-| Flag | Short | Description |
-|------|-------|-------------|
-| `--version` | `-v` | Print the version and exit |
-| `--help` | `-h` | Show help |
-
-### `okfw init`
-
-Usage: `okfw init`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--title` | - | the project directory's name | Bundle title (root `index.md`, OKF §8.1) |
-| `--description` | - | - | One sentence: what the bundle covers and when to use it |
-| `--license` | - | - | License of the bundle content: an SPDX expression or a path in the bundle |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-bundle-meta`
-
-Usage: `okfw set-bundle-meta [--title T] [--description D] [--license L]`
-
-Sets bundle metadata in the root `index.md`, keeping its other keys. An empty value removes a key.
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--title` | - | - | Bundle title |
-| `--description` | - | - | One sentence: what the bundle covers and when to use it |
-| `--license` | - | - | SPDX expression, or a path to a license file in the bundle |
-| `--help` | `-h` | - | Show help |
-
-### `okfw connect`
-
-Usage: `okfw connect`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw create`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--body` | - | - | Markdown body content for the note |
-| `--json` | - | `false` | Print `{"id","path"}` as JSON instead of prose |
-| `--project` | `-p` | - | Optional project metadata (also used as the note's folder) |
-| `--description` | `-d` | - | One-sentence OKF description (written to frontmatter) |
-| `--path` | - | - | Place the concept in an arbitrary wiki subdirectory (e.g. `projects/okf`) |
-| `--tags` | - | - | Additional tags (comma-separated) |
-| `--template` | `-T` | - | Use a note template (e.g., `meeting`, `user-story`) |
-| `--type` | - | the kind | Free-form OKF `type` |
-| `--kind` | - | the template's, else `note` | Structured kind: `note` or `issue` |
-| `--help` | `-h` | - | Show help |
-
-### `okfw templates`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-project`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw add-tags`
-
-Usage: `okfw add-tags <id_or_file> <tag1> [tag2...]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw remove-tags`
-
-Usage: `okfw remove-tags <id_or_file> <tag1> [tag2...]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw validate`
-
-Usage: `okfw validate <id_or_file>`, `okfw validate --all [path]`, or `okfw validate --okf [path]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--all` | - | `false` | Apply the strict okfw schema to every concept in the bundle |
-| `--okf` | - | `false` | Validate a bundle for OKF v0.3 §11.1 conformance: every frontmatter block parses as a YAML mapping with no duplicate keys, every `index.md` follows §8 (no frontmatter except bundle metadata at the root) and every `log.md` follows §9 (`## YYYY-MM-DD` headings, newest first). A `.md` file with no `type` (not a concept), broken links, listing entries that are not links, a path field that resolves only through the v0.2 fallback, and a declared `okf_version` other than okfw's are warnings. Works on any directory, with or without a `.okfw` |
-| `--help` | `-h` | - | Show help |
-
-### `okfw mcp`
-
-Usage: `okfw mcp [--read-only]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--read-only` | - | `false` | Serve only the search, read and graph tools, about 45% less fixed context per turn |
-| `--help` | `-h` | - | Show help |
-
-### `okfw install`
-
-Usage: `okfw install [--platform claude|gemini|codex]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--platform` | - | `claude` | Agent platform: `claude`, `gemini`, or `codex` |
-| `--force` | - | `false` | Overwrite an existing skill file |
-| `--help` | `-h` | - | Show help |
-
-### `okfw index-md`
-
-Usage: `okfw index-md [path]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--no-adopt` | - | `false` | Refresh only listings okfw already maintains; never take over an unmarked `index.md` |
-| `--help` | `-h` | - | Show help |
-
-### `okfw log`
-
-Usage: `okfw log [path]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw root`
-
-Usage: `okfw root`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw search`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--project` | `-p` | - | Filter by project |
-| `--tag` | `-T` | - | Filter by tag (repeatable, AND logic) |
-| `--path` | - | - | Search only this bundle subdirectory, recursively |
-| `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
-| `--type` | `-t` | - | Filter by the free-form OKF `type` field |
-| `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`, or an unknown value as written) |
-| `--stale` | - | `false` | Only concepts whose `stale_after` instant has been reached, or whose `stale_after` does not parse |
-| `--current` | - | `false` | Only current knowledge: no deprecated or unknown-status concept; a deprecated hit is replaced by its `superseded_by` |
-| `--limit` | `-l` | `20` | Maximum number of results |
-| `--offset` | - | `0` | Skip this many results (pagination) |
-| `--json` | - | `false` | Output as JSON |
-| `--help` | `-h` | - | Show help |
-
-### `okfw graph`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--ascii` | - | `false` | Render a plain-text tree instead of Mermaid |
-| `--limit` | `-l` | `10` | Maximum number of nodes to display |
-| `--start` | - | most connected | Start graph from a specific concept |
-| `--depth` | - | `0` (unlimited) | Maximum BFS depth (hops) from the start node |
-| `--help` | `-h` | - | Show help |
-
-### `okfw graph-query`
-
-Subcommands: `backlinks <id>`, `cluster <id>`, `tag <tag>`, `dangling`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--json` | | `false` | Output as JSON |
-| `--depth` | | `0` (unlimited) | Maximum BFS depth (cluster only) |
-| `--limit` | `-l` | `10` | Maximum number of nodes (cluster only) |
-| `--help` | `-h` | - | Show help |
-
-### `okfw backlinks`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--json` | - | `false` | Output as JSON |
-| `--help` | `-h` | - | Show help |
-
-### `okfw daily`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--date` | - | - | Target date (YYYY-MM-DD format) |
-| `--yesterday` | - | `false` | Use yesterday's date |
-| `--list` | - | `false` | List recent daily notes |
-| `--week` | - | `false` | Show this week's notes (with --list) |
-| `--month` | - | `false` | Show this month's notes (with --list) |
-| `--json` | - | `false` | Output as JSON (with --list) |
-| `--help` | `-h` | - | Show help |
-
-### `okfw delete`
-
-Usage: `okfw delete <id_or_file>` (alias: `rm`)
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--force` | `-f` | `false` | Delete without confirming |
-| `--json` | - | `false` | Output the result as JSON |
-| `--help` | `-h` | - | Show help |
-
-### `okfw move`
-
-Usage: `okfw move <id_or_file> <destination>` (aliases: `rename`, `mv`)
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--json` | - | `false` | Output the result as JSON |
-| `--help` | `-h` | - | Show help |
-
-### `okfw site`
-
-Usage: `okfw site build|up|down|status`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--bun` | - | `$OKFW_BUN`, then `bun` on PATH | Path to the bun binary |
-| `--out` (build) | - | - | Also copy the built site to this directory |
-| `--port` (up) | - | `4321` | Port to serve on |
-| `--no-build` (up) | - | `false` | Serve the last build without rebuilding |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-lifecycle`
-
-Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--superseded-by` | - | - | With `deprecated`: the concept that replaces this one (id or path) |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-stale-after`
-
-Usage: `okfw set-stale-after <id_or_file> [DATETIME]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--clear` | - | `false` | Remove `stale_after` instead of setting it |
-| `--help` | `-h` | - | Show help |
-
-### `okfw verify`
-
-Usage: `okfw verify <id_or_file>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--by` | - | `human:<login>` | Actor: `<scheme>:<id>` (`human:`, `team:`, `process:`, …) or `<producer>/<version>` |
-| `--at` | - | now | When it was verified: an RFC 3339 date-time or a date |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-generated`
-
-Usage: `okfw set-generated <id_or_file>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--by` | - | `human:<login>` | Actor that produced the content: `<scheme>:<id>` or `<producer>/<version>` |
-| `--at` | - | now | When the content last meaningfully changed: an RFC 3339 date-time or a date |
-| `--help` | `-h` | - | Show help |
-
-### `okfw add-source`
-
-Usage: `okfw add-source <id_or_file> --resource <uri>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--resource` | - | - | URL, bundle-relative path, or scope descriptor (**required**) |
-| `--id` | - | - | Join key for `[^id]` body footnotes |
-| `--title` | - | - | Human-readable label |
-| `--author` | - | - | Actor who produced the source |
-| `--usage-count` | - | - | How often the resource was exercised |
-| `--last-modified` | - | - | When the source itself last changed (an RFC 3339 date-time with offset, or a date: the start of that day in UTC) |
-| `--usage-window` | - | - | Datetime range framing `--usage-count`, as `FROM..TO` |
-| `--help` | `-h` | - | Show help |
-
-### `okfw set-resource`
-
-Usage: `okfw set-resource <id_or_file> <uri>`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--help` | `-h` | - | Show help |
-
-### `okfw migrate`
-
-Usage: `okfw migrate [path]`
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--dry-run` | - | `false` | Report what would change without writing |
-| `--help` | `-h` | - | Show help |
+Every command's flags, with their values and defaults, are on
+[CLI Flags](/okf-wiki/reference/cli-flags/). That page is generated from the
+command tree, like `okfw <command> --help` and the man pages, so it cannot
+drift from the binary.
 
 ---
 
@@ -1188,7 +888,6 @@ title: "Note Title"
 type: "note"            # required, free-form OKF kind; defaults to the kind value
 # kind: "note"          # structured kind; omitted when it equals "note"
 description: "..."      # optional one-sentence OKF summary
-x-okfw-project: "project-name" # optional
 tags:
   - "tag1"
   - "tag2"
@@ -1205,15 +904,14 @@ reference, including the `type` vs `kind` distinction.
 
 ## Directory Structure
 
-Concepts are organized by topic and project. With no `--path`, a concept is
-placed in a top-level folder named after its project (or the wiki root when no
-project is set); `--path <subdir>` overrides that.
+Concepts are organized by directory. With no `--path`, a concept lands at the
+wiki root; `--path <subdir>` places it in a subdirectory.
 
 ```
 .okfw/                             # Wiki root (at the project root)
 ├── index.md                       # Directory listing (reserved; okf_version)
 ├── log.md                         # Update history (reserved)
-├── infra/                         # A project folder (concepts grouped by project)
+├── infra/                         # A topic directory (create --path infra)
 │   ├── index.md
 │   └── my-first-idea--019f049400a8.md
 ├── daily/                         # Daily notes, grouped by year/month
@@ -1238,14 +936,11 @@ frontmatter.
 - **The project root**: `okfw init` places `.okfw/` at the git repository root, or the current directory outside git
 - **Working directory**: For relative paths
 
-`project` is **never** derived from git. It is optional metadata: pass
-`-p/--project` when creating a concept, or set it later with `okfw set-project`.
-
 ---
 
 ## Common Workflows
 
-### Capture an idea quickly (no project context)
+### Capture an idea quickly
 ```bash
 okfw create "Random thought while commuting"
 ```
@@ -1256,19 +951,19 @@ cd ~/projects/my-project
 okfw create "Interesting pattern in auth flow"
 ```
 
-### Add project context later
+### File it in a directory later
 ```bash
-okfw set-project 019f0494 my-project
+okfw move 019f0494 auth/
 ```
 
 ### Build a note chain
 ```bash
 # Create parent
-okfw create "Main concept" -p my-project --json
+okfw create "Main concept" --path auth --json
 # Note its full frontmatter id, e.g. 019f0494-00a8-7206-b788-c5bbfa2430a8
 
 # Create child (manually add parent field to frontmatter)
-okfw create "Sub-concept" -p my-project
+okfw create "Sub-concept" --path auth
 # Edit to add: parent: "019f0494-00a8-7206-b788-c5bbfa2430a8"
 # (parent must be the full id, not a path or prefix)
 ```

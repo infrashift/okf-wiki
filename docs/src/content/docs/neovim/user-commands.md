@@ -34,34 +34,39 @@ once it is written.
 " Create a note
 :OkfwNote
 
-" Create a note with a project
-:OkfwNote --project my-project
+" Create a note in a wiki subdirectory
+:OkfwNote --path research/auth
 ```
 
 **Flags:**
 
 | Flag | Values | Description |
 |------|--------|-------------|
-| `--project` | any string | Optional project metadata |
+| `--path` | a wiki-relative directory | Place the concept there (created if missing; default: the wiki root) |
+
+:::note[`--project` is deprecated]
+It still works, but warns once per session. Organize concepts by directory
+instead: `--path` places and scopes, and `:OkfwMove` refiles a concept.
+:::
 
 ### `:OkfwTemplate`
 
 Create a note from a template, prompting for the title. With no template name
-it opens a picker (snacks.nvim), or prompts for a name without one; `--project`
+it opens a picker (snacks.nvim), or prompts for a name without one; `--path`
 applies either way.
 
 ```vim
 " Open template picker
 :OkfwTemplate
 
-" Pick a template for a project
-:OkfwTemplate --project my-project
+" Pick a template, placing the note in specs/
+:OkfwTemplate --path specs
 
 " Create meeting notes
 :OkfwTemplate meeting
 
-" Create a feature spec for a project
-:OkfwTemplate feature --project my-project
+" Create a feature spec in specs/
+:OkfwTemplate feature --path specs
 ```
 
 **Available templates:** `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`
@@ -90,8 +95,8 @@ starting from any query you give.
 " Live search within a kind
 :OkfwSearch! --kind issue
 
-" Filter by project
-:OkfwSearch --project my-project
+" Search one directory, recursively
+:OkfwSearch --path research
 
 " Filter by structured kind and status
 :OkfwSearch --kind issue --status draft
@@ -103,19 +108,24 @@ starting from any query you give.
 :OkfwSearch --tag security
 
 " Combine a query with filters
-:OkfwSearch auth --project my-project --tag security
+:OkfwSearch auth --path research --tag security
 ```
 
 **Flags:**
 
 | Flag | Values | Description |
 |------|--------|-------------|
-| `--project` | any string | Filter by project |
+| `--path` | a wiki-relative directory | Search only this directory, recursively |
 | `--kind` | `note`, `daily-note`, `issue` | Filter by structured kind |
 | `--type` | any string | Filter by the free-form OKF `type` field |
 | `--status` | `draft`, `stable`, `deprecated` | Filter by OKF lifecycle status |
 | `--stale` | - | Only concepts whose `stale_after` has passed |
 | `--tag` | any string | Filter by tag (can repeat) |
+
+:::note[`--project` is deprecated]
+It still works, but warns once per session. Organize concepts by directory
+instead: `--path` places and scopes, and `:OkfwMove` refiles a concept.
+:::
 
 Hits worth noticing before you open them are badged after the title:
 `(reviewed)` for a human-reviewed concept, `(draft)` or `(deprecated)`, and
@@ -315,8 +325,8 @@ concepts were rewritten.
 | Command | Description |
 |---------|-------------|
 | `:OkfwInit` | Initialize a `.okfw/` wiki for the current project |
-| `:OkfwNote [--project NAME]` | Create new concept |
-| `:OkfwTemplate [name] [--project NAME]` | Create from template |
+| `:OkfwNote [--path DIR]` | Create new concept |
+| `:OkfwTemplate [name] [--path DIR]` | Create from template |
 | `:OkfwSearch[!] [flags] [query]` | Search concepts (! for live search) |
 | `:OkfwGraph [flags]` | Graph visualization |
 | `:OkfwExport [flags]` | Export a portable subset to `.ephemeral/` |

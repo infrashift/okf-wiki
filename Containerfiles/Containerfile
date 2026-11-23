@@ -81,11 +81,13 @@ COPY --chown=user:0 Containerfiles/config/nvim/lua/config/lazy.lua    /home/user
 COPY --chown=user:0 Containerfiles/config/nvim/lua/config/options.lua /home/user/.config/nvim/lua/config/options.lua
 COPY --chown=user:0 Containerfiles/config/nvim/lua/plugins/okfw.lua    /home/user/.config/nvim/lua/plugins/okfw.lua
 
-# ── 11. Copy okfw NeoVim plugin files ─────────────────────────────────────
-COPY --chown=user:0 lua/okfw/init.lua      /home/user/okfw-plugin/lua/okfw/init.lua
-COPY --chown=user:0 lua/okfw/picker.lua     /home/user/okfw-plugin/lua/okfw/picker.lua
-COPY --chown=user:0 plugin/okfw.lua         /home/user/okfw-plugin/plugin/okfw.lua
-COPY --chown=user:0 after/ftplugin/markdown.lua /home/user/okfw-plugin/after/ftplugin/markdown.lua
+# ── 11. Copy the okfw NeoVim plugin from the working tree ──────────────────
+# Whole directories, so a file added to the plugin cannot be left out of the
+# image; doc/okfw.txt makes :help okfw work.
+COPY --chown=user:0 lua/okfw/            /home/user/okfw-plugin/lua/okfw/
+COPY --chown=user:0 plugin/              /home/user/okfw-plugin/plugin/
+COPY --chown=user:0 after/               /home/user/okfw-plugin/after/
+COPY --chown=user:0 doc/okfw.txt         /home/user/okfw-plugin/doc/okfw.txt
 
 # ── 12. Install mason tools before Lazy sync (tree-sitter must exist first)
 #     Asset names per architecture: shfmt amd64/arm64, tree-sitter x64/arm64,
@@ -115,7 +117,11 @@ RUN nvim --headless "+Lazy! sync" +qa 2>&1 || true
 
 # ── 14. Copy the binary from builder ─────────────────────────────────────
 COPY --from=builder --chown=user:0 /src/okfw /home/user/.local/bin/okfw
-RUN okfw --version
+# The binary and the plugin both come from the working tree, so the image runs
+# the code you are testing. Fail the build if the plugin does not load.
+RUN okfw --version && \
+    nvim --headless "+helptags /home/user/okfw-plugin/doc" \
+        "+lua require('okfw')" "+lua assert(vim.fn.exists(':OkfwNote') == 2, 'okfw plugin not loaded')" +qa
 
 # `okfw install` registers the skill and CLAUDE.md block *per project*, so it
 # is deliberately not run here — it belongs in whichever repository you open.

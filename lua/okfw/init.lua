@@ -6,6 +6,30 @@ M.setup = function(opts)
     }, opts or {})
 end
 
+-- project is deprecated in favor of directories (--path): it dates from one
+-- global wiki holding every repository's notes, and no OKF tool but okfw reads
+-- x-okfw-project. It still works; each deprecated entry point warns once per
+-- session.
+M._deprecation_warned = {}
+M._deprecated = function(feature, advice)
+    if M._deprecation_warned[feature] then return end
+    M._deprecation_warned[feature] = true
+    vim.notify("okfw: " .. feature .. " is deprecated; " .. advice, vim.log.levels.WARN)
+end
+
+-- Append --path (and, deprecated, --project) to an okfw create or search.
+M._dir_args = function(args, opts, verb)
+    if opts.path and opts.path ~= "" then
+        table.insert(args, "--path")
+        table.insert(args, opts.path)
+    end
+    if opts.project and opts.project ~= "" then
+        M._deprecated("project", "use --path <dir> to " .. (verb or "place") .. " concepts by directory")
+        table.insert(args, "--project")
+        table.insert(args, opts.project)
+    end
+end
+
 M.create_note = function(opts_or_project, project)
     -- Handle legacy call signature: create_note(_, project)
     local opts
@@ -23,11 +47,7 @@ M.create_note = function(opts_or_project, project)
 
     local cwd = vim.fn.getcwd()
     local args = { "create", title }
-
-    if opts.project and opts.project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, opts.project)
-    end
+    M._dir_args(args, opts, "place")
 
     local created_file = ""
     local job = require('plenary.job'):new({
@@ -276,16 +296,12 @@ end
 M.create_from_template = function(opts)
     opts = opts or {}
 
-    local function do_create(template_name, project)
+    local function do_create(template_name)
         local title = vim.fn.input("Note Title: ")
         if title == "" then return end
 
         local args = { "create", title, "--template", template_name }
-
-        if project and project ~= "" then
-            table.insert(args, "--project")
-            table.insert(args, project)
-        end
+        M._dir_args(args, opts, "place")
 
         local created_file = ""
         local job = require('plenary.job'):new({
@@ -321,7 +337,7 @@ M.create_from_template = function(opts)
 
     -- If template specified, use it directly
     if opts.template then
-        do_create(opts.template, opts.project)
+        do_create(opts.template)
         return
     end
 
@@ -338,7 +354,7 @@ M.create_from_template = function(opts)
         print("Available templates: " .. table.concat(names, ", "))
         local template_name = vim.fn.input("Template: ")
         if template_name ~= "" then
-            do_create(template_name, opts.project)
+            do_create(template_name)
         end
     end
 end
@@ -381,13 +397,8 @@ M.template_picker = function(opts)
             local title = vim.fn.input("Note Title: ")
             if title == "" then return end
 
-            local project = opts.project
-
             local args = { "create", title, "--template", tmpl.name }
-            if project and project ~= "" then
-                table.insert(args, "--project")
-                table.insert(args, project)
-            end
+            M._dir_args(args, opts, "place")
 
             local created_file = ""
             local job = require('plenary.job'):new({
@@ -422,7 +433,9 @@ M.template_picker = function(opts)
     })
 end
 
+-- Deprecated: refile a concept by directory with move_note (okfw move).
 M.set_project = function(file_path, project)
+    M._deprecated("set_project", "organize concepts by directory: move_note() (okfw move) refiles one")
     file_path = file_path or vim.fn.expand("%:p")
     if file_path == "" then
         print("No file specified")
@@ -567,10 +580,7 @@ M.search = function(query, opts)
         table.insert(args, query)
     end
 
-    if opts.project and opts.project ~= "" then
-        table.insert(args, "--project")
-        table.insert(args, opts.project)
-    end
+    M._dir_args(args, opts, "search")
 
     if opts.tags and type(opts.tags) == "table" then
         for _, tag in ipairs(opts.tags) do

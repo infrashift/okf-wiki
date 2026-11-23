@@ -73,7 +73,11 @@ local function create_commands()
         local i = 1
         while i <= #args_list do
             local arg = args_list[i]
-            if arg == "--project" and args_list[i + 1] then
+            if arg == "--path" and args_list[i + 1] then
+                args_parsed.path = args_list[i + 1]
+                i = i + 2
+            elseif arg == "--project" and args_list[i + 1] then
+                -- Deprecated; create_note warns once and still passes it.
                 args_parsed.project = args_list[i + 1]
                 i = i + 2
             else
@@ -88,23 +92,25 @@ local function create_commands()
             local args = vim.split(line, "%s+")
             local prev = args[#args - 1] or ""
 
-            -- Complete values after flags
-            if prev == "--project" then
+            -- Complete values after flags: a directory under the wiki is
+            -- free-form (it is created if missing).
+            if prev == "--path" or prev == "--project" then
                 return {}
             end
 
-            -- Complete flags (filter out already-used ones)
+            -- Complete flags (filter out already-used ones). --project is
+            -- deprecated, so it is no longer offered.
             local used = {}
             for _, a in ipairs(args) do
                 used[a] = true
             end
             local completions = {}
-            if not used["--project"] then
-                table.insert(completions, "--project")
+            if not used["--path"] then
+                table.insert(completions, "--path")
             end
             return completions
         end,
-        desc = "Create new concept (--project NAME)",
+        desc = "Create new concept (--path DIR)",
     })
 
     vim.api.nvim_create_user_command("OkfwTemplate", function(opts)
@@ -116,7 +122,11 @@ local function create_commands()
         local i = 1
         while i <= #args_list do
             local arg = args_list[i]
-            if arg == "--project" and args_list[i + 1] then
+            if arg == "--path" and args_list[i + 1] then
+                args_parsed.path = args_list[i + 1]
+                i = i + 2
+            elseif arg == "--project" and args_list[i + 1] then
+                -- Deprecated; warns once and still passes it.
                 args_parsed.project = args_list[i + 1]
                 i = i + 2
             elseif not arg:match("^%-%-") then
@@ -129,7 +139,7 @@ local function create_commands()
         end
 
         -- Without a template name this opens the picker (or, without snacks,
-        -- prompts for one), keeping --project either way.
+        -- prompts for one), keeping --path either way.
         okfw.create_from_template(args_parsed)
     end, {
         nargs = "*",
@@ -137,17 +147,21 @@ local function create_commands()
             local args = vim.split(line, "%s+")
             local prev = args[#args - 1] or ""
 
-            -- Complete project name (user types freely)
-            if prev == "--project" then
+            -- Complete the directory (user types freely)
+            if prev == "--path" or prev == "--project" then
                 return {}
             end
 
             -- Check what's already been provided
             local has_template = false
-            local has_project = false
+            local has_path = false
+            local after_flag = false
             for _, a in ipairs(args) do
-                if a == "--project" then
-                    has_project = true
+                if a == "--path" or a == "--project" then
+                    has_path = a == "--path" or has_path
+                    after_flag = true
+                elseif after_flag then
+                    after_flag = false
                 elseif not a:match("^%-%-") and a ~= "" and a ~= "OkfwTemplate" then
                     has_template = true
                 end
@@ -161,12 +175,12 @@ local function create_commands()
                     table.insert(completions, tmpl.name)
                 end
             end
-            if not has_project then
-                table.insert(completions, "--project")
+            if not has_path then
+                table.insert(completions, "--path")
             end
             return completions
         end,
-        desc = "Create note from template (--project NAME)",
+        desc = "Create note from template (--path DIR)",
     })
 
     -- Search and navigation
@@ -179,7 +193,11 @@ local function create_commands()
         local i = 1
         while i <= #args_list do
             local arg = args_list[i]
-            if arg == "--project" and args_list[i + 1] then
+            if arg == "--path" and args_list[i + 1] then
+                search_opts.path = args_list[i + 1]
+                i = i + 2
+            elseif arg == "--project" and args_list[i + 1] then
+                -- Deprecated; warns once and still passes it.
                 search_opts.project = args_list[i + 1]
                 i = i + 2
             elseif arg == "--type" and args_list[i + 1] then
@@ -237,7 +255,7 @@ local function create_commands()
                 return { "note", "daily-note", "issue" }
             end
             -- --type is free-form: OKF registers no type values to offer.
-            if prev == "--project" or prev == "--tag" or prev == "--type" then
+            if prev == "--path" or prev == "--project" or prev == "--tag" or prev == "--type" then
                 return {}
             end
 
@@ -248,7 +266,7 @@ local function create_commands()
             end
             local completions = {}
             local flags = {
-                "--project", "--type", "--kind", "--status", "--stale", "--tag",
+                "--path", "--type", "--kind", "--status", "--stale", "--tag",
             }
             for _, flag in ipairs(flags) do
                 if not used[flag] then

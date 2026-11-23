@@ -54,6 +54,7 @@ export default defineConfig({
           label: 'Reference',
           items: [
             { label: 'CLI Commands', slug: 'reference/cli-commands' },
+            { label: 'CLI Flags', slug: 'reference/cli-flags' },
             { label: 'Project Structure', slug: 'reference/project-structure' },
             { label: 'OKF v0.3: Where We Differ', slug: 'reference/okf-divergences' },
             { label: 'Migrating to OKF v0.3', slug: 'reference/migrating-to-okf-v0-3' },
