@@ -1180,10 +1180,40 @@ local function cursor_in_frontmatter()
     return false
 end
 
--- Follow the markdown link under the cursor. Absolute ("/...") targets resolve
--- against the bundle root; relative targets against the current file's directory.
--- A path-valued frontmatter field follows the CLI's rule (graph.RefLink): only
--- "./" and "../" are relative there, and a bare path is read from the bundle root.
+-- The okf_version a bundle declares in its root index.md, or "" when it
+-- declares none (config.DeclaredOKFVersion).
+M._declared_okf_version = function(root)
+    local ok, lines = pcall(vim.fn.readfile, root:gsub("/$", "") .. "/index.md", "", 200)
+    if not ok or lines[1] ~= "---" then return "" end
+    for i = 2, #lines do
+        local l = lines[i]:gsub("\r$", "")
+        if l == "---" or l == "..." then break end
+        local v = l:match("^okf_version:%s*(.-)%s*$")
+        if v then
+            local q = v:match('^"(.-)"') or v:match("^'(.-)'")
+            if q then return vim.trim(q) end
+            return vim.trim((v:gsub("%s+#.*$", "")))
+        end
+    end
+    return ""
+end
+
+-- Whether a bundle declaring this version gets the OKF v0.2 reading of a bare
+-- path field as a fallback (config.LegacyPathFallback): 0.2 or earlier, or no
+-- version. A version this cannot read counts as newer.
+M._legacy_path_fallback = function(declared)
+    if declared == "" then return true end
+    local major, minor = vim.trim(declared):match("^(%d+)%.(%d+)")
+    if not major then return false end
+    return tonumber(major) == 0 and tonumber(minor) <= 2
+end
+
+-- Follow the markdown link under the cursor. "/..." targets resolve against
+-- the bundle root, and every other target against the current file's
+-- directory: OKF v0.3 section 6's one rule, for body links and path-valued
+-- frontmatter fields alike (graph.NormalizeRef). A bare frontmatter path that
+-- names no file from there is tried from the bundle root only in a bundle that
+-- declares okf_version 0.2 or none (graph.ResolveRef, section 12.1).
 M.follow_link = function()
     local line = vim.api.nvim_get_current_line()
     local col = vim.api.nvim_win_get_cursor(0)[2] + 1
@@ -1212,9 +1242,7 @@ M.follow_link = function()
         vim.notify("External link: " .. href, vim.log.levels.INFO)
         return
     end
-    if not href:match("^%.%.?/") and href:sub(1, 1) ~= "/" and cursor_in_frontmatter() then
-        href = "/" .. href
-    end
+    local bare_field = not href:match("^%.%.?/") and href:sub(1, 1) ~= "/" and cursor_in_frontmatter()
 
     local target
     if href:sub(1, 1) == "/" then
@@ -1227,6 +1255,14 @@ M.follow_link = function()
     else
         local dir = vim.fn.expand("%:p:h")
         target = vim.fn.fnamemodify(dir .. "/" .. href, ":p")
+    end
+
+    if bare_field and vim.fn.filereadable(target) ~= 1 then
+        local root = M.bundle_root()
+        if root and M._legacy_path_fallback(M._declared_okf_version(root)) then
+            local alt = root:gsub("/$", "") .. "/" .. href
+            if vim.fn.filereadable(alt) == 1 then target = alt end
+        end
     end
 
     if vim.fn.filereadable(target) == 1 then

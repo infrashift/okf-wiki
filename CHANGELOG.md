@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Fixed
+- **Neovim: `gf` on a bare frontmatter path opened the wrong file.** `follow_link` read a path-valued field such as `resource: notes/a.md` from the wiki root, the OKF v0.2 rule, while the CLI has followed v0.3 since v2026.11.0: a bare path resolves from the concept's directory, as a body link does. In a v0.3 bundle, `gf` could open a different file than `okfw backlinks` and `okfw move` use, or open a file the CLI does not count as a link. `gf` now follows the CLI's rule, root fallback included: a bundle that declares `okf_version` 0.2 or none still tries the wiki root for a bare path that names no file beside the concept.
+
 ### Deprecated
 - **`--project` is deprecated in favor of `--path`.** `okfw create --project` (`-p`), `okfw search --project` and `okfw set-project` still work. They now print a warning and are left out of `--help`, the man pages and the agent skill. The MCP server no longer advertises `project` (search and create) or the `set_project` action; it still honours them for older clients. That makes the per-turn context 170 bytes smaller (read-write 6,587 → 6,417 bytes; read-only 3,790 → 3,720). `project` dates from okfw's single global `~/okfw` wiki, where it told repositories apart. Each repository now has its own wiki, and a directory does the same job in a form every OKF tool reads, where `x-okfw-project` means nothing outside okfw. To refile a concept, run `okfw move <ref> <dir>/`, which repairs the links to it. Concepts that already carry `x-okfw-project` keep it, and search hits still show it. The Neovim plugin takes `--path` / `opts.path`, and its project features warn once per session.
 
@@ -12,6 +15,10 @@ All notable changes to this project are documented here.
 
 ### Changed
 - **Clearer flag help.** Many flags' help text now gives the accepted values and the default. `add-source --last-modified` no longer says "ISO 8601 datetime" (it also takes a date), `validate --okf` names what it checks, and `daily --date` says it defaults to today. A test holds every flag's help to one style.
+
+### Documentation
+- **The docs site and okf-wiki's own wiki follow ASD-STE100.** A lexiscope scan of the docs site went from 145 errors and 728 warnings to none, and `make docs-style` keeps the docs and the wiki at zero. The rewrite also corrected stale pages: CLI Commands gave the v0.2 rule for a bare frontmatter path, and Note Format named the wrong version for the v0.2 fallback.
+- **okf-wiki keeps its own OKF wiki** in `.okfw/`: 25 ADRs that record why okfw is built the way it is, and issues for the open work.
 
 ## v2026.11.3 — 2026-11-23
 

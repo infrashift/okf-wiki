@@ -619,9 +619,11 @@ It reads the markdown link (`[text](dest)`) under the cursor. If there is no
 link, it reads the path under the cursor. So it also follows a path-valued
 frontmatter field, such as `resource: "/tables/orders.md"` or a
 `sources[].resource`. A path that starts with `/` resolves from the wiki root.
-Other paths resolve from the directory of the current file. Frontmatter is the
-exception: there, only `./` and `../` paths are relative. So a bare
-`policies/refunds.md` resolves from the wiki root. The function ignores a
+Other paths resolve from the directory of the current file, in frontmatter
+too. This is the OKF v0.3 rule, and the CLI uses it. Some bundles declare
+`okf_version` "0.2" or no version. In such a bundle, a bare frontmatter path
+that names no file from the directory resolves from the wiki root, the v0.2
+rule. The function ignores a
 `#fragment`. It reports a URL and does not open it. It also reports a target
 that does not exist.
 
