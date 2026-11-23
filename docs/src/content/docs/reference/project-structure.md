@@ -63,23 +63,22 @@ okf-wiki/
 
 ## Wiki Layout
 
-Each project's knowledge base is a `.okfw/` directory at the project's root,
-created by `okfw init` and discovered automatically by every command (searching
-upward from the current directory, like git finds `.git`). Concepts are
-markdown files named `slug--shortid.md`, where the short id is the first 12
-hex digits of the concept's UUID. A concept's OKF id is its path within the wiki minus
-`.md`.
+The knowledge base of a project is a `.okfw/` directory at the root of the
+project. `okfw init` creates it. Each command finds it: the command looks in
+the current directory and then in each parent directory, as git does to find
+`.git`. Concepts are markdown files with the name `slug--shortid.md`. The short
+id is the first 12 hex digits of the UUID of the concept. The OKF id of a
+concept is its path in the wiki, without `.md`.
 
-Concepts are organized by topic and project, not by maturity. With no `--path`,
-a concept lands in a top-level folder named after its project (or the wiki
-root when there is no project); an explicit `--path projects/okf` overrides
-that.
+Directories organize the concepts by topic, not by maturity. Without `--path`,
+okfw puts a new concept at the wiki root. `--path specs/auth` puts it in that
+subdirectory.
 
 ```
 .okfw/                             # Wiki root (at the project root)
 ├── index.md                       # Directory listing (reserved; okf_version)
 ├── log.md                         # Update history (reserved)
-├── infra/                         # A project folder (concepts grouped by project)
+├── infra/                         # A topic directory (create --path infra)
 │   ├── index.md
 │   └── my-first-idea--019f049400a8.md
 ├── daily/                         # Daily notes, grouped by year/month
@@ -92,12 +91,12 @@ that.
 └── .gitignore                     # Ignores .ephemeral/
 ```
 
-Concept markdown is meant to be **committed with the project**; the only
-generated directory, `.ephemeral/`, is covered by the `.gitignore` that
-`okfw init` writes. There is no search index or graph database: search and the
-link graph are computed from the files on every call.
+Commit the concept markdown **with the project**. okfw generates only one
+directory, `.ephemeral/`, and the `.gitignore` from `okfw init` excludes it.
+There is no search index or graph database. okfw calculates search and the
+link graph from the files on each call.
 
-`index.md` and `log.md` are **reserved filenames** that carry no concept
+okfw reserves the filenames `index.md` and `log.md`. They carry no concept
 frontmatter. `index.md` is a per-directory listing for progressive disclosure
 (the root `index.md` carries `okf_version: "0.3"`), and `log.md` is an update
 history generated from git. Generate them with `okfw index-md` and `okfw log`.

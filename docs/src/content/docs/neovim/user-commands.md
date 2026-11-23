@@ -5,17 +5,17 @@ description: Complete reference for all :Okfw user commands available in NeoVim.
 
 The plugin registers user commands that you can run from NeoVim's command line (`:OkfwCommand`). All commands support tab completion for flags and values.
 
-The plugin discovers the wiki by running `okfw root` from NeoVim's current
-working directory, which searches upward for a `.okfw/` directory the way git
-finds `.git`.
+The plugin finds the wiki with `okfw root`, from the current working directory
+of NeoVim. `okfw root` looks for a `.okfw/` directory there and in each parent
+directory, as git does to find `.git`.
 
 ## Setup
 
 ### `:OkfwInit`
 
-Initialize an OKF wiki for the current project. Runs `okfw init` in NeoVim's
-current working directory, creating `.okfw/` at the git repository root (or
-the cwd outside git). Running it again is a no-op.
+Initialize an OKF wiki for the current project. This command runs `okfw init`
+in the current working directory of NeoVim. It creates `.okfw/` at the root of
+the git repository, or in the cwd outside git. A second run changes nothing.
 
 ```vim
 :OkfwInit
@@ -27,8 +27,8 @@ the cwd outside git). Running it again is a no-op.
 
 ### `:OkfwNote`
 
-Create a new concept. You are prompted for the title, and the new file opens
-once it is written.
+Create a new concept. The command asks for the title. Then it writes the new
+file and opens it.
 
 ```vim
 " Create a note
@@ -44,16 +44,17 @@ once it is written.
 |------|--------|-------------|
 | `--path` | a wiki-relative directory | Place the concept there (created if missing; default: the wiki root) |
 
-:::note[`--project` is deprecated]
-It still works, but warns once per session. Organize concepts by directory
-instead: `--path` places and scopes, and `:OkfwMove` refiles a concept.
+:::note[Deprecated: `--project`]
+It still works, but gives a warning one time in each session. Organize concepts
+by directory instead: `--path` places and scopes, and `:OkfwMove` refiles a
+concept.
 :::
 
 ### `:OkfwTemplate`
 
-Create a note from a template, prompting for the title. With no template name
-it opens a picker (snacks.nvim), or prompts for a name without one; `--path`
-applies either way.
+Create a note from a template. The command asks for the title. With no
+template name, it opens a picker (snacks.nvim). Without snacks.nvim, it asks
+for a name. `--path` applies in both cases.
 
 ```vim
 " Open template picker
@@ -79,8 +80,8 @@ applies either way.
 
 Search concepts. Opens a [snacks.nvim](https://github.com/folke/snacks.nvim)
 picker if available, otherwise prints results; every filter below applies either
-way. Use the bang (`!`) variant for live search that updates as you type,
-starting from any query you give.
+way. Use the bang (`!`) variant for a live search that updates while you type. It
+starts from the query that you give, if any.
 
 ```vim
 " Search for a term
@@ -122,14 +123,15 @@ starting from any query you give.
 | `--stale` | - | Only concepts whose `stale_after` has passed |
 | `--tag` | any string | Filter by tag (can repeat) |
 
-:::note[`--project` is deprecated]
-It still works, but warns once per session. Organize concepts by directory
-instead: `--path` places and scopes, and `:OkfwMove` refiles a concept.
+:::note[Deprecated: `--project`]
+It still works, but gives a warning one time in each session. Organize concepts
+by directory instead: `--path` places and scopes, and `:OkfwMove` refiles a
+concept.
 :::
 
-Hits worth noticing before you open them are badged after the title:
-`(reviewed)` for a human-reviewed concept, `(draft)` or `(deprecated)`, and
-`(stale)` once `stale_after` has passed. An unverified, stable, current concept
+Some hits get a badge after the title, so you see them before you open them.
+The badges are `(reviewed)` for a human-reviewed concept, `(draft)` or
+`(deprecated)`, and `(stale)` after `stale_after` has passed. An unverified, stable, current concept
 carries no badge.
 
 **Picker keymaps (when available):**
@@ -149,7 +151,7 @@ carries no badge.
 
 Render note relationships as a [Mermaid](https://mermaid.js.org/) flowchart
 (`okfw graph`). Opens in a scratch buffer (filetype `mermaid`); press `q` to
-close it. With no `--start`, the graph is centered on the concept in the current
+close it. With no `--start`, the graph starts at the concept in the current
 buffer.
 
 ```vim
@@ -182,12 +184,12 @@ A bare number is the same as `--limit`.
 
 ### `:OkfwExport`
 
-Export a portable subset of the wiki (`okfw export`): the same graph query as
-`:OkfwGraph`, with each concept copied into `<wiki>/.ephemeral/` as `<id>.md`
-and the links between exported concepts rewritten to those files, so the set
-reads in any markdown viewer. Links to concepts outside the set are left as
-they are. `.ephemeral/` is wiped on every export and gitignored. A notification
-reports how many files were written.
+Export a portable subset of the wiki (`okfw export`). It uses the same graph
+query as `:OkfwGraph`. It copies each concept into `<wiki>/.ephemeral/` as
+`<id>.md`. It also changes the links between exported concepts to point at
+those files, so you can read the set in any markdown viewer. It does not change
+links to concepts outside the set. Each export first empties `.ephemeral/`, and
+the `.gitignore` excludes it. A message tells how many files the export wrote.
 
 ```vim
 " Export up to 10 concepts around the current one
@@ -206,7 +208,7 @@ number for the limit).
 
 ### `:OkfwDaily`
 
-Open or create a daily note. Daily notes are idempotent — running it twice on the same day opens the same file.
+Open or create a daily note. Daily notes are idempotent: when you run the command two times on the same day, it opens the same file.
 
 ```vim
 " Today's daily note
@@ -238,11 +240,11 @@ the bang variant to show only this week (from Sunday).
 
 ### `:OkfwIndex`
 
-Regenerate the wiki's OKF `index.md` directory listings by running
-`okfw index-md`. Search and the graph read the files directly, so the listings
-are the only derived state there is to refresh — and saving a concept buffer
-already refreshes them (`okfw index-md --no-adopt`). Run it by hand after
-editing concepts outside NeoVim.
+Regenerate the OKF `index.md` directory listings of the wiki with
+`okfw index-md`. Search and the graph read the files directly. So the listings
+are the only derived state to refresh. When you save a concept buffer, the
+plugin already refreshes them (`okfw index-md --no-adopt`). Run the command by
+hand after you edit concepts outside NeoVim.
 
 ```vim
 " The wiki discovered from the cwd
@@ -260,8 +262,8 @@ Refresh the cached tag list used by tag completion.
 
 ## Deleting and Moving
 
-Use these rather than shelling out to `rm` / `mv`: they keep the `index.md`
-listings in step, and `:OkfwMove` repairs links.
+Use these commands, not `rm` / `mv` in a shell. They keep the `index.md`
+listings correct, and `:OkfwMove` repairs links.
 
 ### `:OkfwDelete`
 
@@ -279,12 +281,14 @@ name it by file path, id or OKF concept ID, as with the CLI.
 :OkfwDelete 019f0494
 ```
 
-Asks for confirmation first, defaulting to **No**. On success it removes the
-concept's file and its `index.md` line, then wipes the now-orphaned buffer.
+The command asks first, and the default answer is **No**. Then it removes the
+file of the concept and its `index.md` line, and closes the buffer of the
+deleted file.
 
-Concepts that still link to the deleted one are named in a warning but left
-untouched — OKF requires consumers to tolerate a link whose target does not
-exist, so a dangling link is not an error to be fixed by editing another note.
+A warning names the concepts that still link to the deleted one, but the
+command does not change them. OKF requires consumers to accept a link to a
+target that does not exist. So a dangling link is not an error, and you do not
+have to edit another note.
 
 ### `:OkfwMove`
 
@@ -307,16 +311,16 @@ concept ID.
 :OkfwMove
 ```
 
-The destination is relative to the wiki root, whatever the cwd, and follows
-`mv`: a path ending in `.md` is the new full path, anything else is a directory
-to move into. The concept keeps its `x-okfw-id`, so
-`x-okfw-parent` hierarchies survive, and the buffer follows the concept to its new path
-so you can carry on editing.
+The target path is relative to the wiki root, from any cwd, and follows the
+rules of `mv`. A path that ends in `.md` is the new full path. Each other path
+is a directory to move into. The concept keeps its `x-okfw-id`, so
+`x-okfw-parent` hierarchies stay correct. The buffer follows the concept to its
+new path, so you can continue to edit.
 
-Links are repaired at **both** ends — inbound links in other concepts, and the
-moved concept's own relative links, which resolve against its directory and so
-break the moment it changes directory. The notification reports how many
-concepts were rewritten.
+The command repairs links at **both** ends. It repairs the inbound links in
+other concepts. It also repairs the relative links of the moved concept: they
+resolve from its directory, so they break when the directory changes. A message
+tells how many concepts the command changed.
 
 ---
 

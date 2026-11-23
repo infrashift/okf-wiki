@@ -4,17 +4,17 @@ description: Where okfw is stricter than, or departs from, the Open Knowledge Fo
 ---
 
 OKF Wiki implements the [Open Knowledge Format v0.3](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md).
-Everything okfw **writes** is a conformant OKF v0.3 bundle, and okfw **reads**
-any conformant bundle: search, the link graph and `okfw validate --okf` accept
-what the spec accepts. The four example bundles in the OKF repository are part
-of okfw's test suite, and they must validate with no violation and resolve
-every link.
+Each bundle that okfw **writes** is a conformant OKF v0.3 bundle. okfw
+**reads** each conformant bundle: search, the link graph and
+`okfw validate --okf` accept what the spec accepts. okfw's tests include the
+four example bundles of the OKF repository. For each of them,
+`okfw validate --okf` must report no violation, and each link must resolve.
 
-okfw is deliberately stricter than the spec about the bundles it **authors**.
-The spec sets a floor any producer can meet; okfw adds a few guarantees on top,
-because a knowledge base that agents write continuously degrades quietly
-without them. Each one is listed below with the rule it departs from, the
-reason, and the consequence.
+For the bundles that okfw **authors**, okfw is stricter than the spec on
+purpose. The spec sets a minimum that each producer can meet. okfw adds a few
+guarantees, because without them, a knowledge base that agents write all the
+time becomes worse with no sign. This page gives each guarantee, the rule that
+it differs from, the reason, and the result.
 
 ## Summary
 
@@ -26,14 +26,14 @@ reason, and the consequence.
 | Near-miss `human:` actor schemes refused | Any scheme is a valid non-human actor (§7) | `okfw validate`, writers |
 
 None of these applies when okfw **reads**. A concept that breaks okfw's rules
-is still found by search, drawn in the graph and listed in `index.md`. Use
+still appears in search, in the graph and in `index.md`. Use
 `okfw validate --okf` to judge a bundle on the spec's own terms.
 
 ## Six required concept fields
 
 **The spec:** a concept needs only a non-empty `type` (§4.1). `title` and
-`tags` are optional, and a consumer MUST NOT reject a concept for a missing
-optional field (§11.2).
+`tags` are optional. A consumer MUST NOT reject a concept when an optional
+field is absent (§11.2).
 
 **okfw:** every concept it writes carries `type`, `title` and `tags`, and
 okfw's own `x-okfw-id`, `x-okfw-created` and `x-okfw-timestamp`, and
@@ -41,8 +41,9 @@ okfw's own `x-okfw-id`, `x-okfw-created` and `x-okfw-timestamp`, and
 
 **Why:**
 - OKF identifies a concept by its path, which changes when the concept moves.
-  The UUIDv7 `x-okfw-id` stays the same, so a reference by id, such as an `x-okfw-parent:`, a
-  daily-note link or an agent's memory, survives a reorganization.
+  The UUIDv7 `x-okfw-id` stays the same. So a reference by id continues to
+  work when you move concepts. Examples are an `x-okfw-parent:`, a daily-note
+  link, or an agent's memory.
 - `title` and `tags` are what the `index.md` listings, search ranking and
   pickers show. A concept without them is hard to find.
 - `x-okfw-created` and `x-okfw-timestamp` record okfw's own write history, which works in a
@@ -52,36 +53,37 @@ okfw's own `x-okfw-id`, `x-okfw-created` and `x-okfw-timestamp`, and
 - `okfw validate` and `okfw validate --all` reject a bundle another tool wrote
   even when it is conformant. Use `okfw validate --okf` for those.
 - Other OKF consumers ignore these keys, as the spec requires them to.
-- okfw's keys live in the `x-` namespace the spec reserves for producers
-  (§4.1), so no future OKF version can give one of them a meaning of its own.
-  Before this release okfw wrote them bare, and OKF v0.1 had already defined a
-  bare `timestamp` as the generation time (Appendix B), so other tools could
-  misread okfw's last-write time. `okfw migrate` renames them.
+- okfw's keys are in the `x-` namespace that the spec reserves for producers
+  (§4.1). So no future OKF version can redefine one of them.
+  Before this release, okfw wrote them bare. But OKF v0.1 defines a bare
+  `timestamp` as the time that a producer generated the concept (Appendix B).
+  So other tools could read okfw's last-write time incorrectly. `okfw migrate`
+  changes the names.
 
 ## A closed schema
 
 **The spec:** consumers MUST NOT reject documents with keys they do not know,
 at any level (§4.1, §11.2).
 
-**okfw:** the schema rejects any key it does not declare. The exceptions are
-extension keys starting with `x-`, which are accepted at every level, and the
-older `x:` block.
+**okfw:** the schema rejects each key that it does not declare. There are two
+exceptions. The schema accepts extension keys that start with `x-`, at each
+level. It also accepts the older `x:` block.
 
-**Why:** under the spec's rule, a misspelt key is not an error. It is just an
-unknown key, and it is ignored. A `stale_afer:` means the concept never goes
-stale. A `descripton:` means it never gets a summary. Nobody is told in either
-case. A closed schema turns those typos into errors at write time. The `x-`
-namespace is the one the spec promises never to use, so custom metadata has a
-place to live that a closed schema can accept safely.
+**Why:** under the spec's rule, a misspelt key is not an error. It is only an
+unknown key, and consumers ignore it. With `stale_afer:`, the concept never
+becomes stale. With `descripton:`, it never gets a summary. In both cases,
+nothing tells the user. A closed schema turns those typos into errors when
+okfw writes. The spec promises never to use the `x-` namespace. So custom
+metadata has a place that a closed schema can safely accept.
 
 **Consequences:**
 - Name custom keys `x-<producer>-<name>`, for example `x-acme-owner`.
   `x-okfw-*` is okfw's own; every other `x-` key belongs to you.
 - A third-party bundle that uses non-`x-` custom keys fails `okfw validate`,
   but passes `okfw validate --okf`.
-- okfw never drops a key it does not know. Frontmatter is edited in place, so
-  unknown keys, comments and quoting survive every okfw write, as §4.1
-  requires.
+- okfw never removes a key that it does not know. It edits frontmatter in
+  place, so unknown keys, comments and quoting stay after each okfw write, as
+  §4.1 requires.
 
 ## Bundle title and description required
 
@@ -94,10 +96,10 @@ place to live that a closed schema can accept safely.
 
 **Why:** the description is the sentence an agent reads to choose between
 bundles: what the bundle covers and when to use it. okfw also puts the title
-and description into the instructions its MCP server sends every agent. A
-field nobody is made to fill in stays empty.
+and description into the instructions that its MCP server sends to each
+agent. When no rule requires a field, the field stays empty.
 
-**Consequences:** `okfw validate --all` fails on a bundle until both are set.
+**Consequences:** `okfw validate --all` fails on a bundle until it has both.
 `okfw validate --okf` does not check them.
 
 ## Near-miss `human:` actors refused
@@ -111,19 +113,19 @@ scheme that is a near miss of `human`, such as `Human:`, `humna:` or
 `humans:`. They also refuse an uppercase scheme.
 
 **Why:** under the spec, `humna:alice` is a valid actor with an unknown
-scheme. A review recorded with that typo would read back as machine-confirmed,
-and nothing would say why.
+scheme. A review with that typo reads back as machine-confirmed, and nothing
+tells why.
 
 **Consequences:** reads accept these actors, as the spec requires, and treat
-them as non-human. Only writes and strict validation refuse them.
+them as non-human. Only the writers and strict `okfw validate` refuse them.
 
 ## What okfw implements that the spec only permits
 
-These are not divergences, but they are choices worth knowing:
+These are not divergences, but they are important choices:
 
-- **Path fields are written with a leading `/`.** Both forms are valid (§6).
+- **okfw writes path fields with a leading `/`.** Both forms are valid (§6).
   The bundle-absolute form stays correct when the concept that holds it moves.
-- **Timestamps are written as date-times.** Dates are valid and okfw accepts
+- **okfw writes timestamps as date-times.** Dates are valid and okfw accepts
   them (§5). okfw writes `generated.at` and `verified[].at` as date-times
   because consumers compare those two values, as §5 recommends. It writes
   every other timestamp the same way, so the format stays uniform.
@@ -132,12 +134,13 @@ These are not divergences, but they are choices worth knowing:
   link repair, change only okfw's `x-okfw-timestamp`. That way an unrelated edit
   never invalidates a review (§5.2–5.3).
 - **`okfw search --current`** excludes deprecated concepts and concepts with an
-  unknown status, and follows `superseded_by` to the replacement (§5.4).
-- **Attested Computation (§10)** concepts can be stored, validated and linked,
-  but okfw does not execute or attest them. The spec still defers the receipt
+  unknown status. For a deprecated hit, it gives the concept that
+  `superseded_by` names (§5.4).
+- **Attested Computation (§10)** concepts: okfw can hold, check and link them,
+  but it does not execute or attest them. The spec still defers the receipt
   and verdict formats and the attester interface (§12.2).
-- **Large directories are summarized in `index.md`.** Past 50 concepts, a
-  listing is grouped by `type` and shows a sample of each group, with a count
-  and the `okfw search --type` command that lists the rest. An exhaustive
-  listing of a large directory would cost more to read than the concepts it
-  previews.
+- **`index.md` gives a summary of a large directory.** Above 50 concepts, the
+  listing puts the concepts in groups by `type`. It shows some concepts of each
+  group, a count, and the `okfw search --type` command that lists the rest. A
+  full listing of a large directory costs more to read than the concepts that
+  it shows.

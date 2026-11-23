@@ -3,16 +3,16 @@ title: NeoVim okfw Plugin Tutorial
 description: Walk through building the devcontainer, connecting via SSH, and using the full OKF Wiki workflow with the NeoVim plugin.
 ---
 
-This tutorial walks you through building the devcontainer, connecting via SSH,
-and using the full OKF Wiki workflow: creating notes, linking them together,
-refining quick captures into permanent knowledge, searching, generating
-graphs, and recording OKF metadata.
+In this tutorial, you build the devcontainer and connect to it through SSH.
+Then you use the full OKF Wiki workflow. You create notes and link them. You
+refine quick captures into permanent knowledge. You search, make graphs, and
+record OKF metadata.
 
 ## Prerequisites
 
-- [Podman](https://podman.io/) (or Docker, substituting `docker` for `podman`)
+- [Podman](https://podman.io/), or Docker with `docker` in place of `podman`
 - An SSH client
-- A terminal emulator (Ghostty recommended for full color support)
+- A terminal emulator. Ghostty has full color support
 - An x86_64 or arm64 (aarch64) host: the image builds natively on either
 
 ## 1. Build the Container
@@ -34,21 +34,21 @@ podman build --build-arg USER_UID=$(id -u) \
   -f Containerfiles/Containerfile -t okfw-devcontainer:latest .
 ```
 
-The build compiles the `okfw` Go binary, installs NeoVim, Claude Code, tmux, and
-all plugins. It takes a few minutes the first time. `USER_UID` gives the
-container's `user` your UID, so under `--userns=keep-id` the `authorized_keys`
-file you mount below is owned by that user — sshd refuses a key file owned by
-anyone else. `VERSION` is what `okfw --version` prints, stamped the way
-`make build` stamps it.
+The build compiles the `okfw` Go binary, and installs NeoVim, Claude Code, tmux
+and all plugins. The first build takes a few minutes. `USER_UID` gives the
+container's `user` the same UID as you. So under `--userns=keep-id`, that user
+owns the `authorized_keys` file that you mount below. sshd refuses a key file
+that a different user owns. `VERSION` is the text that `okfw --version`
+prints. The build puts it into the binary as `make build` does.
 
 ## 2. Start the Container
 
 The container runs an SSH server on port 2222. You need to mount an
 `authorized_keys` file so you can authenticate.
 
-**Using the included test key** (for local development only). git does not
-keep the private key's permissions, and ssh refuses a key others can read, so
-restrict it first:
+**With the included test key** (only for local tests). git does not
+keep the permissions of the private key, and ssh refuses a key that other users
+can read. So first restrict it:
 
 ```bash
 chmod 600 Containerfiles/config/test_ssh_key
@@ -59,7 +59,7 @@ podman run -d --name okfw-dev \
   okfw-devcontainer:latest
 ```
 
-**Using your own SSH key** (recommended; this is what `make run-container` runs):
+**With a personal SSH key** (the better choice, and what `make run-container` runs):
 
 ```bash
 podman run -d --name okfw-dev \
@@ -87,10 +87,10 @@ ssh -p 2222 -i ./Containerfiles/config/test_ssh_key -o IdentitiesOnly=yes \
 ```
 
 `IdentitiesOnly=yes` makes ssh offer only the test key. Without it, ssh first
-offers every key in your ssh-agent, and with several loaded, sshd stops at its
-attempt limit with "Too many authentication failures".
+offers each key in the ssh-agent. When the agent holds many keys, sshd stops at
+its limit of tries with `Too many authentication failures`.
 
-**With your own key:**
+**With a personal key:**
 
 ```bash
 ssh -p 2222 user@localhost
@@ -106,16 +106,15 @@ You land in a **tmux session** with three panes:
 +---------------------------+------------+
 ```
 
-- **Left pane**: NeoVim (your editor)
+- **Left pane**: NeoVim, the editor
 - **Top-right pane**: Bash shell
 - **Bottom-right pane**: Claude Code AI assistant
 
-Navigate between panes with your mouse (mouse mode is enabled) or with tmux
-keybindings (`Ctrl-b` then arrow keys).
+Move between panes with the mouse (tmux has mouse mode on), or with the tmux
+keybindings (`Ctrl-b`, then the arrow keys).
 
-If you disconnect and reconnect, SSH reattaches to the same tmux session
-automatically. Your editor state, shell history, and Claude conversation are
-preserved.
+If you disconnect and connect again, SSH attaches to the same tmux session.
+The state of the editor, the shell history and the Claude session stay.
 
 Only an interactive login attaches to tmux. Give `ssh` a command and it runs
 that instead, so remote commands, `scp` and `sftp` work:
@@ -137,8 +136,8 @@ okfw --version
 okfw --help
 ```
 
-Run `okfw install` inside a project to register its skill with Claude Code —
-that is per-project, so it is deliberately not done when the image is built.
+Run `okfw install` in a project to register its skill with Claude Code. The
+skill is for one project, so the image build does not install it.
 
 ## 4. Where Are Notes Stored?
 
@@ -163,35 +162,35 @@ project:
   .gitignore                   Ignores .ephemeral/
 ```
 
-Every `okfw` command **discovers** the wiki automatically by searching upward
-from the current working directory (the way git finds `.git`), so commands
-work from any subdirectory of the project. Concept markdown is meant to be
-committed with the project; only the `.ephemeral/` export directory is
-gitignored. There is no search index or graph database to maintain: search and
-the link graph are computed from the files on every call.
+Each `okfw` command **finds** the wiki: it looks in the current working
+directory and then in each parent directory, as git does to find `.git`. So
+commands work from any subdirectory of the project. Commit the concept markdown
+with the project. The `.gitignore` excludes only the `.ephemeral/` export
+directory. There is no search index or graph database to maintain. okfw
+calculates search and the link graph from the files on each call.
 
-Concept files are named `slug--shortid.md`, where the short id is the first 12
-hex digits of the concept's UUID. `index.md` and `log.md` are **reserved filenames**
-that carry no concept frontmatter: `index.md` is a directory listing (for
-progressive disclosure) and `log.md` is an update history generated from git.
+A concept file has the name `slug--shortid.md`. The short id is the first 12
+hex digits of the UUID of the concept. okfw reserves the filenames `index.md`
+and `log.md`, and they carry no concept frontmatter. `index.md` is a directory
+listing, for progressive disclosure. `log.md` is an update history from git.
 
-Concepts are placed by topic and project. With no `--path`, a concept lands in
-a top-level folder named after its project (or the wiki root when there is no
-project); `--path <subdir>` overrides that. A project is always optional — quick
-captures need nothing more than a title, and you can assign a project later.
+Directories organize concepts by topic. Without `--path`, a new concept goes to
+the wiki root. `--path <subdir>` puts it in that subdirectory. A quick capture
+needs only a title, and you can move it into a directory later.
 
 **Daily notes** are date-stamped journal entries stored inside the wiki under
 `daily/` in a `YYYY/MM/` directory hierarchy.
 
-Each note has a UUIDv7 `x-okfw-id` (e.g. `019f0494-00a8-7206-b788-c5bbfa2430a8`), which
-embeds a timestamp for natural sorting while remaining collision-free. Legacy
-`YYYYMMDDHHmmss-UUID` IDs are still accepted. A concept's **OKF id is its
-path within the wiki minus `.md`** — for example the file
+Each note has a UUIDv7 `x-okfw-id`, for example
+`019f0494-00a8-7206-b788-c5bbfa2430a8`. The id contains a timestamp, so ids
+sort by time, and two ids are never the same. okfw still accepts legacy
+`YYYYMMDDHHmmss-UUID` IDs. The **OKF id of a concept is its path in the wiki,
+without `.md`**. For example, the file
 `.okfw/infra/my-note-title--019f049400a8.md` has the id
 `infra/my-note-title--019f049400a8`. Commands accept that id, the full UUID, or
-any unique prefix of at least 8 hex digits (`019f0494`).
+a unique prefix of 8 or more hex digits (`019f0494`).
 
-To **persist notes across container restarts**, mount your project directory:
+To **keep notes after the container restarts**, mount the project directory:
 
 ```bash
 podman run -d --name okfw-dev \
@@ -217,24 +216,24 @@ git config user.name "Your Name"
 okfw init
 ```
 
-`okfw init` creates `.okfw/` at the git repository root (or the current
-directory outside git), writes `.okfw/.gitignore`, and generates the OKF root
-`index.md`. Running it again is a no-op. From here on, every `okfw` command
-finds the wiki automatically — from the project root or any subdirectory. The
-tool creates folders on demand as you add concepts — a top-level folder per
-project (or whatever `--path` you pass), plus `daily/` for daily notes.
+`okfw init` creates `.okfw/` at the root of the git repository, or in the
+current directory outside git. It writes `.okfw/.gitignore` and the OKF root
+`index.md`. A second run changes nothing. After that, each `okfw` command
+finds the wiki from the project root or from any subdirectory. okfw creates
+directories when you add concepts: the directory that you give with `--path`,
+and `daily/` for daily notes.
 
 
 ## 6. Start Your Day with a Daily Note
 
-Switch to the NeoVim pane and create your first daily note:
+Go to the NeoVim pane and create the first daily note:
 
 ```vim
 :OkfwDaily
 ```
 
-NeoVim opens today's daily note. It has YAML frontmatter at the top and
-sections for your morning plan, tasks, notes, and end-of-day reflection:
+NeoVim opens the daily note of today. It has YAML frontmatter at the top, and
+sections for the morning plan, tasks, notes, and the end of the day:
 
 ```markdown
 ---
@@ -265,8 +264,8 @@ x-okfw-timestamp: "2026-02-19T14:30:00Z"
 ## Links Created
 ```
 
-Fill in your morning plan. Add a few tasks. Save the file with `:w`. Search
-reads the files directly, so the note is searchable immediately, and saving
+Fill in the morning plan. Add a few tasks. Save the file with `:w`. Search
+reads the files directly, so you can find the note immediately. The save also
 refreshes the `index.md` listings.
 
 You can also view yesterday's daily note:
@@ -289,7 +288,7 @@ Capture a quick idea. In NeoVim:
 :OkfwNote
 ```
 
-You are prompted for a title. Type `Linked Note-Taking Method` and press
+The plugin asks for a title. Type `Linked Note-Taking Method` and push
 Enter. A new note opens with frontmatter and an empty body. Write
 some content:
 
@@ -322,9 +321,9 @@ Create a meeting note:
 :OkfwTemplate meeting
 ```
 
-Enter a title like `Team Standup - Knowledge Management`. The template provides
-sections for attendees, agenda, discussion, action items, and next steps. Fill
-it in and save.
+Type a title such as `Team Standup - Knowledge Management`. The template has
+sections for attendees, agenda, topics, action items, and next steps. Fill it
+in and save it.
 
 Create a code snippet note:
 
@@ -337,10 +336,10 @@ snippet and save.
 
 ## 9. Link Notes Together
 
-Notes become powerful when connected. Links are **vanilla markdown links** that
-point at a concept's file path — a concept's OKF id is its path minus `.md`.
-Open the meeting note you just created, place your cursor where you want a link,
-and insert one:
+Notes become more useful when you connect them. Links are **vanilla markdown
+links** to the file path of a concept. The OKF id of a concept is its path
+without `.md`. Open the meeting note that you created. Put the cursor where you
+want a link, and insert one:
 
 ```vim
 \l
@@ -348,9 +347,10 @@ and insert one:
 
 (`\` is the local leader key followed by `l`)
 
-A picker opens showing all your notes. Select `Linked Note-Taking
-Method` and press Enter. A markdown link is inserted at your cursor. By default
-it uses a wiki-relative absolute path (a leading `/` means the wiki root):
+A picker opens with all the notes. Select `Linked Note-Taking
+Method` and push Enter. The plugin inserts a markdown link at the cursor. By
+default, the link has a wiki-relative absolute path. A leading `/` means the
+wiki root:
 
 ```markdown
 [linked-note-taking-method--019f049400a8](/linked-note-taking-method--019f049400a8.md)
@@ -368,55 +368,55 @@ This inserts:
 [Linked Note-Taking Method](/linked-note-taking-method--019f049400a8.md)
 ```
 
-You can also write relative links by hand, e.g. `[text](./other-note--019f04a10000.md)`.
-Broken links are tolerated. To **follow a link**, place your cursor on it and
-press `gf` (go to file).
+You can also write relative links by hand, for example
+`[text](./other-note--019f04a10000.md)`. okfw accepts broken links. To
+**follow a link**, put the cursor on it and push `gf` (go to file).
 
 You can also insert links from the search picker. Run `:OkfwSearch`,
 highlight a note, and press `Ctrl-l` to insert its link at the cursor.
 
 ## 10. Create More Related Notes
 
-To build a meaningful graph, create several connected notes. Here is a suggested
-set. For each one, use `:OkfwNote`, write content, and link to related notes using
-`\l`:
+To build a useful graph, create some connected notes. Here is a set to try.
+For each note, use `:OkfwNote`, write the content, and link to related notes
+with `\l`:
 
-**Note 2: "Atomic Notes"**
+**Note 2: `Atomic Notes`**
 ```
 An atomic note contains exactly one idea, fully developed.
 This makes notes reusable across contexts.
 ```
 Link to: `Linked Note-Taking Method`
 
-**Note 3: "Linking as Thinking"**
+**Note 3: `Linking as Thinking`**
 ```
 The act of linking notes forces you to articulate the relationship
 between ideas. This is where insight happens.
 ```
 Link to: `Linked Note-Taking Method`, `Atomic Notes`
 
-**Note 4: "Progressive Summarization"**
+**Note 4: `Progressive Summarization`**
 ```
 Layer highlights on top of notes over time. Bold the most important
 passages, then highlight the bold, then write a summary.
 ```
 Link to: `Atomic Notes`
 
-**Note 5: "Capture and Refine"**
+**Note 5: `Capture and Refine`**
 ```
 Capture ideas quickly as raw notes. Later, refine the valuable ones:
 rewrite them in your own words with context and connections.
 ```
 Link to: `Linked Note-Taking Method`, `Atomic Notes`
 
-**Note 6: "Graph Thinking"**
+**Note 6: `Graph Thinking`**
 ```
 A knowledge base is a graph of ideas, not a hierarchy.
 Any note can connect to any other note.
 ```
 Link to: `Linking as Thinking`, `Capture and Refine`
 
-After creating these, you have a small web of interconnected notes.
+Now you have a small web of connected notes.
 
 ## 11. View Backlinks
 
@@ -427,8 +427,8 @@ its backlinks:
 \b
 ```
 
-A floating panel appears at the top-right showing every note that references
-this one. From the panel:
+A floating panel opens at the top-right. It shows each note that refers to
+this one. In the panel:
 
 - Press `Enter` or `o` to open a backlink
 - Press `p` to preview it in a floating window
@@ -438,31 +438,31 @@ Toggle the panel on and off with `\b`.
 
 ## 12. Preview a Note
 
-To peek at a note's raw content without leaving your current file, press
-`Ctrl-p` on a note in the `:OkfwSearch` picker (the `:OkfwDailyList` picker
-shows a preview pane beside the list instead), or preview the current buffer:
+To see the raw content of a note and stay in the current file, push `Ctrl-p`
+on a note in the `:OkfwSearch` picker. The `:OkfwDailyList` picker shows a
+preview pane next to the list. You can also preview the current buffer:
 
 ```vim
 :lua require("okfw").preview_note()
 ```
 
-A floating preview window shows the note content. Inside the preview, press
-`Enter` to open it for editing or `q` to close.
+A floating preview window shows the note content. In the preview, push
+`Enter` to open the note and edit it, or push `q` to close the preview.
 
 ## 13. File the Note in a Directory
 
-The `Linked Note-Taking Method` note has been refined and linked. File it in a
-directory so it's easy to find later. With the note open, run:
+You refined and linked the `Linked Note-Taking Method` note. Now file it in a
+directory, so you can find it quickly later. With the note open, run:
 
 ```vim
 :OkfwMove knowledge-management/
 ```
 
-The note moves to `.okfw/knowledge-management/`, keeping its id, and every
-link to it is rewritten to the new path; the buffer follows it. The new
-directory gets its own `index.md` listing. From the CLI, the same move is
-`okfw move <note> knowledge-management/`, and `okfw create --path
-knowledge-management` creates a note there directly.
+The note moves to `.okfw/knowledge-management/`, and keeps its id. okfw
+changes each link to it to the new path, and the buffer follows the note. The
+new directory gets its own `index.md` listing. In the CLI, the same move is
+`okfw move <note> knowledge-management/`. `okfw create --path
+knowledge-management` creates a note directly in that directory.
 
 ## 14. Search Your Notes
 
@@ -472,8 +472,8 @@ knowledge-management` creates a note there directly.
 :OkfwSearch linked
 ```
 
-A picker shows matching notes. Select one and press Enter to open it,
-or `Ctrl-p` to preview.
+A picker shows the notes that match. Select one, then push Enter to open it,
+or `Ctrl-p` to preview it.
 
 ### Live search (updates as you type)
 
@@ -481,8 +481,8 @@ or `Ctrl-p` to preview.
 :OkfwSearch!
 ```
 
-The `!` (bang) enables live search mode. Start typing and results filter in
-real-time.
+The `!` (bang) turns on live search. Start to type, and the results change
+while you type.
 
 ### CLI search (from the bash pane)
 
@@ -506,17 +506,17 @@ okfw search --tag daily
 
 ## 15. Generate a Graph
 
-Visualize how your notes connect. In NeoVim:
+See how the notes connect. In NeoVim:
 
 ```vim
 :OkfwGraph 20
 ```
 
-This generates a [Mermaid](https://mermaid.js.org/) flowchart showing up to 20
-connected notes and opens it in a scratch buffer. Each node is labeled with its
-title and every markdown link between concept files becomes an arrow. Copy the output
-into [mermaid.live](https://mermaid.live) or any Mermaid renderer to see the
-visual graph.
+This command makes a [Mermaid](https://mermaid.js.org/) flowchart of up to 20
+connected notes, and opens it in a scratch buffer. The label of each node is
+its title, and each markdown link between concept files becomes an arrow. To
+see the graph, copy the output into [mermaid.live](https://mermaid.live) or a
+different Mermaid renderer.
 
 From the CLI:
 
@@ -542,9 +542,10 @@ is.
 okfw set-lifecycle infra/old-method--019f0494 deprecated
 ```
 
-`draft` means not yet reviewed, `stable` (the default when absent) means ready to
-use, and `deprecated` means kept for its links and history but no longer current.
-Find them later with `okfw search --status draft`.
+`draft` means that nobody has reviewed it yet. `stable` (the default when the
+field is absent) means that it is ready to use. `deprecated` means that okfw
+keeps it for its links and history, but it is not current. Find drafts later
+with `okfw search --status draft`.
 
 ### Give a concept a shelf life
 
@@ -552,10 +553,10 @@ Find them later with `okfw search --status draft`.
 okfw set-stale-after infra/pricing--019f0494 2026-12-31T00:00:00Z
 ```
 
-A concept is stale once now is on or after that instant (a bare date such as
-`2026-12-31` means the start of that day in UTC). `okfw search --stale`
-lists everything that has expired, so review is a query rather than a memory
-exercise.
+A concept is stale at that instant and after it. A bare date such as
+`2026-12-31` means the start of that day in UTC. `okfw search --stale` lists
+all the concepts that are stale. So a review is a query, and you do not have to
+remember it.
 
 ### Record that you reviewed something
 
@@ -563,12 +564,13 @@ exercise.
 okfw verify infra/pricing--019f0494
 ```
 
-This appends an entry to the concept's `verified` list, defaulting to
-`human:<your login>`. A concept with no current entries is *unverified*; one
-verified only by automation is *machine-confirmed*; one a human signed off on
-is *human-reviewed*. "Current" means made at or after the concept's last
-meaningful change (`generated.at`): once the content is rewritten, an earlier
-review no longer counts, because nobody reviewed the new text.
+This command adds an entry to the `verified` list of the concept. The default
+actor is `human:<login>`. The tier of a concept with no current entries is `unverified`. When only
+automated checks verified it, the tier is `machine-confirmed`. When a human
+approved it, the tier is `human-reviewed`. "Current" means that the entry is at
+or after the last meaningful change of the concept (`generated.at`). After a
+rewrite of the content, an earlier review does not count, because nobody
+reviewed the new text.
 
 ### Cite where the knowledge came from
 
@@ -593,9 +595,9 @@ okfw validate --all    # strict okfw schema
 okfw validate --okf    # permissive OKF conformance check
 ```
 
-If you are opening a wiki created by an older okfw, run `okfw migrate` first: it
-removes the retired task-tracking fields and moves the bundle to OKF v0.3 (see
-[Migrating to OKF v0.3](/okf-wiki/reference/migrating-to-okf-v0-3/)).
+If you open a wiki from an older okfw, run `okfw migrate` first. It removes
+the old task-tracking fields and moves the bundle to OKF v0.3. See the
+[OKF v0.3 migration guide](/okf-wiki/reference/migrating-to-okf-v0-3/).
 
 ### Retire a concept instead of deleting it
 
@@ -634,22 +636,22 @@ metrics.
 :OkfwTemplate feature
 ```
 
-Sections: requirements, design, API changes, testing strategy, rollout plan.
+Sections: requirements, design, API changes, test strategy, rollout plan.
 
-**Issue (bug report or enhancement):**
+**Issue (bug report or feature request):**
 
 ```vim
 :OkfwTemplate issue
 ```
 
-Sections: type (bug/enhancement/question), description, steps to reproduce,
-expected vs actual behavior.
+Sections: type (bug, feature or question), description, steps to reproduce,
+and the expected and actual behavior.
 
 ## 18. Tag Completion
 
-When editing a note's YAML frontmatter, place your cursor in the `tags:`
-section and press `Ctrl-x Ctrl-t` in insert mode. This triggers tag
-autocompletion from all tags used across your bundle.
+When you edit the YAML frontmatter of a note, put the cursor in the `tags:`
+section. Then push `Ctrl-x Ctrl-t` in insert mode. This starts tag completion,
+from all the tags in the bundle.
 
 Refresh the tag cache if you've added new tags externally:
 
@@ -659,9 +661,9 @@ Refresh the tag cache if you've added new tags externally:
 
 ## 19. Refresh the Directory Listings
 
-There is no search index to maintain — search and the graph read the files
-directly. What okfw does keep up to date are the OKF `index.md` directory
-listings, and saving a concept in NeoVim refreshes them automatically. To
+There is no search index to maintain, because search and the graph read the
+files directly. okfw keeps only the OKF `index.md` directory listings up to
+date. When you save a concept in NeoVim, the plugin refreshes them. To
 regenerate them all by hand:
 
 ```vim

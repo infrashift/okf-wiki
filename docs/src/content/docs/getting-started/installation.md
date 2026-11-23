@@ -14,10 +14,10 @@ binaries, with no runtime dependencies, for three platforms:
 | Linux on aarch64 | `linux-arm64` |
 | macOS on Apple silicon | `darwin-arm64` |
 
-Each archive holds `bin/okfw` and the man pages under `share/man/man1`. Copying
-both into `~/.local` installs the command and its manual. `man` searches the
-`share/man` beside each `bin` directory on your `PATH`, so `man okfw` works
-without setting `MANPATH`.
+Each archive holds `bin/okfw` and the man pages under `share/man/man1`. Copy
+both into `~/.local` to install the command and its manual. `man` looks in the
+`share/man` next to each `bin` directory on the `PATH`, so `man okfw` works
+without a `MANPATH`.
 
 ```bash
 VERSION=v2026.11.3
@@ -30,23 +30,23 @@ okfw --version   # okfw version v2026.11.3
 man okfw
 ```
 
-Put `~/.local/bin` on your `PATH`. The macOS binary is signed with the
-project's cosign key, but it is not notarized by Apple. A download through
-`curl` is not quarantined. After a download through a browser, run
+Put `~/.local/bin` on the `PATH`. The project signs the macOS binary with its
+cosign key, but Apple does not notarize it. macOS does not quarantine a
+download through `curl`. After a download through a browser, run
 `xattr -d com.apple.quarantine ~/.local/bin/okfw`.
 
-A binary from a release before v2026.11.0 has no man pages in its archive, and
-`okfw man` installs them for any okfw binary: it writes them to
-`~/.local/share/man/man1`, from the commands themselves.
+The archive of a release before v2026.11.0 has no man pages. `okfw man`
+installs them for each okfw binary. It makes them from the commands and writes
+them to `~/.local/share/man/man1`.
 
-Every release is signed. Before installing, you can check that the tarball is
-the one the project published; see
-[Verifying Releases](/okf-wiki/reference/verifying-releases/).
+The project signs each release. Before you install a tarball, you can verify
+that the project published it. See
+[Verify a release](/okf-wiki/reference/verifying-releases/).
 
 ## Build from source
 
-Requires Go 1.24+. The concept schema is compiled into the binary, so nothing
-else is needed at runtime.
+This needs Go 1.24 or later. The binary contains the compiled concept schema,
+so it needs nothing else at runtime.
 
 ```bash
 git clone https://github.com/infrashift/okf-wiki.git
@@ -77,23 +77,23 @@ make man                  # Writes the man pages to bin/man/man1
 make dist                 # All three, packaged in dist/ (needs syft)
 ```
 
-`make dist` writes, for each platform, `okfw-<version>-<platform>.tar.gz`
-(`bin/okfw`, `share/man/man1/*.1`, LICENSE and README) and an SPDX SBOM of the
-binary, `okfw-<version>-<platform>.spdx.json`, plus `SHA256SUMS` over the
-tarballs and `SHA256SUMS.sbom` over the SBOMs. Signing them is covered in
-[Releasing](/okf-wiki/reference/releasing/).
+For each platform, `make dist` writes `okfw-<version>-<platform>.tar.gz`, with
+`bin/okfw`, `share/man/man1/*.1`, LICENSE and README. It also writes an SPDX
+SBOM of the binary, `okfw-<version>-<platform>.spdx.json`. `SHA256SUMS` covers
+the tarballs, and `SHA256SUMS.sbom` covers the SBOMs. The
+[release procedure](/okf-wiki/reference/releasing/) tells how to sign them.
 
 ## Versions
 
-`okfw --version` prints the version `make` stamped into the binary: the git tag
-on HEAD, `<tag>-<n>-g<commit>` for a build past one, or the short commit when
-the repository has no tags. Override it with `make build VERSION=...`. A binary
-built with plain `go build` reports the pseudo-version Go recorded from git
-instead.
+`okfw --version` prints the version that `make` puts into the binary. That is
+the git tag on HEAD, or `<tag>-<n>-g<commit>` for a later commit. When the
+repository has no tags, it is the short commit. To set another version, run
+`make build VERSION=...`. A plain `go build` binary reports the pseudo-version
+that Go records from git.
 
-Releases are tagged in CalVer, `vYYYY.M.N`: the year, the month, and a counter
-within the month, with no leading zeros (`v2026.1.0`, not `v2026.01.0`), which
-also keeps them valid semver.
+Release tags use CalVer, `vYYYY.M.N`: the year, the month, and a counter in
+the month. The numbers have no leading zeros (`v2026.1.0`, not `v2026.01.0`),
+so each tag is also valid semver.
 
 ## Initialize a wiki
 
@@ -104,7 +104,7 @@ cd your-project
 okfw init
 ```
 
-This creates a `.okfw/` directory at your project's root. Every `okfw` command
-finds it automatically from anywhere inside the project — no configuration
-needed. See [Configuration](/okf-wiki/getting-started/configuration/) for
+This command creates a `.okfw/` directory at the root of the project. Each
+`okfw` command finds it from any directory in the project, with no
+configuration. See [Configuration](/okf-wiki/getting-started/configuration/) for
 details.

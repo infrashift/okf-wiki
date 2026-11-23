@@ -45,6 +45,7 @@ make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
 make build-darwin-arm64 # Cross-compiles bin/okfw-darwin-arm64 (macOS, Apple silicon)
 make man             # Man pages from the command tree (okfw man) into bin/man/man1
 make docs-flags      # Regenerate the docs site's CLI Flags page from the command tree
+make docs-style      # lexiscope ASD-STE100 check of the docs site (needs lexiscope; not in CI)
 make build VERSION=v2026.10.0 # Overrides the stamped version (default: git describe --tags)
 make dist            # dist/: okfw-<version>-{linux-amd64,linux-arm64,darwin-arm64}.tar.gz (bin/okfw + share/man/man1), SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
 make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
@@ -72,6 +73,10 @@ command gets one. The docs site's flag reference
 improve a flag's help text in the Go source, never on the page.
 `TestEveryFlagHasHelpText` holds help text to one style: present, capitalized,
 no trailing period.
+The docs site's prose follows ASD-STE100 (Simplified Technical English), and
+`make docs-style` checks it with lexiscope's `ste-100` ruleset; `vocabulary.cue`
+holds the okfw/OKF terms it accepts. Add a term there only when it names a
+concept of okfw, OKF, a tool or a standard; rewrite other prose.
 
 **The ZMakefile mirrors the Makefile** for [zmake](https://github.com/infrashift/zmake)
 (modern syntax: `@name:` tasks, no `.PHONY`; zmake reads it before the

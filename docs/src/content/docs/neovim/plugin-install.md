@@ -3,16 +3,16 @@ title: Plugin Installation
 description: Install and configure the okfw NeoVim plugin for seamless OKF Wiki integration.
 ---
 
-The `okfw` NeoVim plugin provides seamless integration for creating notes directly from your editor.
+The `okfw` NeoVim plugin lets you create, find and link notes from the editor.
 
 ## Prerequisites
 
 - NeoVim 0.9+
 - [plenary.nvim](https://github.com/nvim-lua/plenary.nvim) (required dependency)
 - [snacks.nvim](https://github.com/folke/snacks.nvim) (optional, for picker UI)
-- `okfw` binary installed and in your `$PATH` (or its full path passed as `bin`
-  to `setup()`). See [Installation](/okf-wiki/getting-started/installation/) for
-  the prebuilt Linux release binaries and for building from source.
+- The `okfw` binary on the `$PATH`, or its full path as `bin` in `setup()`.
+  The [install page](/okf-wiki/getting-started/installation/) tells how to get
+  the release binaries or build from source.
 
 ## Installation
 
@@ -64,9 +64,9 @@ lua require("okfw").setup({ bin = "okfw" })
    git clone https://github.com/infrashift/okf-wiki.git ~/.local/share/nvim/site/pack/plugins/start/okf-wiki
    ```
 
-2. Ensure plenary.nvim is also installed
+2. Install plenary.nvim too
 
-3. Add to your `init.lua`:
+3. Add this to `init.lua`:
    ```lua
    require("okfw").setup({
        bin = "okfw",
@@ -75,24 +75,24 @@ lua require("okfw").setup({ bin = "okfw" })
 
 ## Initialize a Wiki
 
-The plugin discovers the wiki by running `okfw root` from NeoVim's current
-working directory, which searches upward for a `.okfw/` directory (the way git
-finds `.git`). If your project doesn't have a wiki yet, initialize one with
-the `:OkfwInit` user command (it runs `okfw init` in the cwd):
+The plugin finds the wiki with `okfw root`, from the current working directory
+of NeoVim. `okfw root` looks for a `.okfw/` directory there and in each parent
+directory, as git does to find `.git`. If the project has no wiki, initialize
+one with the `:OkfwInit` user command. It runs `okfw init` in the cwd:
 
 ```vim
 :OkfwInit
 ```
 
-This creates `.okfw/` at the git repository root (or in the cwd outside a git
-repository); running it again is a no-op.
+This command creates `.okfw/` at the root of the git repository, or in the cwd
+outside a git repository. A second run changes nothing.
 
 ## Configuration
 
-`bin` is the only option. Every plugin function reads it, so `setup()` must run
-before you use the plugin. Under lazy.nvim the plugin calls `setup()` with the
-defaults on the `VeryLazy` event if your config has not; with any other plugin
-manager, call it yourself as shown above.
+`bin` is the only option. Each plugin function reads it, so `setup()` must run
+before you use the plugin. Under lazy.nvim, if the config did not call
+`setup()`, the plugin calls it with the defaults on the `VeryLazy` event. With
+a different plugin manager, call it yourself as shown above.
 
 ### Basic Setup
 
@@ -136,8 +136,8 @@ require("okfw").setup_cmp()
 
 ## Filetype Settings
 
-When editing a concept file (markdown with `id:` in frontmatter), the plugin
-automatically provides buffer-local keymaps:
+When you edit a concept file (markdown with `id:` in frontmatter), the plugin
+adds these buffer-local keymaps:
 
 | Keymap | Description |
 |--------|-------------|
@@ -150,8 +150,9 @@ automatically provides buffer-local keymaps:
 | `<localleader>v` | Validate frontmatter (all concept types) |
 | `gf` | Follow the markdown link under the cursor (`/` resolves to the wiki root) |
 
-Saving a concept buffer also refreshes the wiki's `index.md` listings
-(`okfw index-md --no-adopt`), so an edited title or description shows up in them.
+When you save a concept buffer, the plugin also refreshes the `index.md`
+listings of the wiki (`okfw index-md --no-adopt`). So a changed title or
+description shows in them.
 
 ## Help Documentation
 
@@ -161,7 +162,7 @@ See [User Commands](/okf-wiki/neovim/user-commands/) for a complete reference of
 
 ## Keybindings
 
-Add these to your NeoVim configuration:
+Add these to the NeoVim configuration:
 
 ```lua
 -- Quick note
@@ -279,21 +280,21 @@ wk.register({
 
 1. When you call `create_note()`, NeoVim prompts for a note title
 2. The plugin invokes `okfw create "title"`
-3. The `okfw` binary discovers the project's `.okfw/` wiki by searching upward from NeoVim's cwd
-4. On success the plugin prints a confirmation and opens the new concept
+3. `okfw` looks for the `.okfw/` wiki in the cwd of NeoVim and in each parent directory
+4. If the command succeeds, the plugin prints a message and opens the new concept
 
 ## Troubleshooting
 
 ### "okfw: command not found"
 
-Ensure the `okfw` binary is in your `$PATH`:
+Make sure that the `okfw` binary is on the `$PATH`:
 
 ```bash
 # Check if okfw is accessible
 which okfw
 ```
 
-If not, add it to your `PATH` or give its full path in `setup()`:
+If it is not, add it to the `PATH`, or give its full path in `setup()`:
 
 ```lua
 require("okfw").setup({
@@ -316,8 +317,7 @@ use "nvim-lua/plenary.nvim"
 ### "no OKF wiki found"
 
 The project has no `.okfw/` directory anywhere up the tree from NeoVim's cwd.
-Run `:OkfwInit` (or `okfw init` from a shell at your project root) to create
-one.
+To create one, run `:OkfwInit`, or `okfw init` in a shell at the project root.
 
 ### Notes Not Created
 
@@ -361,11 +361,11 @@ Create a new note.
 **Parameters:**
 - `opts` (table, optional):
   - `title` (string): Note title. Prompted for when omitted.
-  - `path` (string): Wiki subdirectory to place the note in (`okfw create --path`; created if missing). Omitted when nil.
+  - `path` (string): Wiki subdirectory for the note (`okfw create --path`). okfw creates it if it does not exist. Omitted when nil.
   - `project` (string): **Deprecated**: still passed as `--project`, with a one-time warning. Use `path`.
 
 **Behavior:**
-1. Prompts for note title via `vim.fn.input()` (unless `title` is given)
+1. Asks for the note title with `vim.fn.input()`, if the call gives no `title`
 2. Executes `okfw create` asynchronously via plenary.job
 3. Prints success/failure message and opens the new concept
 
@@ -397,14 +397,14 @@ require("okfw").set_project(nil, "my-project")  -- Current file, explicit projec
 
 ### `delete_note(file_path)`
 
-Delete a concept — the file and its `index.md` line — after asking for
-confirmation (default **No**). What `:OkfwDelete` does.
+Delete a concept: the file and its `index.md` line. The function asks first,
+and the default answer is **No**. This is what `:OkfwDelete` does.
 
 **Parameters:**
 - `file_path` (string, optional): Path to the concept. Defaults to current buffer.
 
-Concepts that still link to it are reported in a warning, not edited. The
-buffer of the deleted file is wiped.
+A warning names the concepts that still link to it, and the function does not
+edit them. It closes the buffer of the deleted file.
 
 ```lua
 require("okfw").delete_note()
@@ -412,12 +412,13 @@ require("okfw").delete_note()
 
 ### `move_note(file_path, dest)`
 
-Move or rename a concept, repairing links at both ends. What `:OkfwMove` does.
+Move or rename a concept, and repair the links at both ends. This is what `:OkfwMove` does.
 
 **Parameters:**
 - `file_path` (string, optional): Path to the concept. Defaults to current buffer.
-- `dest` (string, optional): Bundle-relative destination — a path ending in
-  `.md` is the new full path, anything else a directory. Prompted for if nil.
+- `dest` (string, optional): The bundle-relative target. A path that ends in
+  `.md` is the new full path. Each other path is a directory. If nil, the
+  function asks for it.
 
 The buffer follows the concept to its new path.
 
@@ -441,7 +442,7 @@ Search concepts with optional filters. This prints the hits (or hands them to
   - `status` (string): Filter by lifecycle status (`draft`, `stable`, `deprecated`)
   - `stale` (boolean): Only concepts whose `stale_after` has passed
   - `limit` (number): Max results
-  - `on_results` (function): Callback receiving results array
+  - `on_results` (function): Callback that gets the results array
 
 ```lua
 require("okfw").search("authentication")
@@ -452,8 +453,8 @@ require("okfw").search("query", { path = "research", on_results = function(r) ..
 
 Regenerate the wiki's OKF `index.md` listings (runs `okfw index-md`). There is
 no search index: search and the graph read the files directly, so the listings
-are the only derived state to refresh. Saving a concept buffer already refreshes
-them.
+are the only derived state to refresh. When you save a concept buffer, the
+plugin already refreshes them.
 
 **Parameters:**
 - `path` (string, optional): Bundle path. Defaults to the wiki discovered from the cwd.
@@ -520,9 +521,9 @@ require("okfw").preview_note("/path/to/note.md")
 
 ### `resolve_concept(ref)`
 
-Return the absolute path of the concept named by `ref` — a frontmatter id, a
-unique prefix of 8+ hex digits, or an OKF concept ID (its wiki-relative path,
-with or without `.md`) — or `nil`.
+Return the absolute path of the concept that `ref` names, or `nil`. `ref` is a
+frontmatter id, a unique prefix of 8 or more hex digits, or an OKF concept ID.
+The OKF concept ID is its wiki-relative path, with or without `.md`.
 
 ```lua
 local path = require("okfw").resolve_concept("019f0494")
@@ -530,13 +531,13 @@ local path = require("okfw").resolve_concept("019f0494")
 
 ### `preview_by_id(id)`
 
-Preview a note by its ID (resolved by scanning the wiki).
+Preview a note by its ID. The function looks through the wiki for the ID.
 
 **Parameters:**
 - `id` (string, optional): The frontmatter id or a unique prefix of it (8+ hex digits, e.g. `019f0494`), or the concept's OKF concept ID (its wiki-relative path minus `.md`). Prompts for input if nil.
 
 **Behavior:**
-1. Resolves the ID by scanning the wiki (`resolve_concept()`)
+1. Finds the ID in the wiki (`resolve_concept()`)
 2. Opens floating preview if found
 
 ```lua
@@ -546,9 +547,9 @@ require("okfw").preview_by_id()  -- Prompts for ID
 
 ### Inserting links
 
-Link insertion is normally done through the **link picker**, bound to
-`<localleader>l` by default. It lets you search your concepts and insert a
-vanilla markdown link to the one you pick — no need to know the concept id.
+Usually, you insert links with the **link picker**. Its default key is
+`<localleader>l`. You search the concepts, and it inserts a vanilla markdown
+link to the concept that you pick. You do not need to know the concept id.
 
 The inserted link points at the target concept's wiki-relative file path (a
 leading `/` means the wiki root), for example:
@@ -569,15 +570,15 @@ is what `<localleader>l` invokes.
 
 **Parameters:**
 - `opts` (table, optional):
-  - `include_title` (boolean): Default format for the `<CR>` action — `true`
-    uses the concept title as the link text, otherwise the file name (minus
-    `.md`) is used
-  - `query` (string): Query passed to `okfw search` to pick the candidates
-    (its 50 best hits; the concept you are editing is left out)
+  - `include_title` (boolean): The default format for the `<CR>` action. With
+    `true`, the link text is the concept title. Otherwise, it is the file name
+    without `.md`
+  - `query` (string): The query for `okfw search` that finds the candidates:
+    its 50 best hits, without the concept that you edit
 
 **Picker keymaps:**
 - `<CR>` - Insert markdown link (link text depends on `include_title` option)
-- `<C-t>` - Insert markdown link using the concept title as the link text
+- `<C-t>` - Insert a markdown link with the concept title as the link text
 
 ```lua
 require("okfw").link_picker()  -- Opens picker, <CR> inserts [file-name](/dir/file-name.md)
@@ -587,14 +588,14 @@ require("okfw").link_picker({ include_title = true })  -- <CR> inserts [Title](/
 #### `insert_link(entry, use_title)`
 
 Insert a markdown link to `entry` (a search result: a table with a
-bundle-relative `path`, or an absolute `file_path`, and `title`) at the cursor. `use_title` makes the title the link text. Linking
-a concept to itself, or to a file outside the wiki, is refused.
+bundle-relative `path`, or an absolute `file_path`, and `title`) at the cursor. `use_title` makes the title the link text. The
+function refuses a link from a concept to itself, or to a file outside the wiki.
 
 #### `entry_file(entry)`
 
 The absolute file of a search result. `okfw search --json` gives a
-bundle-relative `path`, which this resolves against the wiki root; an entry
-with an absolute `file_path` is returned as it is.
+bundle-relative `path`, and this function resolves it from the wiki root. For
+an entry with an absolute `file_path`, it returns that path.
 
 ```lua
 local file = require("okfw").entry_file(hit)
@@ -614,14 +615,15 @@ require("okfw").insert_link_prompt(true)
 Open the concept named by the link under the cursor. This is what `gf` invokes
 in a concept buffer; call it yourself to bind it to another key.
 
-It reads the markdown link (`[text](dest)`) the cursor is on, or failing that
-the path under the cursor, so it also follows a path-valued frontmatter field
-such as `resource: "/tables/orders.md"` or a `sources[].resource`. A path
-starting with `/` resolves against the wiki root, any other against the current
-file's directory. Frontmatter is the exception: only `./` and `../` paths are
-relative there, so a bare `policies/refunds.md` resolves against the wiki root,
-as the CLI reads it. A `#fragment` is ignored, a URL is reported rather than
-opened, and a target that does not exist is reported.
+It reads the markdown link (`[text](dest)`) under the cursor. If there is no
+link, it reads the path under the cursor. So it also follows a path-valued
+frontmatter field, such as `resource: "/tables/orders.md"` or a
+`sources[].resource`. A path that starts with `/` resolves from the wiki root.
+Other paths resolve from the directory of the current file. Frontmatter is the
+exception: there, only `./` and `../` paths are relative. So a bare
+`policies/refunds.md` resolves from the wiki root. The function ignores a
+`#fragment`. It reports a URL and does not open it. It also reports a target
+that does not exist.
 
 ```lua
 vim.keymap.set("n", "<CR>", function()
@@ -644,8 +646,8 @@ require("okfw").add_tags("go error-handling")
 
 ### `validate(file_path)`
 
-Validate a concept's frontmatter against okfw's schema (`okfw validate`) and
-report the result. What `<localleader>v` does.
+Check the frontmatter of a concept against okfw's schema (`okfw validate`), and
+report the result. This is what `<localleader>v` does.
 
 **Parameters:**
 - `file_path` (string, optional): Defaults to current buffer
@@ -689,7 +691,7 @@ require("okfw").refresh_tags()
 
 ### `complete_tags()`
 
-Trigger manual tag completion at cursor using vim's completion menu.
+Start tag completion at the cursor, in the completion menu of vim.
 
 ```lua
 require("okfw").complete_tags()
@@ -788,7 +790,7 @@ require("okfw").backlinks_split({ position = "bottom" })
 
 ### `toggle_backlinks(opts)`
 
-Toggle the floating backlinks panel. `opts` is passed to `backlinks_panel()`.
+Toggle the floating backlinks panel. The function gives `opts` to `backlinks_panel()`.
 
 ```lua
 require("okfw").toggle_backlinks()
@@ -850,7 +852,7 @@ Open a picker to select a template and create a note. Requires snacks.nvim.
 **Behavior:**
 1. Displays all available templates with descriptions
 2. On selection, prompts for note title
-3. Creates note using selected template
+3. Creates the note from the selected template
 
 ```lua
 require("okfw").template_picker()
@@ -859,7 +861,7 @@ require("okfw").template_picker({ path = "specs" })
 
 ### `daily(opts)`
 
-Create or open a daily note. Daily notes are idempotent - the same file is returned for the same date.
+Create or open a daily note. Daily notes are idempotent: the function returns the same file for the same date.
 
 **Parameters:**
 - `opts` (table, optional):
@@ -930,7 +932,7 @@ require("okfw").daily_picker({ month = true })
 
 ## Picker API
 
-Requires snacks.nvim to be installed.
+This needs snacks.nvim.
 
 ### `require("okfw.picker").search(opts)`
 
@@ -959,7 +961,7 @@ Open picker with live search (results update as you type).
 
 ### `require("okfw.picker").insert_link(opts)`
 
-Open picker specifically for inserting links. Same as `require("okfw").link_picker(opts)`.
+Open the picker that inserts links. Same as `require("okfw").link_picker(opts)`.
 
 **Opts:**
 - `include_title` (boolean): Use the concept title as the link text by default

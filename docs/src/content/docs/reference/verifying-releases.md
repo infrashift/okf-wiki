@@ -3,10 +3,10 @@ title: Verifying Releases
 description: Check a downloaded okfw release against the project's signing key, its signatures and its checksums.
 ---
 
-Every okfw release is signed with the project's release key. Verifying a
-download answers two questions: are these the files the project published, and
-were they changed after signing? Both rest on one thing you check first: that
-the public key you verify with is the project's key.
+The project signs each okfw release with its release key. When you verify a
+download, you answer two questions. Did the project publish these files? Did
+someone change them after the project signed them? Both answers depend on one
+check that you do first: the public key that you use must be the project's key.
 
 ## What a release contains
 
@@ -37,10 +37,10 @@ Without `gh`, download the files from the
 
 ## 2. Check the release key
 
-A signature check against the `cosign.pub` inside the release only proves
-that the files agree with each other: anyone who could replace the tarballs
-could replace that key too. So first confirm it is the project's key, using
-copies published elsewhere.
+A signature check against the `cosign.pub` in the release proves only that
+the files agree with each other. A person who can replace the tarballs can
+also replace that key. So first verify that it is the project's key. Compare
+it with copies that the project published in other places.
 
 ### The release key
 
@@ -76,8 +76,8 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
   --bundle okfw-$VERSION-linux-amd64.tar.gz.sigstore.json okfw-$VERSION-linux-amd64.tar.gz
 ```
 
-Each prints `Verified OK`. Any other output means the file is not what was
-signed. To check everything in the release at once:
+Each command prints `Verified OK`. Other output means that the file is not
+the file that the project signed. To check everything in the release at once:
 
 ```bash
 for f in *.tar.gz *.spdx.json SHA256SUMS SHA256SUMS.sbom; do
@@ -87,13 +87,14 @@ for f in *.tar.gz *.spdx.json SHA256SUMS SHA256SUMS.sbom; do
 done
 ```
 
-`--insecure-ignore-tlog` is required, not a shortcut: okfw releases are signed
-offline, so there is no transparency-log entry to check. See
+cosign needs `--insecure-ignore-tlog` here, and it is not a shortcut. The
+project signs okfw releases offline, so there is no transparency-log entry to
+check. See
 [What the signatures prove](#what-the-signatures-prove).
 
 ## 4. Check the checksums
 
-With `SHA256SUMS` itself verified, the checksums confirm the tarballs:
+After you verify `SHA256SUMS`, its checksums verify the tarballs:
 
 ```bash
 sha256sum --ignore-missing -c SHA256SUMS
@@ -109,16 +110,17 @@ replaced one: whoever replaced a tarball could replace `SHA256SUMS` too.
 
 ## 5. Check the binary
 
-Unpack the tarball and confirm the binary is the version you verified:
+Unpack the tarball. Then verify that the binary is the version that you
+checked:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
 okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.3
 ```
 
-With Go installed, `go version -m` prints what the binary records about its
-own build. `vcs.revision` is the commit it was built from, which should be the
-tagged commit, and `vcs.modified=false` means the tree was clean:
+If you have Go, `go version -m` prints the build data that the binary
+records. `vcs.revision` is the commit of the build, and it must be the tagged
+commit. `vcs.modified=false` means that the tree had no changes:
 
 ```bash
 go version -m okfw-$VERSION-linux-amd64/bin/okfw | grep -E 'vcs\.(revision|modified)'
@@ -127,9 +129,9 @@ git ls-remote https://github.com/infrashift/okf-wiki.git "refs/tags/$VERSION^{}"
 
 ## Using the SBOM
 
-The SPDX SBOM lists every module compiled into the binary, with versions, and
-the Go standard library version. Once its signature is verified, it can feed a
-vulnerability scanner without scanning the binary yourself, for example with
+The SPDX SBOM lists each module in the binary, with its version, and the
+version of the Go standard library. After you verify its signature, you can
+give it to a vulnerability scanner instead of the binary. For example, use
 [grype](https://github.com/anchore/grype):
 
 ```bash
@@ -138,13 +140,14 @@ grype sbom:okfw-$VERSION-linux-amd64.spdx.json
 
 ## What the signatures prove
 
-A verified signature proves the file was signed by whoever holds the release
-key's private half, and has not changed since. It does not prove *when* it was
-signed: offline signing records no timestamp and no transparency-log entry.
-That keeps signing self-contained, at the cost of the public, append-only
-record a logged signature would give. Trust therefore rests entirely on the
-release key, which is why step 2 comes first.
+A verified signature proves two things. The holder of the private half of the
+release key signed the file, and the file has not changed since. It does not
+prove *when* the holder signed it. Offline signing records no timestamp and no
+transparency-log entry. So signing needs no service, but it gives no public,
+append-only record, as a logged signature does. So trust depends only on the
+release key, and step 2 comes first for that reason.
 
-If the key is ever rotated, the new key is committed to `release/cosign.pub`,
-added to the table above, and announced in the release notes. Older releases
+If the project rotates the key, it commits the new key to
+`release/cosign.pub`. It also adds the key to the table above, and tells users
+in the release notes. Older releases
 stay verifiable against the key that signed them.

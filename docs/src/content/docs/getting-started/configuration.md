@@ -4,8 +4,8 @@ description: OKF Wiki is zero-configuration — one command per project, no conf
 ---
 
 OKF Wiki is **zero-configuration**. There is no config file, no environment
-variable, and nothing to tune. A wiki is a `.okfw/` directory at your project's
-root, and every command finds it automatically.
+variable, and nothing to tune. A wiki is a `.okfw/` directory at the root of the
+project, and every command finds it automatically.
 
 ## Initializing a wiki
 
@@ -16,18 +16,18 @@ cd your-project
 okfw init
 ```
 
-This creates `.okfw/` at the git repository root (or the current directory if
-you're not in a git repo), writes a `.okfw/.gitignore` covering the
-`.ephemeral/` export directory, and generates the OKF root `index.md` (with the `okf_version`
-declaration). Running `okfw init` again is a no-op that prints
-`OKF wiki already initialized at <path>`.
+This command creates `.okfw/` at the root of the git repository. Outside a git
+repository, it creates `.okfw/` in the current directory. It also writes a
+`.okfw/.gitignore` for the `.ephemeral/` export directory, and the OKF root
+`index.md` with the `okf_version` declaration. When you run `okfw init` again,
+it changes nothing and prints `OKF wiki already initialized at <path>`.
 
 ## Automatic discovery
 
-Every command discovers the wiki by searching upward from the current working
-directory — the same way git finds `.git`. That means commands work from any
-subdirectory of your project. When no wiki is found, commands exit non-zero
-with:
+Each command looks for the wiki in the current working directory, and then in
+each parent directory, as git does to find `.git`. So the commands work from
+any subdirectory of the project. When a command finds no wiki, it exits
+non-zero with this message:
 
 ```
 no OKF wiki found (searched upward from <dir>); run 'okfw init' at your project root to create one
@@ -42,7 +42,7 @@ Two commands help you verify and script against the discovered wiki:
 
 ## The `.okfw/` layout
 
-The layout inside `.okfw/` is fixed:
+okfw always uses this layout inside `.okfw/`:
 
 | Path | Description |
 |------|-------------|
@@ -52,7 +52,7 @@ The layout inside `.okfw/` is fixed:
 | `.ephemeral/` | Export scratch directory (the only generated directory) |
 | `.gitignore` | Ignores `.ephemeral/` |
 
-Concept markdown is meant to be **committed with your project**; only
-`.ephemeral/` is gitignored. There is no search index or graph database to
-build or keep in sync: search and the link graph are computed from the files
-on every call.
+Commit the concept markdown **with the project**. The `.gitignore` excludes
+only `.ephemeral/`. There is no search index or graph database to build or
+keep in sync. okfw calculates search and the link graph from the files on each
+call.

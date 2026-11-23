@@ -3,21 +3,21 @@ title: Daily Notes Workflow
 description: A comprehensive guide to managing daily notes with okfw directly from NeoVim.
 ---
 
-A comprehensive guide to managing daily notes with `okfw` directly from your editor. This document covers the daily, weekly, and monthly review workflows with NeoVim-specific commands and keybindings.
+This guide shows how to keep daily notes with `okfw` from the editor. It covers the daily, weekly and monthly reviews, with the NeoVim commands and keybindings for them.
 
-Your project needs an initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at the project root to create the `.okfw/` directory. The plugin discovers the wiki via `okfw root` from NeoVim's current working directory, so everything below works from any subdirectory of the project.
+The project needs a wiki. To create the `.okfw/` directory, run `:OkfwInit` (or `okfw init` in a shell) one time at the project root. The plugin finds the wiki with `okfw root`, from the current working directory of NeoVim. So all the steps below work from any subdirectory of the project.
 
 ---
 
 ## What Are Daily Notes?
 
-A daily note is a dated entry that serves as your primary capture point for a given day. Rather than deciding "what type of note is this?" every time you have a thought, you write in today's daily note first. Later, you review and extract refined insights.
+A daily note is a dated entry: the first place where you capture ideas on that day. Do not ask "what type of note is this?" for each thought. Write in the daily note of today first. Later, review it and move the refined ideas into their own notes.
 
 **Key characteristics:**
 - **One per day** - Each date has exactly one daily note
-- **Idempotent** - Running `:OkfwDaily` twice returns the same file
-- **Temporal anchor** - Creates a timeline of your thinking
-- **Low friction** - No categorization decisions needed during capture
+- **Idempotent** - When you run `:OkfwDaily` two times, you get the same file
+- **Time line** - The notes record when each idea occurred
+- **Easy capture** - You do not choose a category when you capture
 - **Kind: daily-note** - A distinct structured kind for daily captures (`kind: "daily-note"`)
 
 ---
@@ -26,16 +26,16 @@ A daily note is a dated entry that serves as your primary capture point for a gi
 
 ### 1. Reduces Cognitive Overhead
 
-When an idea strikes, you don't want to spend mental energy deciding:
+When an idea occurs, you do not want to stop and answer these questions:
 - Is this worth a standalone note?
 - What project does this belong to?
-- What should I title this?
+- What title do I give it?
 
-Daily notes eliminate these decisions. Just write. Sort it out later.
+With daily notes, you do not answer them. Write first. Sort later.
 
 ### 2. Creates a Personal Changelog
 
-Daily notes become a searchable history of your work and thoughts:
+Daily notes become a history of work and thoughts that you can search:
 - "What was I working on last Tuesday?"
 - "When did I first encounter this bug?"
 - "What did I learn during that project?"
@@ -49,14 +49,14 @@ The daily review practice naturally resurfaces ideas:
 
 ### 4. Supports GTD-Style Workflows
 
-Daily notes function as an "inbox" in Getting Things Done methodology:
+Daily notes are an "inbox", as in the GTD method of David Allen:
 - Capture everything during the day
 - Process and organize during review
 - Refine valuable insights into permanent notes
 
 ### 5. Feeds Durable Concepts
 
-Daily notes are a staging area: refine what proves durable into its own concept and link back, so the day's capture becomes part of the graph.
+Daily notes are a first stop. Refine each durable idea into its own concept, and link back. Then the capture of the day becomes part of the graph.
 
 ---
 
@@ -182,7 +182,7 @@ local notes = require("okfw").list_daily_sync({ week = true })
    ```
 
 3. **Extract insights from yesterday:**
-   - Identify anything worth keeping as a standalone note
+   - Find the ideas that are worth a standalone note
    - Create new notes with `:OkfwNote` or `:OkfwTemplate`
    - Link back to the daily note if relevant
 
@@ -192,7 +192,7 @@ local notes = require("okfw").list_daily_sync({ week = true })
 
 ### Throughout the Day
 
-Capture everything in your daily note. Press your keymap to jump there instantly:
+Capture everything in the daily note. Set a keymap that opens it immediately:
 
 ```lua
 vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily" })
@@ -201,7 +201,7 @@ vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily"
 ### End of Day (5 minutes)
 
 1. Review the Notes section
-2. Fill in the End of Day reflection
+2. Fill in the End of Day section
 3. List any notes you created in Links Created
 4. Mark completed tasks
 
@@ -209,8 +209,8 @@ vim.keymap.set("n", "<leader>zd", "<cmd>OkfwDaily<cr>", { desc = "Today's daily"
 
 ## Refining Daily Captures into Concepts
 
-A daily note is where a thought lands first; it is not where it should stay. When
-something in today's note turns out to matter, promote it:
+A thought goes into the daily note first, but it must not stay there. When an
+idea in the note of today is important, promote it:
 
 ```vim
 :OkfwNote
@@ -218,9 +218,9 @@ something in today's note turns out to matter, promote it:
 
 and enter the title at the prompt (`Note Title: Authentication token lifetime`).
 
-Then link the two directions — the concept back to the daily note it came from,
-and the daily note out to the concept — so the origin of an idea stays
-recoverable.
+Then add links in the two directions. Link the concept back to its daily note,
+and link the daily note to the concept. Then you can always find the origin of
+an idea.
 
 ### Suggested rhythm
 
@@ -266,19 +266,19 @@ okfw daily --list --week
 
 1. **Scan all daily notes** from the week
 2. **Identify patterns:**
-   - What topics kept coming up?
+   - Which topics occurred many times?
    - What questions remain unanswered?
    - What projects progressed? Stalled?
 3. **Create synthesis notes:**
    - Weekly summary note
-   - Standalone notes for recurring themes
+   - Standalone notes for themes that occur again
 4. **Review drafts and stale concepts** via `:OkfwSearch --status draft` and `:OkfwSearch --stale`
 
 ---
 
 ## Monthly Review Workflow
 
-Monthly reviews are for strategic thinking.
+Use the monthly review for strategy.
 
 ### List This Month's Notes
 
@@ -298,7 +298,7 @@ okfw daily --list --month
 3. **Assess projects:**
    - What shipped?
    - What's blocked?
-   - What should be abandoned?
+   - What do we stop?
 4. **Review what you deprecated** via `:OkfwSearch --status deprecated`
 5. **Set next month's themes**
 
@@ -306,7 +306,7 @@ okfw daily --list --month
 
 ## Recommended Keymaps
 
-Add these to your NeoVim configuration:
+Add these to the NeoVim configuration:
 
 ```lua
 -- Daily notes
@@ -319,9 +319,9 @@ vim.keymap.set("n", "<leader>zw", "<cmd>OkfwDailyList!<cr>", { desc = "This week
 
 ## File Organization
 
-Daily notes are stored inside the project's wiki (the `.okfw/` directory
-created by `okfw init` and discovered automatically from any subdirectory) in
-a structured hierarchy:
+okfw keeps daily notes in the wiki of the project, in a tree of directories.
+The wiki is the `.okfw/` directory that `okfw init` creates, and okfw finds it
+from any subdirectory:
 
 ```
 .okfw/
@@ -337,17 +337,17 @@ a structured hierarchy:
 ```
 
 This structure:
-- Lives at the wiki root, separate from project folders
+- Is at the wiki root, apart from the topic directories
 - Groups notes by year and month
 - Uses human-readable filenames (`YYYY-MM-DD-<weekday>--<shortid>.md`)
-- Makes manual browsing easy
+- Is easy to browse by hand
 - Supports standard file system tools
 
 ---
 
 ## Integration with OKF Wiki
 
-Daily notes complement the wider knowledge base:
+Daily notes add to the knowledge base:
 
 | Knowledge Base Concept | Daily Notes Role |
 |-----------------------|------------------|
@@ -388,13 +388,13 @@ Graph (connect)             Done (complete)
 
 1. **Lower the bar** - A one-line daily note is still valuable
 2. **Time-box reviews** - 5 minutes daily, 15 minutes weekly
-3. **Don't backfill** - If you miss a day, just start fresh
-4. **Use the search** - Your daily notes are searchable; trust the system
-5. **Experiment** - Modify the template to fit your needs
+3. **Do not fill in old days** - If you miss a day, start again on the next day
+4. **Use the search** - You can search the daily notes, so trust the system
+5. **Try changes** - Change the template until it fits
 
 ---
 
 ## Related Documentation
 
-- [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - General note-taking workflow
+- [Notes Workflow](/okf-wiki/neovim/notes-workflow/) - The general workflow for notes
 - [CLI Commands](/okf-wiki/reference/cli-commands/) - Complete CLI reference
