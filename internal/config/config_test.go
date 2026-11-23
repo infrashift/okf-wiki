@@ -371,3 +371,27 @@ func TestExtractBody(t *testing.T) {
 		})
 	}
 }
+
+// TestEmptyFrontmatterBlock: okfw-benchmark fixture c33. A block that closes
+// on the next line is a closed, empty block — no type, so not a concept
+// (OKF v0.3 section 3.2) — not an unclosed one, and the body after it is
+// the body.
+func TestEmptyFrontmatterBlock(t *testing.T) {
+	for _, content := range []string{"---\n---\n\nBody\n", "---\r\n---\r\n\r\nBody\r\n"} {
+		fm, err := ExtractFrontmatter([]byte(content))
+		if err != nil || len(fm) != 0 {
+			t.Errorf("%q: ExtractFrontmatter = %q, %v; want an empty block", content, fm, err)
+		}
+		z, err := ParseFrontmatter([]byte(content))
+		if err != nil || IsConcept(z) {
+			t.Errorf("%q: ParseFrontmatter = %+v, %v; want no error and not a concept", content, z, err)
+		}
+		if body := ExtractBody([]byte(content)); body != "\nBody\n" && body != "\r\nBody\r\n" {
+			t.Errorf("%q: ExtractBody = %q", content, body)
+		}
+	}
+	// A --- inside the body is not the closing line of an empty block.
+	if fm, _ := ExtractFrontmatter([]byte("---\ntype: T\n---\nBody\n---\n")); string(fm) != "type: T" {
+		t.Errorf("frontmatter = %q", fm)
+	}
+}

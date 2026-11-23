@@ -40,6 +40,19 @@ func CheckIndexFile(content []byte, isRoot bool) (violations, warnings []string)
 			// Section 8.1 also permits extension keys, and section 4.1 says a
 			// consumer MUST NOT reject an unknown key; an unknown non-x- key is
 			// a warning, so a typo (titel) is still noticed.
+			// Section 11.1(1): the block must parse as a YAML mapping. Checked
+			// first: an unparseable block used to fall through to the
+			// unknown-key warning below, so a broken root index passed.
+			var doc yaml.Node
+			if perr := yaml.Unmarshal(fm, &doc); perr != nil {
+				violations = append(violations, fmt.Sprintf("root index.md frontmatter does not parse as YAML (%v)", perr))
+				break
+			}
+			if len(doc.Content) > 0 && doc.Content[0].Kind != yaml.MappingNode &&
+				!(doc.Content[0].Kind == yaml.ScalarNode && doc.Content[0].Tag == "!!null") {
+				violations = append(violations, "root index.md frontmatter is not a YAML mapping")
+				break
+			}
 			dups := config.DuplicateKeys(fm)
 			if len(dups) > 0 {
 				violations = append(violations, "duplicate frontmatter key(s): "+strings.Join(dups, ", "))
