@@ -48,12 +48,53 @@ const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown 
 - Never edit index.md or log.md; okfw generates them.
 - Results are capped: truncated or next_offset means there is more.`
 
+// mcpReadOnlyInstructions is mcpInstructions for `okfw mcp --read-only`: the
+// write guidance is gone with the write tools.
+const mcpReadOnlyInstructions = `This server is the project's OKF wiki (okfw), read-only: markdown concepts with YAML frontmatter, linked by markdown links. It holds what the code does not say: decisions and their reasons, findings, open work, runbooks.
+
+- Search before you derive: okfw_search. Weigh each hit by trust, status and stale; a deprecated hit names its replacement in superseded_by.
+- Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
+- Results are capped: truncated or next_offset means there is more.`
+
+// readOnlyTools are the tools `okfw mcp --read-only` serves.
+var readOnlyTools = map[string]bool{"search": true, "read": true, "graph": true}
+
 // maxInstructionDirs bounds the directory names appended to the instructions.
 const maxInstructionDirs = 20
 
 type mcpServer struct {
 	startDir string // wiki discovery start; "" = process cwd
 	out      io.Writer
+
+	// readOnly serves only search, read and graph. The tool definitions and
+	// instructions ride in an agent's context on every turn, and the
+	// okfw-benchmark token runs measured that fixed cost at 60-80% of okfw's
+	// input tokens; the two write tools are nearly half of the definitions,
+	// spent on every turn of a task that only reads.
+	readOnly bool
+}
+
+// tools returns the tools this server serves.
+func (s *mcpServer) tools() []map[string]interface{} {
+	all := mcpTools()
+	if !s.readOnly {
+		return all
+	}
+	out := make([]map[string]interface{}, 0, len(readOnlyTools))
+	for _, t := range all {
+		if readOnlyTools[strings.TrimPrefix(t["name"].(string), "okfw_")] {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// baseInstructions is the static part of the instructions for this server.
+func (s *mcpServer) baseInstructions() string {
+	if s.readOnly {
+		return mcpReadOnlyInstructions
+	}
+	return mcpInstructions
 }
 
 type rpcRequest struct {
@@ -250,7 +291,7 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 	case "ping":
 		resp.Result = map[string]interface{}{}
 	case "tools/list":
-		resp.Result = map[string]interface{}{"tools": mcpTools()}
+		resp.Result = map[string]interface{}{"tools": s.tools()}
 	case "tools/call":
 		var p struct {
 			Name      string          `json:"name"`
@@ -279,9 +320,9 @@ const maxBundleDescription = 240
 func (s *mcpServer) instructions() string {
 	cfg, err := s.cfg()
 	if err != nil {
-		return mcpInstructions
+		return s.baseInstructions()
 	}
-	out := mcpInstructions
+	out := s.baseInstructions()
 	if meta, err := bundle.ReadBundleMeta(cfg.RootPath); err == nil && (meta.Title != "" || meta.Description != "") {
 		line := "\n\nThis wiki"
 		if meta.Title != "" {
@@ -349,7 +390,11 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) (res *toolResult
 	// unambiguously in a client that flattens tool names across servers, but
 	// the bare names shipped first and may be baked into a prompt or a saved
 	// skill somewhere, and breaking those buys nothing.
-	switch strings.TrimPrefix(name, "okfw_") {
+	short := strings.TrimPrefix(name, "okfw_")
+	if s.readOnly && !readOnlyTools[short] {
+		return errResult(fmt.Errorf("%s is not available: this okfw MCP server is read-only (okfw mcp --read-only)", name))
+	}
+	switch short {
 	case "search":
 		return s.toolSearch(cfg, args)
 	case "create":

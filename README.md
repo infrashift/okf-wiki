@@ -155,6 +155,9 @@ Two complementary integration points:
   type, lifecycle, staleness, resource and author in one write. Register with
   `claude mcp add okfw -- okfw mcp`, launched from the project directory. The
   unprefixed names still dispatch, for configurations that predate the prefix.
+  `okfw mcp --read-only` serves only search, read and graph, for an agent that
+  only looks things up. That cuts the context the server costs the agent on
+  every turn by about 45%.
 - **Agent skill** — `okfw install --platform claude|gemini|codex` writes the
   skill and a managed CLAUDE.md/GEMINI.md/AGENTS.md block teaching agents the
   wiki's conventions (linking syntax, atomic notes, capture → refine → link).

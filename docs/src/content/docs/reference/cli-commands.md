@@ -306,8 +306,17 @@ exception (see [How far to trust a hit](#how-far-to-trust-a-hit)).
 Client registration (Claude Code):
 
 ```bash
-claude mcp add okfw -- okfw mcp
+claude mcp add okfw -- okfw mcp               # all five tools
+claude mcp add okfw -- okfw mcp --read-only   # search, read and graph only
 ```
+
+`--read-only` is for an agent that only looks things up. The tool definitions
+and instructions are sent to the model on every turn of a conversation. A
+benchmark of agents answering questions over OKF bundles measured them at
+60–80% of okfw's input tokens. The two write tools are nearly half of those
+definitions, so a read-only server cuts the fixed cost per turn by about 45%
+(6.4 KB to 3.5 KB). It refuses `okfw_create` and `okfw_update`, and its
+instructions leave out the guidance on writing.
 
 ### Install the agent skill
 ```bash
@@ -945,10 +954,11 @@ Usage: `okfw validate <id_or_file>`, `okfw validate --all [path]`, or `okfw vali
 
 ### `okfw mcp`
 
-Usage: `okfw mcp`
+Usage: `okfw mcp [--read-only]`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--read-only` | - | `false` | Serve only the search, read and graph tools, about 45% less fixed context per turn |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw install`

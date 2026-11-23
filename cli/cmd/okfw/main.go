@@ -1222,6 +1222,7 @@ Examples:
 	graphQueryCmd.AddCommand(gqDanglingCmd)
 
 	rootCmd.AddCommand(createCmd)
+	var mcpReadOnly bool
 	var mcpCmd = &cobra.Command{
 		Use:   "mcp",
 		Short: "Serve okfw over MCP (stdio) for AI agents",
@@ -1233,14 +1234,22 @@ token usage.
 The wiki is discovered per call by searching upward from the server's working
 directory, so configure your MCP client to launch okfw from the project root.
 
+--read-only serves only search, read and graph, with instructions to match.
+The tool definitions and instructions ride in an agent's context on every
+turn, and the two write tools are nearly half of the definitions: an agent
+that only looks things up should not pay for them. A call to create or update
+is refused.
+
 Example client configuration (Claude Code):
-  claude mcp add okfw -- okfw mcp`,
+  claude mcp add okfw -- okfw mcp
+  claude mcp add okfw -- okfw mcp --read-only   # an agent that only reads`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			server := &mcpServer{out: os.Stdout}
+			server := &mcpServer{out: os.Stdout, readOnly: mcpReadOnly}
 			return server.serve(os.Stdin)
 		},
 	}
+	mcpCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "Serve only the search, read and graph tools")
 
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(initCmd)
