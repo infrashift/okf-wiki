@@ -39,6 +39,15 @@ vocabulary: {
 	// NeoVim.
 	floating: true // a NeoVim floating window
 
+	// The wiki of this repository: ADRs and issues.
+	decision:   true // an architecture decision record, and its Decision section
+	resolution: true // the Resolution section of an issue
+	validation: true // strict validation, okfw validate --all
+
+	// Standards and other tools.
+	implementation: true // the OKF reference implementation
+	notarization:   true // Apple notarization of a macOS binary
+
 	// Daily notes.
 	evening: true // the evening review of a daily note, like the exception morning
 }

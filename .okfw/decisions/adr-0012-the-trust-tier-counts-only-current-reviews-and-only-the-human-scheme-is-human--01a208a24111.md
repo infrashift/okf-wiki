@@ -14,7 +14,7 @@ description: "A verified event counts only at or after generated.at, the tier ke
 
 **Status:** Accepted
 **Date:** 2026-10-10
-**Source:** Commit b727923, "hold generated.by and verified[].by to the OKF actor convention". PR #15 (2026-11-23) added the count of current events and the typo guard.
+**Source:** Commit b727923, `hold generated.by and verified[].by to the OKF actor convention`. PR #15 (2026-11-23) added the count of current events and the typo guard.
 
 ## Context
 The trust tier keys on the `human:` prefix (OKF section 5.3). The identity fields took any string, so `Human:ryan`, `humna:ryan` or `ryan` recorded a review that read back as machine-confirmed, with no warning.

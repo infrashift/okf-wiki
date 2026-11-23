@@ -17,7 +17,7 @@ description: "okfw writes id, kind, project, parent, created and timestamp as x-
 **Source:** PR #18, commit 18aa43e.
 
 ## Context
-OKF v0.3 section 4.1 promises that no OKF version defines an `x-` key, and asks producers for `x-<producer>-<name>`. okfw's bare keys could collide with a future spec. `timestamp` already collided with the OKF v0.1 key of the same name, which meant the time of generation (Appendix B).
+OKF v0.3 section 4.1 promises that no OKF version defines an `x-` key, and asks producers for `x-<producer>-<name>`. okfw's bare keys could collide with a future spec. `timestamp` already collided with the OKF v0.1 key of the same name, which gave the time that a producer generated the concept (Appendix B).
 
 ## Decision
 - The keys are `x-okfw-id`, `x-okfw-kind`, `x-okfw-project`, `x-okfw-parent`, `x-okfw-created` and `x-okfw-timestamp` (`config.Key*`).

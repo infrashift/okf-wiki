@@ -14,7 +14,7 @@ description: "The CGo code-knowledge-graph binary that incubated in this reposit
 
 **Status:** Accepted
 **Date:** 2026-10-09
-**Source:** Commit ffa4efa, "decommission graphy and the okfw code that served it".
+**Source:** Commit ffa4efa, `decommission graphy and the okfw code that served it`.
 
 ## Context
 The repository incubated `graphy`, a CGo binary that built a code knowledge graph and exported it into okfw bundles. It needed a C toolchain, tree-sitter, bbolt, gonum and hcl.

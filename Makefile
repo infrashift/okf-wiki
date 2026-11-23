@@ -227,13 +227,15 @@ docs-build:
 docs-flags:
 	OKFW_UPDATE_DOCS=1 go test ./cli/cmd/okfw -run '^TestCLIFlagReferenceIsCurrent$$' -count=1
 
-# The docs follow ASD-STE100. lexiscope checks the docs site with its ste-100
-# ruleset and vocabulary.cue, the technical terms that it accepts. Each finding
-# fails the task. lexiscope has no release yet, so CI does not run it.
+# The docs and the wiki follow ASD-STE100. lexiscope checks the docs site and
+# the concepts in .okfw/ with its ste-100 ruleset and vocabulary.cue, the
+# technical terms that it accepts. okfw generates index.md and log.md, so the
+# scan skips them. Each finding fails the task. lexiscope has no release yet,
+# so CI does not run it.
 LEXISCOPE ?= lexiscope
 docs-style:
 	@command -v $(LEXISCOPE) >/dev/null || { echo "docs-style needs lexiscope: https://github.com/infrashift/lexiscope" >&2; exit 1; }
-	$(LEXISCOPE) scan docs/src/content/docs --ruleset ste-100 --ruleset vocabulary.cue --fail-on note
+	$(LEXISCOPE) scan docs/src/content/docs .okfw --ruleset ste-100 --ruleset vocabulary.cue --exclude index.md --exclude log.md --fail-on note
 
 build-image:
 	$(CONTAINER_ENGINE) build --build-arg USER_UID=$(USER_UID) --build-arg VERSION=$(VERSION) -f $(CONTAINER_FILE) -t $(IMAGE_NAME):$(IMAGE_TAG) .
