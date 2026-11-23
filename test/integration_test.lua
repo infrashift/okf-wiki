@@ -519,18 +519,54 @@ do
     okfw.follow_link()
     assert_eq(vim.fn.expand("%:t"), "follow-b--00000000.md", "follow_link follows a frontmatter path")
 
-    -- A bare frontmatter path is read from the bundle root, as the CLI reads
-    -- it, so gf must not open the same-named file beside the concept.
+    -- OKF v0.3 section 6: a bare frontmatter path resolves from the concept's
+    -- directory, as a body link does and as the CLI reads it
+    -- (graph.NormalizeRef), so gf opens the file beside the concept, not the
+    -- same-named file at the bundle root.
     local bundle = okfw.bundle_root():gsub("/$", "")
     local rooted = bundle .. "/follow-e--00000000.md"
+    local beside = dir .. "/follow-e--00000000.md"
     vim.fn.writefile({ "# E (bundle root)" }, rooted)
-    vim.fn.writefile({ "# E (beside the concept)" }, dir .. "/follow-e--00000000.md")
+    vim.fn.writefile({ "# E (beside the concept)" }, beside)
     vim.fn.writefile({ "---", 'resource: "follow-e--00000000.md"', "---", "# D" }, dir .. "/follow-d--00000000.md")
     vim.cmd("edit " .. dir .. "/follow-d--00000000.md")
     vim.api.nvim_win_set_cursor(0, { 2, 14 })
     okfw.follow_link()
+    assert_eq(vim.fn.expand("%:p"), vim.fn.fnamemodify(beside, ":p"),
+        "follow_link reads a bare frontmatter path from the concept's directory")
+
+    -- With no file beside the concept, a v0.3 bundle does not fall back to the
+    -- root: gf stays put, as the CLI finds no edge.
+    vim.fn.delete(beside)
+    vim.cmd("edit " .. dir .. "/follow-d--00000000.md")
+    vim.api.nvim_win_set_cursor(0, { 2, 14 })
+    okfw.follow_link()
+    assert_eq(vim.fn.expand("%:t"), "follow-d--00000000.md",
+        "a v0.3 bundle gives a bare path no root fallback")
+
+    -- A bundle that declares okf_version 0.2 (or none) gets the v0.2 reading
+    -- as a fallback (graph.ResolveRef, section 12.1): the root.
+    local index = bundle .. "/index.md"
+    local saved = vim.fn.readfile(index)
+    assert_eq(okfw._declared_okf_version(bundle), "0.3", "reads the declared okf_version")
+    local legacy = {}
+    for _, l in ipairs(saved) do
+        table.insert(legacy, (l:gsub('^okf_version:.*$', 'okf_version: "0.2"')))
+    end
+    vim.fn.writefile(legacy, index)
+    assert_eq(okfw._declared_okf_version(bundle), "0.2", "reads a changed okf_version")
+    vim.cmd("edit " .. dir .. "/follow-d--00000000.md")
+    vim.api.nvim_win_set_cursor(0, { 2, 14 })
+    okfw.follow_link()
     assert_eq(vim.fn.expand("%:p"), vim.fn.fnamemodify(rooted, ":p"),
-        "follow_link reads a bare frontmatter path from the bundle root")
+        "a v0.2 bundle falls back to the root for a bare path")
+    vim.fn.writefile(saved, index)
+
+    -- The version rule matches config.LegacyPathFallback.
+    for v, want in pairs({ [""] = true, ["0.1"] = true, ["0.2"] = true, ["0.2.1"] = true,
+            ["0.3"] = false, ["1.0"] = false, ["next"] = false }) do
+        assert_eq(okfw._legacy_path_fallback(v), want, "legacy path fallback for okf_version '" .. v .. "'")
+    end
     vim.cmd("bwipeout")
     vim.fn.delete(rooted)
 end

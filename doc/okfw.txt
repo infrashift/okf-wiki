@@ -359,9 +359,11 @@ follow_link()           Open the concept named by the link under the cursor;
                         path under it, so it also follows a path-valued
                         frontmatter field such as `resource: /tables/x.md`.
                         A path starting with / resolves against the wiki root,
-                        any other against the current file's directory, except
-                        in frontmatter, where only ./ and ../ are relative and
-                        a bare path also resolves against the wiki root. A
+                        any other against the current file's directory, in
+                        frontmatter too (OKF v0.3 section 6, as the CLI reads
+                        it). In a bundle that declares okf_version 0.2 or none,
+                        a bare frontmatter path that names no file there is
+                        tried from the wiki root (the v0.2 reading). A
                         #fragment is ignored, a URL is reported rather than
                         opened, and a missing target is reported.
 
