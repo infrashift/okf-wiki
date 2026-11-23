@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.11.2 — 2026-11-23
 
 ### Added
 - **`okfw mcp --read-only`** serves only the search, read and graph tools, with instructions to match, for an agent that only looks things up. It cuts the context the server costs on every turn by about 45% (6.4 KB → 3.5 KB). A benchmark of agents answering questions over OKF bundles (Claude Sonnet 5.5 and Haiku 5.5) measured that fixed cost at 60–80% of okfw's input tokens. In the same benchmark, okfw was already 23–28% cheaper per correct answer than the OKF reference implementation's tools. `okfw_create` and `okfw_update` are refused on a read-only server.
