@@ -20,13 +20,13 @@ both into `~/.local` installs the command and its manual. `man` searches the
 without setting `MANPATH`.
 
 ```bash
-VERSION=v2026.11.2
+VERSION=v2026.11.3
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
 tar -xzf $a.tar.gz
 mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
-okfw --version   # okfw version v2026.11.2
+okfw --version   # okfw version v2026.11.3
 man okfw
 ```
 

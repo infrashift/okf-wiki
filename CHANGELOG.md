@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.11.3 — 2026-11-23
 
 ### Fixed
 - **`okfw mcp --read-only` made Claude Sonnet 5.5 drop correct answers.** It found the right concept, often ranked first, then submitted no answer at all, in 7 of 108 benchmark tasks (101 of 108 correct, against 106 on the read-write server). The write guidance that read-only mode drops was the only place its instructions showed what a concept path looks like (`/dir/file.md`). The read-only instructions now name the path form. In the okfw-benchmark rerun, read-only Sonnet answered 107 of 108 correctly, with no empty answer in 168 tasks; Haiku 5.5 stayed at 108 of 108. The read-only server's per-turn cost is now 42% below the read-write one's, against 45% before.
