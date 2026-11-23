@@ -458,3 +458,27 @@ func TestResolveConceptPathFindsEveryIDLayoutThroughItsPrefilter(t *testing.T) {
 		}
 	}
 }
+
+// TestBareConceptIDIsTheRootFile: "target" is the OKF concept ID of
+// target.md at the bundle root only; paths/target.md is "paths/target". The
+// legacy <id>.md filename match used to take every target.md in the bundle,
+// so the reference was refused as ambiguous.
+func TestBareConceptIDIsTheRootFile(t *testing.T) {
+	cfg, root := testCfg(t)
+	for _, rel := range []string{"target.md", "paths/target.md"} {
+		p := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("---\ntype: Metric\n---\n\nx\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := ResolveConceptPath(cfg, "target")
+	if err != nil || got != filepath.Join(root, "target.md") {
+		t.Errorf("ResolveConceptPath(target) = %q, %v; want the root file", got, err)
+	}
+	if got, err := ResolveConceptPath(cfg, "paths/target"); err != nil || got != filepath.Join(root, "paths", "target.md") {
+		t.Errorf("ResolveConceptPath(paths/target) = %q, %v", got, err)
+	}
+}

@@ -37,6 +37,7 @@ okfw now targets [OKF v0.3](https://github.com/open-knowledge-format/open-knowle
 - The four example bundles from the OKF repository are part of the test suite. okfw must find them conformant and fully linked.
 
 ### Fixed — OKF v0.3
+- **A bare concept ID names the file at the bundle root.** `okfw backlinks target` refused, as ambiguous, a bundle with both `target.md` and `paths/target.md`. The legacy `<id>.md` filename match took every `target.md` in the bundle. It now applies only to a reference shaped like an okfw id. Found by the okfw-benchmark semantics fixtures.
 - **A `.md` file with no `type` is not a concept** (§3.2). A `README.md` in a bundle no longer appears in search, the graph or the listings, and no longer fails `validate`.
 - **Duplicate frontmatter keys are refused** (§4). yaml.v3 kept the last one silently.
 - **A scalar `tags` is one tag, and a single `sources` mapping is a one-item list** (§11.2). Before, both read as empty.

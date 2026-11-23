@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -225,8 +226,17 @@ func ResolveConceptPath(cfg *config.Config, idOrPath string) (string, error) {
 		if !strings.HasSuffix(path, ".md") || config.IsReservedBase(info.Name()) {
 			return nil
 		}
-		// A legacy <id>.md filename.
-		if info.Name() == idOrPath+".md" {
+		// The OKF concept ID of a file at the bundle root: its name minus
+		// .md (section 2). Only the root qualifies — paths/target.md is
+		// "paths/target", and matching every target.md in the bundle made a
+		// bare concept ID ambiguous for no reason.
+		if info.Name() == idOrPath+".md" && filepath.Dir(path) == filepath.Clean(cfg.RootPath) {
+			exact = append(exact, path)
+			return nil
+		}
+		// A legacy <id>.md filename, wherever it lives — but only for a
+		// reference shaped like an okfw id.
+		if info.Name() == idOrPath+".md" && idShaped(idOrPath) {
 			exact = append(exact, path)
 			return nil
 		}
@@ -371,3 +381,9 @@ func isHex(s string) bool {
 	}
 	return true
 }
+
+var idShapeRe = regexp.MustCompile(`^([0-9]{14}-)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+
+// idShaped reports whether ref has the shape of an okfw id: a UUID, or the
+// legacy YYYYMMDDHHmmss-UUID (#ConceptID in the schema).
+func idShaped(ref string) bool { return idShapeRe.MatchString(ref) }
