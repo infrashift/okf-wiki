@@ -75,7 +75,7 @@ and macOS on Apple silicon (`darwin-arm64`). Each archive holds `bin/okfw` and
 the man pages under `share/man/man1`:
 
 ```bash
-VERSION=v2026.11.2
+VERSION=v2026.11.3
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
