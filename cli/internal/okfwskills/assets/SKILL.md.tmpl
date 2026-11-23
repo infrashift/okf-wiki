@@ -41,7 +41,9 @@ Each hit carries `trust` (`unverified`, `machine-confirmed`,
 `human-reviewed`), plus `status` when it is not `stable` and `stale` when its
 `stale_after` has passed. Weigh a hit by them: prefer a reviewed, current
 concept, and treat a stale or deprecated one as a lead to check rather than as
-the answer. Trust counts only reviews made since the content last changed, so
+the answer. Trust ranks hits but never rules one out: `unverified` is the
+usual state, and an unverified hit that answers the question is the answer.
+Trust counts only reviews made since the content last changed, so
 a rewritten concept reads as unverified until someone checks it again. To see
 current knowledge only, add `--current` / `"current":true`: a deprecated hit
 is then replaced by the concept its `superseded_by` names.

@@ -5,6 +5,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/infrashift/okf-wiki/cli/internal/okfwskills"
 )
 
 // fixedCost returns the bytes an MCP client sends the model on every turn:
@@ -64,5 +66,45 @@ func TestMCPReadOnly(t *testing.T) {
 	out, isErr := callTool(t, ro, "okfw_search", `{"q":"ledger"}`)
 	if isErr || !strings.Contains(out, "Ledger note") {
 		t.Errorf("read-only search: %s", out)
+	}
+}
+
+// TestMCPGuidanceNeverDiscardsUnverifiedHits pins the one sentence that
+// stopped agents dropping correct answers. Every hit carries trust, almost
+// every concept is unverified, and "weigh each hit by trust" alone read to
+// Sonnet 5.5 as "rely on none": in the okfw-benchmark token runs it searched,
+// got the right concept ranked first, and submitted no answer at all — 7 of
+// 108 tasks under --read-only, whose shorter instructions gave that line more
+// weight. Every surface that tells an agent about trust must also say that it
+// ranks and never excludes.
+func TestMCPGuidanceNeverDiscardsUnverifiedHits(t *testing.T) {
+	const rule = "never rule one out"
+	for name, text := range map[string]string{
+		"mcpInstructions":         mcpInstructions,
+		"mcpReadOnlyInstructions": mcpReadOnlyInstructions,
+	} {
+		if !strings.Contains(text, rule) || !strings.Contains(text, "unverified is the usual state") {
+			t.Errorf("%s must say trust ranks hits but never rules one out", name)
+		}
+	}
+	// The read-only text loses the write guidance's [Title](/dir/file.md), the
+	// only place the full text shows a concept path, so it must say it itself.
+	if !strings.Contains(mcpReadOnlyInstructions, "/dir/file.md") {
+		t.Error("mcpReadOnlyInstructions must show what a concept path looks like")
+	}
+	for _, tool := range mcpTools() {
+		if tool["name"] != "okfw_search" {
+			continue
+		}
+		if d, _ := tool["description"].(string); !strings.Contains(d, "an unverified hit that answers the question is the answer") {
+			t.Errorf("okfw_search's description must say an unverified hit still answers: %s", d)
+		}
+	}
+	skill, _, err := okfwskills.Docs("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(strings.Fields(skill), " "), "Trust ranks hits but never rules one out") {
+		t.Error("the skill must say trust ranks hits but never rules one out")
 	}
 }

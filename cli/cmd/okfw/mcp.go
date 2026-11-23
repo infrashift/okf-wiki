@@ -41,7 +41,7 @@ const mcpProtocolVersion = "2024-11-05"
 // by TestMCPInstructionsStayShort.
 const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown concepts with YAML frontmatter, linked by markdown links. It holds what the code does not say: decisions and their reasons, findings, open work, runbooks.
 
-- Search before you derive or write: okfw_search. Weigh each hit by trust, status and stale.
+- Search before you derive or write: okfw_search. trust, status and stale rank hits but never rule one out: unverified is the usual state, and a hit that answers the question is the answer.
 - Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
 - Write one idea per concept, with a one-sentence description and at least one link, [Title](/dir/file.md) from the wiki root. Set type, kind, status and provenance in the okfw_create call itself.
 - status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it, with superseded_by naming the replacement. Custom keys are named x-<producer>-<name>.
@@ -49,11 +49,16 @@ const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown 
 - Results are capped: truncated or next_offset means there is more.`
 
 // mcpReadOnlyInstructions is mcpInstructions for `okfw mcp --read-only`: the
-// write guidance is gone with the write tools.
+// write guidance is gone with the write tools. The path line replaces the one
+// thing the write guidance also taught, what a concept path looks like
+// ([Title](/dir/file.md)): without it Sonnet 5.5 found the right concept and
+// then, without thinking, submitted no path at all, in about 1 task in 15 of
+// the okfw-benchmark runs; with it, none in 60 (TestMCPGuidanceNeverDiscardsUnverifiedHits).
 const mcpReadOnlyInstructions = `This server is the project's OKF wiki (okfw), read-only: markdown concepts with YAML frontmatter, linked by markdown links. It holds what the code does not say: decisions and their reasons, findings, open work, runbooks.
 
-- Search before you derive: okfw_search. Weigh each hit by trust, status and stale; a deprecated hit names its replacement in superseded_by.
+- Search before you derive: okfw_search. trust, status and stale rank hits but never rule one out: unverified is the usual state, and a hit that answers the question is the answer. A deprecated hit names its replacement in superseded_by.
 - Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
+- A concept is named by its wiki-relative path, /dir/file.md: the path of a search hit, and what you cite or open.
 - Results are capped: truncated or next_offset means there is more.`
 
 // readOnlyTools are the tools `okfw mcp --read-only` serves.
@@ -171,7 +176,7 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "okfw_search",
-			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only when not stable, stale only when stale_after has passed (or does not parse). Prefer a current, reviewed hit over a stale or deprecated one.",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only when not stable, stale only when stale_after has passed (or does not parse). Prefer a current, reviewed hit over a stale or deprecated one, but unverified is the default, not a defect: an unverified hit that answers the question is the answer.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
