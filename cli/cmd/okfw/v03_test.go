@@ -180,3 +180,37 @@ func TestAnEditUpgradesTheKeysOfItsFile(t *testing.T) {
 		t.Errorf("edited concept does not validate: %v", err)
 	}
 }
+
+// TestGraphAndExportReachEveryComponent: without --start, graph and export
+// began at the most connected concept and never left its component, so an
+// unlinked concept was missing at any --limit and export dropped it
+// silently. Both now cover every component and say what a limit withheld.
+func TestGraphAndExportReachEveryComponent(t *testing.T) {
+	cfg := bundleAt(t)
+	writeConceptFile(t, cfg.RootPath, "a.md", conceptContent("019680f0-7e00-7abc-8def-f00000000001", "Hub", "note", "# Hub\n\n[b](b.md) [c](c.md)"))
+	writeConceptFile(t, cfg.RootPath, "b.md", conceptContent("019680f0-7e00-7abc-8def-f00000000002", "Spoke B", "note", "# B"))
+	writeConceptFile(t, cfg.RootPath, "c.md", conceptContent("019680f0-7e00-7abc-8def-f00000000003", "Spoke C", "note", "# C"))
+	writeConceptFile(t, cfg.RootPath, "lonely.md", conceptContent("019680f0-7e00-7abc-8def-f00000000004", "Lonely", "note", "# Lonely"))
+
+	out, err := captureStdout(t, func() error { _, err := runCmd(t, rootCmd(), "graph", "--limit", "100"); return err })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Lonely") || !strings.Contains(out, "Hub") {
+		t.Errorf("graph --limit 100 should show every concept:\n%s", out)
+	}
+
+	if _, err := runCmd(t, rootCmd(), "export", "--limit", "100"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.RootPath, config.EphemeralDir, "019680f0-7e00-7abc-8def-f00000000004.md")); err != nil {
+		t.Errorf("export --limit 100 left out the unlinked concept: %v", err)
+	}
+
+	if got := withheld(2, 4, "concepts"); !strings.Contains(got, "2 more concepts not shown") || !strings.Contains(got, "--limit") {
+		t.Errorf("withheld(2, 4) = %q", got)
+	}
+	if got := withheld(4, 4, "concepts"); got != "" {
+		t.Errorf("nothing withheld should say nothing, got %q", got)
+	}
+}

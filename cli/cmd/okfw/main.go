@@ -367,10 +367,16 @@ The diagram goes to stdout so it can be piped; a summary line
 If no path is given, the discovered wiki root is used. The graph is built
 from the concepts on disk each time, so it always matches them.
 
+Without --start, the graph begins at the most connected concept and shows its
+neighbourhood first; once that is exhausted it continues with the most
+connected concept not yet shown, so every concept, linked or not, is reached
+with a high enough --limit. The summary line says how many concepts the limit
+left out.
+
 Examples:
   okfw graph                             # Mermaid diagram from the wiki root
   okfw graph --ascii                     # Plain-text tree instead
-  okfw graph path/to/dir                 # All concepts in a directory
+  okfw graph path/to/dir                 # Concepts in a directory (up to --limit)
   okfw graph --start 20260213-abc-123    # Centered on a specific concept
   okfw graph --depth 3                   # Traverse up to 3 hops from start
   okfw graph --limit 20                  # Show up to 20 nodes (default: 10)`,
@@ -390,7 +396,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			nodes, err := queryGraph(cfg, g, graphStartFlag, graphLimitFlag, graphDepthFlag)
+			nodes, reachable, err := queryGraph(cfg, g, graphStartFlag, graphLimitFlag, graphDepthFlag)
 			if err != nil {
 				return err
 			}
@@ -401,7 +407,7 @@ Examples:
 			} else {
 				fmt.Println(graph.GenerateMermaid(nodes, edges))
 			}
-			fmt.Fprintf(os.Stderr, "%d nodes, %d edges\n", len(nodes), len(edges))
+			fmt.Fprintf(os.Stderr, "%d nodes, %d edges%s\n", len(nodes), len(edges), withheld(len(nodes), reachable, "concepts"))
 			return nil
 		},
 	}
@@ -541,7 +547,8 @@ section 3.2).
 
 Examples:
   okfw export                             # Export from bundle root
-  okfw export --limit 5                   # Export 5 closest notes
+  okfw export --limit 5                   # Export 5 concepts, busiest neighbourhood first
+  okfw export --limit 1000                # Export every concept, linked or not
   okfw export --start 20260213-abc-123    # Export from a specific concept
   okfw export --depth 2                   # Export up to 2 hops from start`,
 		Args: cobra.MaximumNArgs(1),
@@ -560,7 +567,7 @@ Examples:
 			if err != nil {
 				return err
 			}
-			nodes, err := queryGraph(cfg, g, exportStartFlag, exportLimitFlag, exportDepthFlag)
+			nodes, reachable, err := queryGraph(cfg, g, exportStartFlag, exportLimitFlag, exportDepthFlag)
 			if err != nil {
 				return err
 			}
@@ -626,7 +633,7 @@ Examples:
 				exported++
 			}
 
-			fmt.Fprintf(os.Stderr, "Exported %d files to %s/\n", exported, config.EphemeralDir)
+			fmt.Fprintf(os.Stderr, "Exported %d files to %s/%s\n", exported, config.EphemeralDir, withheld(len(nodes), reachable, "concepts"))
 			return nil
 		},
 	}
@@ -1337,20 +1344,33 @@ func runInitWith(target string, meta bundle.BundleMeta) error {
 }
 
 // queryGraph runs FindConnected or FindAllConnected based on startID.
-func queryGraph(cfg *config.Config, g *graph.Graph, start string, limit, depth int) ([]*graph.Node, error) {
+//
+// It also returns how many nodes the same query reaches with no limit, so a
+// caller can say what --limit withheld: graph and export showed a capped set
+// as if it were the whole bundle.
+func queryGraph(cfg *config.Config, g *graph.Graph, start string, limit, depth int) ([]*graph.Node, int, error) {
 	if start != "" {
 		// Accept any concept reference, as every other command does: a full
 		// id, a unique prefix, an OKF concept ID or a path.
 		key, err := bundle.ConceptKeyOf(cfg, start)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if g.GetNode(key) == nil {
-			return nil, fmt.Errorf("start node %q not found in graph", start)
+			return nil, 0, fmt.Errorf("start node %q not found in graph", start)
 		}
-		return g.FindConnected(key, limit, depth), nil
+		return g.FindConnected(key, limit, depth), len(g.FindConnected(key, g.NodeCount(), depth)), nil
 	}
-	return g.FindAllConnected(limit, depth), nil
+	return g.FindAllConnected(limit, depth), len(g.FindAllConnected(g.NodeCount(), depth)), nil
+}
+
+// withheld says how many concepts a capped query left out, and how to see
+// them, or "" when it left out none.
+func withheld(shown, reachable int, what string) string {
+	if reachable <= shown {
+		return ""
+	}
+	return fmt.Sprintf(" — %d more %s not shown; raise --limit (to %d for all)", reachable-shown, what, reachable)
 }
 
 // prepareEphemeralDir wipes and recreates the ephemeral directory with a .gitignore.
