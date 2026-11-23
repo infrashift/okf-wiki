@@ -24,7 +24,7 @@ okfw init
 
 Creates a `.okfw/` directory at the git repository root (or the current
 directory outside git), writes a `.okfw/.gitignore` covering the only
-generated directory (`ephemeral/`), and generates the
+generated directory (`.ephemeral/`), and generates the
 OKF root `index.md` (with the `okf_version` declaration). Running `okfw init`
 again is a no-op that prints `OKF wiki already initialized at <path>`.
 
@@ -218,7 +218,7 @@ okfw migrate             # apply
 ```
 
 Rewrites concepts so they satisfy the current schema. okfw removed its
-task-tracking fields, because OKF v0.2 spec'd `status` as the lifecycle field
+task-tracking fields, because OKF spec'd `status` as the lifecycle field
 and okfw was using it for todo progress. This drops `due`, `completed`,
 `priority` and `kind: todo`, and rewrites a legacy `status`:
 
@@ -227,10 +227,14 @@ and okfw was using it for todo progress. This drops `due`, `completed`,
 | `status: closed` | `status: deprecated` |
 | `status: open` or `status: in_progress` | removed (absent means `stable`) |
 
-It also upgrades bare dates in `stale_after`, `sources[].last_modified` and
-`usage_window` to ISO 8601 datetimes (`2026-12-31` becomes
-`2026-12-31T00:00:00Z`, the reading okfw already gave it), and reports any
-timestamp it cannot safely upgrade for you to fix by hand.
+It also moves a bundle from OKF v0.2 to v0.3: bare path fields that okfw read
+from the bundle root gain a leading `/` (v0.3 reads a bare path from the
+concept's directory), the root `index.md` declares `okf_version: "0.3"` with
+its other keys kept, and the export scratch directory moves from `ephemeral/`
+to `.ephemeral/`. It reports a missing bundle title or description, `verified`
+events without an `at`, and any timestamp in neither v0.3 form, for you to fix.
+Bare dates are valid in v0.3 and are left as written. See
+[Migrating to OKF v0.3](/okf-wiki/reference/migrating-to-okf-v0-3/).
 
 Safe to re-run; a second pass reports nothing to do. The free-form `type` is left
 alone, since OKF does not register type values.
@@ -323,7 +327,7 @@ okfw index-md --no-adopt         # Refresh only listings okfw already maintains
 
 Generates OKF `index.md` files (directory listings for progressive disclosure)
 in each directory of the wiki. The root `index.md` carries the wiki's
-`okf_version: "0.2"`; all other index files have no frontmatter, and entries
+`okf_version: "0.3"`; all other index files have no frontmatter, and entries
 include each concept's description.
 
 You rarely need to run this by hand: creating or updating a note keeps every
@@ -517,9 +521,9 @@ okfw export --limit 50
 ```
 
 Writes a self-contained copy of a connected subset of concepts into
-`.okfw/ephemeral/`, one file per concept named `<id>.md`, with links rewritten to
+`.okfw/.ephemeral/`, one file per concept named `<id>.md`, with links rewritten to
 match (an in-bundle link becomes `<id>.md`). Useful for handing a slice of the wiki to something that has no access to
-the bundle. `ephemeral/` is gitignored and safe to delete.
+the bundle. `.ephemeral/` is gitignored and safe to delete.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -683,20 +687,38 @@ See [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a compreh
 
 ## OKF Metadata
 
-okfw implements OKF v0.2's lifecycle, trust, and provenance families. Each has a
-writer, so no field is set-able only by hand-editing YAML.
+okfw implements OKF v0.3's lifecycle, trust, and provenance families, and its
+bundle metadata. Each has a writer, so no field is set-able only by
+hand-editing YAML.
+
+### Bundle metadata
+```bash
+okfw init --title Billing --description "Runbooks and decisions for billing." --license CC-BY-4.0
+okfw set-bundle-meta --description "Runbooks and decisions for billing."
+```
+
+The bundle-root `index.md` carries `okf_version`, `title`, `description` and
+`license` (OKF §8.1); okfw keeps that frontmatter as it is whenever it
+regenerates the listing. `okfw validate --all` requires a title and a
+description: the description is the sentence an agent reads to pick a bundle,
+and the MCP server quotes both to every agent.
 
 ### Lifecycle
 ```bash
-okfw set-lifecycle 019f0494 deprecated   # draft | stable | deprecated
+okfw set-lifecycle 019f0494 deprecated --superseded-by metrics/gross-margin.md
+okfw set-lifecycle 019f0494 draft                 # draft | stable | deprecated
 okfw set-stale-after 019f0494 2026-12-31T00:00:00Z
 okfw set-stale-after 019f0494 2026-12-31          # stored as 2026-12-31T00:00:00Z
 okfw set-stale-after 019f0494 --clear
+okfw search "gross margin" --current              # skip deprecated; follow superseded_by
 ```
 
-An absent `status` means `stable`. A concept is stale once now is on or after
-`stale_after` — an absolute instant, not a TTL. OKF requires an ISO 8601
-datetime with a UTC offset; a bare date is accepted and stored as midnight UTC.
+An absent `status` means `stable`. `--superseded-by` names the concept that
+replaces a deprecated one, written as a bundle-absolute path; setting any other
+status removes it. A concept is stale once now is on or after `stale_after` —
+an absolute instant, not a TTL — and a value that cannot be parsed counts as
+stale. OKF accepts a date-time with an offset or a date (the start of that day
+in UTC); okfw stores the date-time form.
 
 ### Trust
 ```bash
@@ -704,20 +726,26 @@ okfw verify 019f0494                              # defaults to human:<your logi
 okfw verify 019f0494 --by process:nightly-audit
 okfw verify 019f0494 --by human:ryan --at 2026-07-20T10:00:00Z
 okfw set-generated 019f0494 --by process:finance-nightly
+okfw set-generated 019f0494 --by agent/1 --at 2026-07-01T00:00:00Z
 ```
 
 `verify` appends to the concept's `verified` list. Consumers derive a trust tier
-from it: no entries means `unverified`, non-human actors mean
-`machine-confirmed`, and any `human:` actor means `human-reviewed`. Running
-`verify` by hand is a human confirmation, hence the default actor.
+from the **current** entries — those at or after `generated.at`: none means
+`unverified`, only non-human actors mean `machine-confirmed`, and a `human:`
+actor means `human-reviewed`. Running `verify` by hand is a human confirmation,
+hence the default actor.
 
-`--by` on both commands must be `human:<id>`, `process:<id>` or
-`<producer>/<version>`, with the prefix in lowercase; anything else is refused,
-because the tier keys on the exact prefix `human:` and a misspelt one would
-silently record a human review as machine-confirmed.
+`set-generated` records a generation: `generated.by`, and `generated.at` (now,
+unless `--at` says otherwise). That is the statement that the content was
+produced again, so reviews made before it stop counting. okfw moves
+`generated.at` itself only for a body rewrite made through okfw; tag,
+lifecycle, source and verify edits change only okfw's `timestamp`.
 
-`generated.at` is not set directly — it mirrors `timestamp`, and okfw keeps the
-two equal.
+`--by` on both commands must be `<scheme>:<id>` — `human:`, `team:`,
+`process:` or another lowercase scheme — or `<producer>/<version>`. A near miss
+of `human:` (`Human:`, `humna:`) is refused, because the tier keys on the exact
+scheme `human:` and a misspelt one would silently record a human review as
+machine-confirmed.
 
 ### Provenance
 ```bash
@@ -746,7 +774,7 @@ reference.
 
 :::note
 okfw has **no task tracking**. `okfw todo`, `todos`, `todo-list`, and `set-status`
-were removed along with the `todo` kind: OKF v0.2 spec'd `status` as the
+were removed along with the `todo` kind: OKF spec'd `status` as the
 lifecycle field, and okfw is a knowledge format rather than a task tracker. Run
 `okfw migrate` to clean up concepts written before the removal.
 :::
@@ -800,6 +828,22 @@ Usage: `okfw init`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--title` | - | the project directory's name | Bundle title (root `index.md`, OKF §8.1) |
+| `--description` | - | - | One sentence: what the bundle covers and when to use it |
+| `--license` | - | - | License of the bundle content: an SPDX expression or a path in the bundle |
+| `--help` | `-h` | - | Show help |
+
+### `okfw set-bundle-meta`
+
+Usage: `okfw set-bundle-meta [--title T] [--description D] [--license L]`
+
+Sets bundle metadata in the root `index.md`, keeping its other keys. An empty value removes a key.
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--title` | - | - | Bundle title |
+| `--description` | - | - | One sentence: what the bundle covers and when to use it |
+| `--license` | - | - | SPDX expression, or a path to a license file in the bundle |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw connect`
@@ -860,7 +904,7 @@ Usage: `okfw validate <id_or_file>`, `okfw validate --all [path]`, or `okfw vali
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--all` | - | `false` | Apply the strict okfw schema to every concept in the bundle |
-| `--okf` | - | `false` | Validate the whole wiki for OKF §11 conformance: every concept has parseable frontmatter with a non-empty `type`, every `index.md` follows §8 (no frontmatter except `okf_version` at the root) and every `log.md` follows §9 (`## YYYY-MM-DD` headings, newest first). Broken links, listing entries that are not links, and a declared `okf_version` other than okfw's are reported as warnings |
+| `--okf` | - | `false` | Validate a bundle for OKF v0.3 §11.1 conformance: every frontmatter block parses as a YAML mapping with no duplicate keys, every `index.md` follows §8 (no frontmatter except bundle metadata at the root) and every `log.md` follows §9 (`## YYYY-MM-DD` headings, newest first). A `.md` file with no `type` (not a concept), broken links, listing entries that are not links, a path field that resolves only through the v0.2 fallback, and a declared `okf_version` other than okfw's are warnings. Works on any directory, with or without a `.okfw` |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw mcp`
@@ -915,8 +959,9 @@ Usage: `okfw root`
 | `--path` | - | - | Search only this bundle subdirectory, recursively |
 | `--kind` | - | - | Filter by structured kind (`note`/`daily-note`/`issue`) |
 | `--type` | `-t` | - | Filter by the free-form OKF `type` field |
-| `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`) |
-| `--stale` | - | `false` | Only concepts whose `stale_after` instant has been reached |
+| `--status` | - | - | Filter by OKF lifecycle status (`draft`/`stable`/`deprecated`, or an unknown value as written) |
+| `--stale` | - | `false` | Only concepts whose `stale_after` instant has been reached, or whose `stale_after` does not parse |
+| `--current` | - | `false` | Only current knowledge: no deprecated or unknown-status concept; a deprecated hit is replaced by its `superseded_by` |
 | `--limit` | `-l` | `20` | Maximum number of results |
 | `--offset` | - | `0` | Skip this many results (pagination) |
 | `--json` | - | `false` | Output as JSON |
@@ -987,6 +1032,7 @@ Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
+| `--superseded-by` | - | - | With `deprecated`: the concept that replaces this one (id or path) |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw set-stale-after`
@@ -1004,8 +1050,8 @@ Usage: `okfw verify <id_or_file>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--by` | - | `human:<login>` | Actor: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
-| `--at` | - | now | RFC 3339 datetime |
+| `--by` | - | `human:<login>` | Actor: `<scheme>:<id>` (`human:`, `team:`, `process:`, …) or `<producer>/<version>` |
+| `--at` | - | now | When it was verified: an RFC 3339 date-time or a date |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw set-generated`
@@ -1014,7 +1060,8 @@ Usage: `okfw set-generated <id_or_file>`
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--by` | - | `human:<login>` | Actor that produced the content: `human:<id>`, `process:<id>`, or `<producer>/<version>` |
+| `--by` | - | `human:<login>` | Actor that produced the content: `<scheme>:<id>` or `<producer>/<version>` |
+| `--at` | - | now | When the content last meaningfully changed: an RFC 3339 date-time or a date |
 | `--help` | `-h` | - | Show help |
 
 ### `okfw add-source`
@@ -1028,7 +1075,7 @@ Usage: `okfw add-source <id_or_file> --resource <uri>`
 | `--title` | - | - | Human-readable label |
 | `--author` | - | - | Actor who produced the source |
 | `--usage-count` | - | - | How often the resource was exercised |
-| `--last-modified` | - | - | When the source itself last changed (ISO 8601 datetime; a bare date means midnight UTC) |
+| `--last-modified` | - | - | When the source itself last changed (an RFC 3339 date-time with offset, or a date: the start of that day in UTC) |
 | `--usage-window` | - | - | Datetime range framing `--usage-count`, as `FROM..TO` |
 | `--help` | `-h` | - | Show help |
 
@@ -1108,8 +1155,8 @@ project is set); `--path <subdir>` overrides that.
 │           └── 2026-06-26-friday--019f04a10000.md
 ├── any-other-folder/              # Concepts may live in any directory you choose
 │   └── refined-concept--019f04b80000.md
-├── ephemeral/                     # Export scratch dir (gitignored)
-└── .gitignore                     # Ignores ephemeral/
+├── .ephemeral/                     # Export scratch dir (gitignored)
+└── .gitignore                     # Ignores .ephemeral/
 ```
 
 `index.md` and `log.md` are **reserved filenames** carrying no concept

@@ -173,10 +173,10 @@ A bare number is the same as `--limit`.
 ### `:OkfwExport`
 
 Export a portable subset of the wiki (`okfw export`): the same graph query as
-`:OkfwGraph`, with each concept copied into `<wiki>/ephemeral/` as `<id>.md`
+`:OkfwGraph`, with each concept copied into `<wiki>/.ephemeral/` as `<id>.md`
 and the links between exported concepts rewritten to those files, so the set
 reads in any markdown viewer. Links to concepts outside the set are left as
-they are. `ephemeral/` is wiped on every export and gitignored. A notification
+they are. `.ephemeral/` is wiped on every export and gitignored. A notification
 reports how many files were written.
 
 ```vim
@@ -319,7 +319,7 @@ concepts were rewritten.
 | `:OkfwTemplate [name] [--project NAME]` | Create from template |
 | `:OkfwSearch[!] [flags] [query]` | Search concepts (! for live search) |
 | `:OkfwGraph [flags]` | Graph visualization |
-| `:OkfwExport [flags]` | Export a portable subset to `ephemeral/` |
+| `:OkfwExport [flags]` | Export a portable subset to `.ephemeral/` |
 | `:OkfwDaily [date]` | Open daily note |
 | `:OkfwDailyList[!]` | Browse daily notes (! for this week) |
 | `:OkfwDelete [concept]` | Delete a concept (asks first) and its `index.md` entry |

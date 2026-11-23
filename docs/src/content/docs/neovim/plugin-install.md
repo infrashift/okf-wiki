@@ -487,7 +487,7 @@ require("okfw").graph({ limit = 20, path = "path/to/.okfw/" })
 
 ### `export(opts)`
 
-Copy a graph subset into `<wiki>/ephemeral/` as `<id>.md` files with the links
+Copy a graph subset into `<wiki>/.ephemeral/` as `<id>.md` files with the links
 between them rewritten, so the set reads in any markdown viewer (`okfw export`).
 Takes the same `opts` as `graph()`. What `:OkfwExport` does.
 

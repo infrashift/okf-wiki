@@ -47,6 +47,9 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 			if fi.IsDir() && SkipWalkDir(path, p) {
 				return filepath.SkipDir
 			}
+			if fi.Mode()&os.ModeSymlink != 0 && !Within(bundleRoot, p) {
+				return nil // OKF section 3.2: never follow a link out of the bundle
+			}
 			if !fi.IsDir() && strings.HasSuffix(p, ".md") && !config.IsReservedBase(fi.Name()) {
 				files = append(files, p)
 			}
@@ -76,8 +79,8 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 			continue
 		}
 		z, err := config.ParseFrontmatter(content)
-		if err != nil {
-			continue // no parseable frontmatter: not a concept
+		if err != nil || !config.IsConcept(z) {
+			continue // no frontmatter or no type: not a concept (OKF section 3.2)
 		}
 		absPath, _ := filepath.Abs(filePath)
 		rel, err := relSlash(bundleRoot, absPath)
@@ -123,9 +126,10 @@ func LoadGraphFrom(path, bundleRoot string) (*graph.Graph, error) {
 		keyByRel[rel] = k
 		return k
 	}
+	exists := RefExists(bundleRoot)
 	g := graph.New()
 	for _, c := range concepts {
-		c.node.Links = config.ResolveConceptLinks(c.z, c.body, c.fromDir, keyOf)
+		c.node.Links = config.ResolveConceptLinks(c.z, c.body, c.fromDir, keyOf, exists)
 		g.AddNode(c.node)
 	}
 	if g.NodeCount() == 0 {

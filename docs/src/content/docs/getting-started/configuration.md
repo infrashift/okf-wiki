@@ -18,7 +18,7 @@ okfw init
 
 This creates `.okfw/` at the git repository root (or the current directory if
 you're not in a git repo), writes a `.okfw/.gitignore` covering the
-`ephemeral/` export directory, and generates the OKF root `index.md` (with the `okf_version`
+`.ephemeral/` export directory, and generates the OKF root `index.md` (with the `okf_version`
 declaration). Running `okfw init` again is a no-op that prints
 `OKF wiki already initialized at <path>`.
 
@@ -49,10 +49,10 @@ The layout inside `.okfw/` is fixed:
 | `*.md` (top level) | Concept markdown files (subdirectories via `--path` or `--project`) |
 | `index.md` (every directory) | OKF directory listing, auto-maintained on every note change |
 | `daily/YYYY/MM/` | Daily notes, grouped by year and month |
-| `ephemeral/` | Export scratch directory (the only generated directory) |
-| `.gitignore` | Ignores `ephemeral/` |
+| `.ephemeral/` | Export scratch directory (the only generated directory) |
+| `.gitignore` | Ignores `.ephemeral/` |
 
 Concept markdown is meant to be **committed with your project**; only
-`ephemeral/` is gitignored. There is no search index or graph database to
+`.ephemeral/` is gitignored. There is no search index or graph database to
 build or keep in sync: search and the link graph are computed from the files
 on every call.

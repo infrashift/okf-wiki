@@ -19,6 +19,10 @@ func testCfg(root string) *config.Config {
 	return config.ConfigFor(root)
 }
 
+// describedRoot is a bundle-root index.md carrying the metadata okfw validate
+// requires (OKF v0.3 section 8.1).
+const describedRoot = "---\nokf_version: \"0.3\"\ntitle: \"Test\"\ndescription: \"A bundle for tests.\"\n---\n\n# Index\n"
+
 func conceptContent(id, title, typ, body string) string {
 	return "---\n" +
 		"id: \"" + id + "\"\n" +
@@ -62,10 +66,17 @@ func TestRunValidateOKF(t *testing.T) {
 		t.Fatalf("conformant bundle should pass, got %v", err)
 	}
 
-	// Inject a concept with an empty `type` (hard violation).
+	// OKF v0.3 section 3.2: a file with an empty `type` is not a concept, and
+	// does not affect conformance. It is only warned about.
 	writeConceptFile(t, root, "notes/bad--0002.md", conceptContent("01968109-4700-7def-9abc-ffffffffffff", "Bad", "", "# Bad"))
+	if err := runValidateOKF(cfg, root); err != nil {
+		t.Fatalf("an untyped file must not fail conformance: %v", err)
+	}
+
+	// Section 4: duplicate keys are a violation.
+	writeConceptFile(t, root, "notes/dup--0003.md", "---\ntype: note\ntitle: A\ntitle: B\n---\nbody\n")
 	if err := runValidateOKF(cfg, root); err == nil {
-		t.Fatal("expected a conformance violation for empty type")
+		t.Fatal("expected a conformance violation for a duplicate key")
 	}
 }
 
@@ -75,10 +86,11 @@ func TestRunValidateOKF(t *testing.T) {
 func TestValidateBundlePathSpelling(t *testing.T) {
 	root := t.TempDir()
 	cfg := testCfg(root)
-	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.2\"\n---\n\n# Index\n")
+	writeConceptFile(t, root, "index.md", describedRoot)
 	alpha := conceptContent("019680f0-7e00-7abc-8def-1234567890ab", "Alpha", "note", "# Alpha")
 	writeConceptFile(t, root, "notes/alpha--0001.md", alpha)
-	writeConceptFile(t, root, "ephemeral/alpha--0001.md", alpha) // an export copy
+	writeConceptFile(t, root, ".ephemeral/alpha--0001.md", alpha) // an export copy
+	writeConceptFile(t, root, "ephemeral/alpha--0001.md", alpha)  // one from before v0.3
 
 	t.Chdir(filepath.Dir(root))
 	for _, path := range []string{root, root + "/", filepath.Base(root), filepath.Base(root) + "/", "./" + filepath.Base(root) + "/"} {
@@ -417,11 +429,29 @@ func TestRunValidateAllIsStricterThanOKFConformance(t *testing.T) {
 func TestRunValidateAllAcceptsAConformantBundle(t *testing.T) {
 	root := t.TempDir()
 	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", describedRoot)
 	writeConceptFile(t, root, "ok--0001.md",
 		bundle.GenerateBasicNote("019680f0-7e00-7abc-8def-1234567890ab", "Fine", "", nil))
+	writeConceptFile(t, root, "README.md", "# Not a concept\n") // OKF v0.3 section 3.2
 
 	if err := runValidateAll(cfg, root); err != nil {
 		t.Errorf("a valid bundle should pass --all: %v", err)
+	}
+}
+
+// okfw requires a title and a description in the bundle-root index.md, which
+// OKF v0.3 section 8.1 makes optional; validate --okf does not.
+func TestRunValidateAllRequiresBundleMetadata(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.3\"\ntitle: \"Test\"\n---\n\n# Index\n")
+	writeConceptFile(t, root, "ok--0001.md",
+		bundle.GenerateBasicNote("019680f0-7e00-7abc-8def-1234567890ab", "Fine", "", nil))
+	if err := runValidateAll(cfg, root); err == nil || !strings.Contains(err.Error(), "description") {
+		t.Errorf("err = %v, want the missing description reported", err)
+	}
+	if _, err := captureStdout(t, func() error { return runValidateOKF(cfg, root) }); err != nil {
+		t.Errorf("--okf must not require bundle metadata: %v", err)
 	}
 }
 
@@ -489,6 +519,7 @@ func TestRunMigrateStripsLegacyTodoFields(t *testing.T) {
 			t.Errorf("%s should be gone:\n%s", gone, got)
 		}
 	}
+	writeConceptFile(t, root, "index.md", describedRoot)
 	if err := runValidateAll(cfg, root); err != nil {
 		t.Errorf("the bundle should validate after migrating: %v", err)
 	}
@@ -561,42 +592,22 @@ timestamp: "2026-02-13T10:45:00Z"
 # Pricing
 `
 
-func TestRunMigrateUpgradesDatesToDatetimes(t *testing.T) {
+// OKF v0.3 makes a bare date valid again (the start of that day in UTC), so
+// migrate leaves the dates older okfw wrote as they are; section 4 asks a
+// producer not to re-serialize values it did not change.
+func TestRunMigrateLeavesBareDatesAlone(t *testing.T) {
 	root := t.TempDir()
 	cfg := testCfg(root)
 	p := writeConceptFile(t, root, "pricing--0001.md", legacyDatedConcept)
 
-	if err := runValidateAll(cfg, root); err == nil {
-		t.Fatal("bare dates should fail the current schema")
+	if _, err := config.ParseAndValidate([]byte(legacyDatedConcept)); err != nil {
+		t.Fatalf("bare dates should satisfy the v0.3 schema: %v", err)
 	}
 	if err := runMigrate(cfg, root, false); err != nil {
 		t.Fatalf("runMigrate: %v", err)
 	}
-	got := readFile(t, p)
-	z, err := config.ParseAndValidate([]byte(got))
-	if err != nil {
-		t.Fatalf("migrated concept does not validate: %v\n%s", err, got)
-	}
-	if z.StaleAfter != "2026-12-31T00:00:00Z" ||
-		z.UsageWindow.From != "2026-01-01T00:00:00Z" || z.UsageWindow.To != "2026-06-30T00:00:00Z" ||
-		z.Sources[0].LastModified != "2026-05-01T00:00:00Z" ||
-		z.Sources[0].UsageWindow.From != "2026-02-01T00:00:00Z" || z.Sources[0].UsageWindow.To != "2026-03-01T00:00:00Z" {
-		t.Errorf("not every date was upgraded:\n%s", got)
-	}
-	// Reformatting a field is not a change to content.
-	if !z.Timestamp.Equal(time.Date(2026, 2, 13, 10, 45, 0, 0, time.UTC)) {
-		t.Errorf("timestamp moved to %s", z.Timestamp)
-	}
-	if !strings.HasSuffix(got, "\n# Pricing\n") {
-		t.Errorf("body changed:\n%s", got)
-	}
-
-	once := got
-	if err := runMigrate(cfg, root, false); err != nil {
-		t.Fatal(err)
-	}
-	if twice := readFile(t, p); twice != once {
-		t.Errorf("a second migrate changed the file:\n%s\n---\n%s", once, twice)
+	if got := readFile(t, p); got != legacyDatedConcept {
+		t.Errorf("a concept holding only bare dates was rewritten:\n%s", got)
 	}
 }
 
@@ -612,15 +623,62 @@ func TestRunMigrateLeavesUnrepairableTimestampsAlone(t *testing.T) {
 		t.Fatalf("runMigrate: %v", err)
 	}
 	got := readFile(t, p)
-	if !strings.Contains(got, `stale_after: "2026-12-31T00:00:00"`) {
-		t.Errorf("an offset-less datetime was rewritten:\n%s", got)
-	}
-	if !strings.Contains(got, `last_modified: "2026-05-01T00:00:00Z"`) {
-		t.Errorf("the repairable fields beside it were not upgraded:\n%s", got)
+	if got != content {
+		t.Errorf("migrate rewrote a concept it could not repair:\n%s", got)
 	}
 	bad, err := bundle.TimestampsNeedingRepair([]byte(got))
 	if err != nil || len(bad) != 1 || bad[0] != "stale_after" {
 		t.Errorf("TimestampsNeedingRepair = %v, %v; want [stale_after]", bad, err)
+	}
+}
+
+// TestRunMigrateMovesABundleToV03: a v0.2 bundle's bare path fields meant the
+// bundle root; migrate makes that explicit before it stamps okf_version 0.3,
+// keeps the root index.md's other frontmatter, and moves the export scratch.
+func TestRunMigrateMovesABundleToV03(t *testing.T) {
+	root := t.TempDir()
+	cfg := testCfg(root)
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.2\"\ntitle: \"Finance\"\n# keep me\nx-acme-owner: \"fpa\"\n---\n\n# Index\n")
+	writeConceptFile(t, root, "skills/run.md", conceptContent("019680f0-7e00-7abc-8def-100000000001", "Run", "Skill", "# Run"))
+	writeConceptFile(t, root, "computations/skills/local.md", conceptContent("019680f0-7e00-7abc-8def-100000000002", "Local", "Skill", "# Local"))
+	comp := strings.Replace(conceptContent("019680f0-7e00-7abc-8def-100000000003", "Revenue", "Attested Computation", "# Revenue"),
+		"tags: []\n", "tags: []\nruntime: \"bigquery\"\nexecutor:\n  resource: \"skills/run.md\"\nattester:\n  resource: \"skills/local.md\"\nresource: \"https://example.com/x.md\"\n", 1)
+	p := writeConceptFile(t, root, "computations/revenue.md", comp)
+	writeConceptFile(t, root, "ephemeral/.gitignore", "# Auto-generated — ignore all exported files\n*\n!.gitignore\n")
+	writeConceptFile(t, root, ".gitignore", "# okfw generated artifacts\nephemeral/\n")
+
+	if err := runMigrate(cfg, root, false); err != nil {
+		t.Fatalf("runMigrate: %v", err)
+	}
+	got := readFile(t, p)
+	if !strings.Contains(got, `resource: "/skills/run.md"`) {
+		t.Errorf("a root-relative path was not made explicit:\n%s", got)
+	}
+	if !strings.Contains(got, `resource: "skills/local.md"`) {
+		t.Errorf("a path that resolves from the concept's directory was changed:\n%s", got)
+	}
+	if !strings.Contains(got, `resource: "https://example.com/x.md"`) {
+		t.Errorf("a URL was changed:\n%s", got)
+	}
+	idx := readFile(t, filepath.Join(root, "index.md"))
+	for _, want := range []string{`okf_version: "0.3"`, `title: "Finance"`, "# keep me", `x-acme-owner: "fpa"`} {
+		if !strings.Contains(idx, want) {
+			t.Errorf("root index.md lost %q:\n%s", want, idx)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "ephemeral")); !os.IsNotExist(err) {
+		t.Errorf("the old export scratch directory is still there: %v", err)
+	}
+	if gi := readFile(t, filepath.Join(root, ".gitignore")); !strings.Contains(gi, ".ephemeral/") {
+		t.Errorf(".gitignore not updated:\n%s", gi)
+	}
+	// Idempotent, and the paths are not prefixed twice now the bundle is 0.3.
+	before := got
+	if err := runMigrate(cfg, root, false); err != nil {
+		t.Fatal(err)
+	}
+	if after := readFile(t, p); after != before {
+		t.Errorf("a second migrate changed the concept:\n%s", after)
 	}
 }
 
@@ -643,7 +701,7 @@ func captureStdout(t *testing.T, fn func() error) (string, error) {
 func TestValidateOKFOnABundleOkfwDidNotWrite(t *testing.T) {
 	root := t.TempDir()
 	cfg := testCfg(root)
-	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.2\"\n---\n\n# Finance\n\n* [Revenue](computations/revenue.md) - Revenue.\n")
+	writeConceptFile(t, root, "index.md", "---\nokf_version: \"0.3\"\n---\n\n# Finance\n\n* [Revenue](computations/revenue.md) - Revenue.\n")
 	writeConceptFile(t, root, "computations/revenue.md", "---\ntype: Attested Computation\ntags: finance\n---\n# Revenue\n\nSee [profit](/computations/profit.md \"P\").\n")
 	writeConceptFile(t, root, "computations/profit.md", "---\ntype: Attested Computation\n---\n# Profit\n")
 	writeConceptFile(t, root, "notes/ephemeral/scratch.md", "---\ntype: Note\n---\n# Scratch\n")

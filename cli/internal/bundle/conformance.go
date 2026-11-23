@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/infrashift/okf-wiki/internal/config"
 )
 
 // OKF section 11 makes a bundle conformant only if its reserved files follow
@@ -21,9 +23,10 @@ var (
 	logDateRe   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 )
 
-// CheckIndexFile checks an index.md against OKF section 8: no frontmatter,
-// except that the bundle-root index may carry okf_version and nothing else;
-// listing entries are links.
+// CheckIndexFile checks an index.md against OKF v0.3 section 8: no
+// frontmatter, except that the bundle-root index may carry the section 8.1
+// bundle metadata (okf_version, title, description, license) and extension
+// keys; listing entries are links.
 func CheckIndexFile(content []byte, isRoot bool) (violations, warnings []string) {
 	body := string(content)
 	if hasFrontmatter(content) {
@@ -34,9 +37,24 @@ func CheckIndexFile(content []byte, isRoot bool) (violations, warnings []string)
 		case !isRoot:
 			violations = append(violations, "frontmatter is only permitted in the bundle-root index.md")
 		default:
-			if extra := extraKeys(fm, "okf_version"); len(extra) > 0 {
-				violations = append(violations, fmt.Sprintf(
-					"root index.md frontmatter may carry only okf_version (also found: %s)", strings.Join(extra, ", ")))
+			// Section 8.1 also permits extension keys, and section 4.1 says a
+			// consumer MUST NOT reject an unknown key; an unknown non-x- key is
+			// a warning, so a typo (titel) is still noticed.
+			dups := config.DuplicateKeys(fm)
+			if len(dups) > 0 {
+				violations = append(violations, "duplicate frontmatter key(s): "+strings.Join(dups, ", "))
+			} else if extra := extraKeys(fm, BundleMetaKeys...); len(extra) > 0 {
+				var unknown []string
+				for _, k := range extra {
+					if !strings.HasPrefix(k, "x-") {
+						unknown = append(unknown, k)
+					}
+				}
+				if len(unknown) > 0 {
+					warnings = append(warnings, fmt.Sprintf(
+						"root index.md frontmatter has keys OKF section 8.1 does not define: %s (name your own x-<producer>-<name>)",
+						strings.Join(unknown, ", ")))
+				}
 			}
 		}
 		if err == nil {
@@ -97,20 +115,7 @@ func CheckLogFile(content []byte) (violations []string) {
 
 // DeclaredOKFVersion returns the okf_version a bundle-root index.md declares,
 // or "".
-func DeclaredOKFVersion(content []byte) string {
-	if !hasFrontmatter(content) {
-		return ""
-	}
-	fm, _, _, err := splitFrontmatter(content)
-	if err != nil {
-		return ""
-	}
-	var v struct {
-		OKFVersion string `yaml:"okf_version"`
-	}
-	_ = yaml.Unmarshal(fm, &v)
-	return v.OKFVersion
-}
+func DeclaredOKFVersion(content []byte) string { return config.DeclaredOKFVersion(content) }
 
 func hasFrontmatter(content []byte) bool {
 	s := string(content)

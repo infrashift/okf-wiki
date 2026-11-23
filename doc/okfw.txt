@@ -202,9 +202,9 @@ Graph ~
                         --start ID: center on a concept (default: the
                         concept in the current buffer)
 
-                        Copies concepts into <root>/ephemeral/ as <id>.md,
+                        Copies concepts into <root>/.ephemeral/ as <id>.md,
                         with in-bundle markdown links rewritten to point at
-                        <id>.md. The ephemeral/ directory has a
+                        <id>.md. The .ephemeral/ directory has a
                         .gitignore that ignores all exported files.
 
                         Links to concepts NOT in the export set are left
@@ -313,7 +313,7 @@ graph({opts})           Show Mermaid graph in scratch buffer.
                                                                *okfw.export()*
 export({opts})          Export graph subset as portable markdown.
                         opts.path, opts.limit, opts.depth, opts.start
-                        Writes <id>.md files to <root>/ephemeral/ with
+                        Writes <id>.md files to <root>/.ephemeral/ with
                         in-bundle links rewritten to <id>.md.
 
 Preview ~

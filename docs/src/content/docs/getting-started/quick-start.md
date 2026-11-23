@@ -83,5 +83,5 @@ okfw search --stale                       # find concepts past stale_after
 okfw verify 019f0494                      # record that you reviewed it
 okfw add-source 019f0494 --resource https://example.com/spec
 okfw validate --all                       # strict schema check of the wiki
-okfw migrate                              # clean up a pre-0.2 wiki
+okfw migrate                              # move an older wiki to OKF v0.3
 ```

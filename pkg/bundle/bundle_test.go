@@ -1,6 +1,7 @@
 package bundle_test
 
 import (
+	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -39,20 +40,30 @@ func TestParseReadsTheFields(t *testing.T) {
 }
 
 // TestParseIsLenient: okfw's reads never fail a concept over a field with the
-// wrong shape, and a concept without an id is identified by its path.
+// wrong shape, and a concept without an id is identified by its path. OKF
+// v0.3 section 11.2: a scalar tags is one tag, never split at commas, and an
+// unknown status is kept raw, since it is not stable (section 5.4).
 func TestParseIsLenient(t *testing.T) {
-	c, err := bundle.Parse("notes/x.md", []byte("---\ntitle: X\ntags: foo\nstatus: open\n---\nbody\n"))
+	c, err := bundle.Parse("notes/x.md", []byte("---\ntype: Note\ntitle: X\ntags: foo, bar\nstatus: open\ncreated: soon\n---\nbody\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if c.ID != "notes/x" {
 		t.Errorf("ID = %q, want the OKF concept ID notes/x", c.ID)
 	}
-	if c.Tags != nil || c.Title != "X" {
-		t.Errorf("a malformed tags field should cost only itself: %+v", c)
+	if len(c.Tags) != 1 || c.Tags[0] != "foo, bar" || c.Title != "X" {
+		t.Errorf("a scalar tags is one tag: %+v", c)
 	}
-	if c.Status != "stable" {
-		t.Errorf("Status = %q; an unrecognised status reads as stable", c.Status)
+	if c.Status != "open" {
+		t.Errorf("Status = %q; an unrecognised status is kept as written", c.Status)
+	}
+}
+
+// TestParseRefusesAnUntypedFile: OKF v0.3 section 3.2 — a .md file with no
+// type is not a concept, so a README.md in a bundle is not one.
+func TestParseRefusesAnUntypedFile(t *testing.T) {
+	if _, err := bundle.Parse("README.md", []byte("---\ntitle: Read me\n---\nbody\n")); !errors.Is(err, bundle.ErrNotConcept) {
+		t.Errorf("err = %v, want ErrNotConcept", err)
 	}
 }
 

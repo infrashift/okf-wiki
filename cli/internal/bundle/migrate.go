@@ -9,10 +9,9 @@ import (
 	"github.com/infrashift/okf-wiki/internal/config"
 )
 
-// OKF v0.2 first wrote stale_after, sources[].last_modified and usage_window as
-// bare YYYY-MM-DD dates; the spec now requires every timestamp to be a datetime
-// with an explicit offset (section 5). These are the keys that used to hold
-// dates. generated.at and verified[].at were always datetimes.
+// dateFieldNodes returns the timestamp keys that may hold a bare date: OKF v0.2
+// first wrote stale_after, sources[].last_modified and usage_window as dates,
+// an erratum then required datetimes, and v0.3 accepts both forms again.
 func dateFieldNodes(m *yaml.Node) map[string]*yaml.Node {
 	nodes := map[string]*yaml.Node{"stale_after": MapGet(m, "stale_after")}
 	window := func(prefix string, w *yaml.Node) {
@@ -36,49 +35,17 @@ func dateFieldNodes(m *yaml.Node) map[string]*yaml.Node {
 	return nodes
 }
 
-// UpgradeDateOnlyTimestamps rewrites bare dates in the keys OKF moved to
-// datetimes as midnight UTC, returning the rewritten content and the keys it
-// changed — or (nil, nil) when nothing needed changing.
-//
-// Midnight UTC is a choice, not a recovery: a bare date never said which
-// timezone it meant. It is the reading okfw's own staleness check gave these
-// values before the change, so a concept that was stale stays stale. The
-// timestamp is left alone; reformatting a field is not a change to content.
-func UpgradeDateOnlyTimestamps(content []byte) ([]byte, []string, error) {
-	var changed []string
-	out, err := Edit(content, func(m *yaml.Node) error {
-		for key, n := range dateFieldNodes(m) {
-			if n == nil || n.Kind != yaml.ScalarNode || !config.IsDateOnly(n.Value) {
-				continue
-			}
-			n.Value += "T00:00:00Z"
-			n.Tag = "" // let the encoder re-resolve; keep the author's quoting style
-			changed = append(changed, key)
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(changed) == 0 {
-		return nil, nil, nil
-	}
-	sort.Strings(changed)
-	return out, changed, nil
-}
-
-// TimestampsNeedingRepair lists timestamp keys whose value is neither a valid
-// OKF datetime nor a bare date migrate can upgrade — most often a datetime with
-// no offset. Those name an instant only the author knows, so migrate reports
-// them rather than guessing.
+// TimestampsNeedingRepair lists timestamp keys whose value is in neither OKF
+// v0.3 form (section 5) — most often a datetime with no offset. Those name an
+// instant only the author knows, so migrate reports them rather than guessing.
 func TimestampsNeedingRepair(content []byte) ([]string, error) {
 	var bad []string
 	_, err := Edit(content, func(m *yaml.Node) error {
 		check := func(key string, n *yaml.Node) {
-			if n == nil || n.Kind != yaml.ScalarNode || config.IsDateOnly(n.Value) {
+			if n == nil || n.Kind != yaml.ScalarNode || n.Value == "" {
 				return
 			}
-			if _, err := config.ParseDateTime(n.Value); err != nil {
+			if _, err := config.ParseTimestamp(n.Value); err != nil {
 				bad = append(bad, key)
 			}
 		}

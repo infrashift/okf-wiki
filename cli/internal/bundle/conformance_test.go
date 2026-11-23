@@ -15,14 +15,16 @@ func TestCheckIndexFile(t *testing.T) {
 		root             bool
 		violations, warn int
 	}{
-		"plain listing":            {"# Tables\n\n* [Orders](orders.md) - One row per order.\n* [Sub](sub/)\n", false, 0, 0},
-		"root with okf_version":    {"---\nokf_version: \"0.2\"\n---\n\n# /\n\n* [A](a.md)\n", true, 0, 0},
-		"frontmatter below root":   {"---\nokf_version: \"0.2\"\n---\n\n# Sub\n", false, 1, 0},
-		"root with another key":    {"---\nokf_version: \"0.2\"\ntitle: Home\n---\n\n# /\n", true, 1, 0},
-		"concept-shaped index":     {"---\ntype: note\n---\n\n# x\n", false, 1, 0},
-		"non-link entry":           {"# Things\n\n* just text\n- [ok](ok.md)\n", false, 0, 1},
-		"bullet in a code example": {"# Things\n\n```\n* not a listing\n```\n", false, 0, 0},
-		"no heading":               {"* [A](a.md)\n", false, 0, 1},
+		"plain listing":             {"# Tables\n\n* [Orders](orders.md) - One row per order.\n* [Sub](sub/)\n", false, 0, 0},
+		"root with okf_version":     {"---\nokf_version: \"0.2\"\n---\n\n# /\n\n* [A](a.md)\n", true, 0, 0},
+		"frontmatter below root":    {"---\nokf_version: \"0.2\"\n---\n\n# Sub\n", false, 1, 0},
+		"root with bundle metadata": {"---\nokf_version: \"0.3\"\ntitle: Home\ndescription: D\nlicense: CC-BY-4.0\nx-acme-owner: fpa\n---\n\n# /\n", true, 0, 0},
+		"root with an unknown key":  {"---\nokf_version: \"0.3\"\ntitel: Home\n---\n\n# /\n", true, 0, 1},
+		"root with a duplicate key": {"---\nokf_version: \"0.3\"\ntitle: A\ntitle: B\n---\n\n# /\n", true, 1, 0},
+		"concept-shaped index":      {"---\ntype: note\n---\n\n# x\n", false, 1, 0},
+		"non-link entry":            {"# Things\n\n* just text\n- [ok](ok.md)\n", false, 0, 1},
+		"bullet in a code example":  {"# Things\n\n```\n* not a listing\n```\n", false, 0, 0},
+		"no heading":                {"* [A](a.md)\n", false, 0, 1},
 	} {
 		v, w := CheckIndexFile([]byte(tc.content), tc.root)
 		if len(v) != tc.violations || len(w) != tc.warn {

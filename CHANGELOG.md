@@ -4,6 +4,30 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Changed (breaking) — OKF v0.3
+okfw now targets [OKF v0.3](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md). The spec has moved: the `knowledge-catalog/okf/SPEC.md` copy is frozen at v0.2. **Run `okfw migrate`** on an existing bundle, then `okfw set-bundle-meta --description "…"`. The [migration guide](https://infrashift.github.io/okf-wiki/reference/migrating-to-okf-v0-3/) has the details, and a new page, [OKF v0.3 and OKF Wiki: where we differ](https://infrashift.github.io/okf-wiki/reference/okf-divergences/), explains where okfw is stricter than the spec, why, and what it costs.
+- **A bare frontmatter path resolves from the concept's directory, not the bundle root** (v0.3 §6.2, a breaking change in the spec). Body links and path fields now follow one rule. In a bundle still declaring `okf_version` 0.2 or none, a bare path that names nothing locally is tried from the root, the compatibility fallback §12.1 allows. `okfw migrate` gives those paths a leading `/` and then declares 0.3. okfw's writers now spell in-bundle paths with a leading `/`.
+- **The trust tier counts only current reviews** (§5.3). A `verified` event counts only if its `at` is at or after `generated.at`, and one without both `by` and `at` is ignored. A concept rewritten after its last human review now reads as unverified until someone checks it again.
+- **`generated.at` no longer mirrors `timestamp`.** v0.3 makes it the last *meaningful* change to the content. Tag, lifecycle, source and verify edits, and the link repair `okfw move` does, now move only `timestamp`, so they no longer invalidate a review. `okfw set-generated` sets `generated.at` (new `--at`, default now). A body rewrite through the MCP `append`/`set_body` actions moves it too.
+- **A bare date is a valid timestamp again** (§5), meaning the start of that day in UTC. `okfw validate` accepts it and `okfw migrate` no longer rewrites it. A `stale_after` that cannot be parsed now reads as stale, never as fresh.
+- **The export scratch directory is `.ephemeral/`.** v0.3 leaves only dot-named paths outside a bundle, so other OKF tools read every copy in `ephemeral/` as a second concept. `okfw migrate` removes the old directory.
+- **`okfw validate --all` requires a bundle `title` and `description`** in the root `index.md`. `okfw init` sets the title from the project directory.
+
+### Added — OKF v0.3
+- **`superseded_by`** (§5.4) names a deprecated concept's replacement: `okfw set-lifecycle <ref> deprecated --superseded-by <new>`, or `superseded_by` on the MCP `set_lifecycle` action. It is a link, so `okfw move` keeps it pointing at the replacement and `okfw delete` reports it.
+- **`okfw search --current`** and MCP `current` drop deprecated concepts and concepts with an unknown status. They replace a deprecated hit with its `superseded_by`.
+- **Bundle metadata** (§8.1): `okfw init --title/--description/--license` and `okfw set-bundle-meta`. Regenerating `index.md` keeps the root frontmatter byte for byte. The MCP server tells every agent the bundle's title and description.
+- **Extension keys `x-<producer>-<name>`** (§4.1) are accepted at every level of the closed schema. Use them for custom metadata. The old `x:` block still works.
+- **`team:` and other actor schemes** (§7) are accepted as non-human. okfw still refuses a near miss of `human:`, such as `humna:`, which would silently demote a review.
+- **`okfw validate --okf <dir>` works on any directory**, with or without a `.okfw`. It reports duplicate keys as violations. It warns about a `.md` file with no `type`, which is not a concept (§3.2), and about a path that resolves only through the v0.2 fallback.
+- The four example bundles from the OKF repository are part of the test suite. okfw must find them conformant and fully linked.
+
+### Fixed — OKF v0.3
+- **A `.md` file with no `type` is not a concept** (§3.2). A `README.md` in a bundle no longer appears in search, the graph or the listings, and no longer fails `validate`.
+- **Duplicate frontmatter keys are refused** (§4). yaml.v3 kept the last one silently.
+- **A scalar `tags` is one tag, and a single `sources` mapping is a one-item list** (§11.2). Before, both read as empty.
+- **Walks no longer follow a symbolic link out of the bundle** (§3.2). `pkg/bundle.DirFS` gives the same guarantee to a program reading a bundle from disk.
+
 ### Added
 - **A public Go package reads bundles: `github.com/infrashift/okf-wiki/pkg/bundle`.** `Load` and `Walk` read a bundle from any `fs.FS`, such as one extracted in memory from an archive, with every read bounded: a file-size limit, a file-count limit, and no path outside the bundle. `Parse` reads one concept (id, title, type, description, tags, lifecycle status and body) as leniently as every okfw read does, `Validate` applies the strict check of `okfw validate`, and `Search` ranks as `okfw search` does. The CLI runs the same walk and ranking, so the two cannot disagree. A program that consumed bundles had to reimplement the format, because the parser was internal to the CLI.
 

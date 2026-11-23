@@ -44,7 +44,7 @@ const mcpInstructions = `This server is the project's OKF wiki (okfw): markdown 
 - Search before you derive or write: okfw_search. Weigh each hit by trust, status and stale.
 - Read top-down: okfw_read {"ref":"/"} returns the root index.md listing, {"ref":"<dir>/"} a directory's. Open a concept only when its description fits, and prefer a section to the whole concept.
 - Write one idea per concept, with a one-sentence description and at least one link, [Title](/dir/file.md) from the wiki root. Set type, kind, status and provenance in the okfw_create call itself.
-- status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it. Custom keys go under x:.
+- status is the lifecycle (draft|stable|deprecated), not task state. Deprecate superseded knowledge rather than deleting it, with superseded_by naming the replacement. Custom keys are named x-<producer>-<name>.
 - Never edit index.md or log.md; okfw generates them.
 - Results are capped: truncated or next_offset means there is more.`
 
@@ -130,7 +130,7 @@ func mcpTools() []map[string]interface{} {
 	return []map[string]interface{}{
 		{
 			"name":        "okfw_search",
-			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only for draft or deprecated, stale only when stale_after has passed. Prefer a current, reviewed hit over a stale or deprecated one.",
+			"description": "Search wiki concepts. Returns {total,results:[{id,title,path,kind,type,project,tags,snippet,trust,status?,stale?}]}; path is wiki-relative (use with read). trust is unverified, machine-confirmed or human-reviewed; status appears only when not stable, stale only when stale_after has passed (or does not parse). Prefer a current, reviewed hit over a stale or deprecated one.",
 			"inputSchema": obj(map[string]interface{}{
 				"q":       str("full-text query"),
 				"project": str("filter by project"),
@@ -139,6 +139,7 @@ func mcpTools() []map[string]interface{} {
 				"type":    str("filter by OKF free-form type, e.g. Playbook, Metric"),
 				"status":  enum("OKF lifecycle status filter", "draft", "stable", "deprecated"),
 				"stale":   map[string]interface{}{"type": "boolean", "description": "only concepts whose stale_after has passed"},
+				"current": map[string]interface{}{"type": "boolean", "description": "only current knowledge; a deprecated hit is replaced by its superseded_by (hit gains replaces)"},
 				"tags":    strs("filter by tags (all must match)"),
 				"dir":     str("search only this wiki subdirectory, e.g. issues"),
 				"limit":   num("max results (default 10)"),
@@ -179,9 +180,10 @@ func mcpTools() []map[string]interface{} {
 			"name":        "okfw_update",
 			"description": "Update a concept: metadata, OKF trust/provenance (verify, set_generated, set_resource, add_source), or its markdown body (append / set_body).",
 			"inputSchema": obj(map[string]interface{}{
-				"ref":    str("concept id or path"),
-				"action": enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "remove_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
-				"value":  str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags (add_tags, remove_tags) | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
+				"ref":           str("concept id or path"),
+				"action":        enum("what to change", "set_project", "set_lifecycle", "set_stale_after", "add_tags", "remove_tags", "append", "set_body", "verify", "set_generated", "set_resource", "add_source"),
+				"superseded_by": str("set_lifecycle deprecated only: the replacing concept's id or path"),
+				"value":         str("project | draft|stable|deprecated | ISO 8601 datetime with offset, e.g. 2026-12-31T00:00:00Z (set_stale_after) | comma-separated tags (add_tags, remove_tags) | markdown (append/set_body) | actor like human:me (verify, set_generated; optional) | URI (set_resource) | resource string or JSON {resource,id,title,author,last_modified,usage_count,usage_window} (add_source)"),
 			}, "ref", "action", "value"),
 		},
 		{
@@ -265,17 +267,37 @@ func (s *mcpServer) handleLine(line string) *rpcResponse {
 	return resp
 }
 
-// instructions returns mcpInstructions plus this wiki's top-level directories,
-// so the first listing an agent opens is one it chose rather than guessed. With
-// no wiki yet, the static text alone is still correct.
+// maxBundleDescription bounds the bundle description quoted in the
+// instructions, which ride in the agent's context all session.
+const maxBundleDescription = 240
+
+// instructions returns mcpInstructions plus what this wiki is — its OKF v0.3
+// section 8.1 title and description, the sentence an agent is meant to choose
+// a bundle by — and its top-level directories, so the first listing an agent
+// opens is one it chose rather than guessed. With no wiki yet, the static text
+// alone is still correct.
 func (s *mcpServer) instructions() string {
 	cfg, err := s.cfg()
 	if err != nil {
 		return mcpInstructions
 	}
+	out := mcpInstructions
+	if meta, err := bundle.ReadBundleMeta(cfg.RootPath); err == nil && (meta.Title != "" || meta.Description != "") {
+		line := "\n\nThis wiki"
+		if meta.Title != "" {
+			line += ", " + strings.Join(strings.Fields(meta.Title), " ")
+		}
+		if d := strings.Join(strings.Fields(meta.Description), " "); d != "" {
+			if len(d) > maxBundleDescription {
+				d = strings.TrimSpace(d[:maxBundleDescription]) + "…"
+			}
+			line += ": " + d
+		}
+		out += line
+	}
 	entries, err := os.ReadDir(cfg.RootPath)
 	if err != nil {
-		return mcpInstructions
+		return out
 	}
 	var dirs []string
 	for _, e := range entries {
@@ -285,14 +307,14 @@ func (s *mcpServer) instructions() string {
 		dirs = append(dirs, e.Name()+"/")
 	}
 	if len(dirs) == 0 {
-		return mcpInstructions
+		return out
 	}
 	more := ""
 	if len(dirs) > maxInstructionDirs {
 		more = fmt.Sprintf(" … %d more", len(dirs)-maxInstructionDirs)
 		dirs = dirs[:maxInstructionDirs]
 	}
-	return mcpInstructions + "\n\nThis wiki's top-level directories: " + strings.Join(dirs, ", ") + more + "."
+	return out + "\n\nThis wiki's top-level directories: " + strings.Join(dirs, ", ") + more + "."
 }
 
 func (s *mcpServer) cfg() (*config.Config, error) {
@@ -357,8 +379,13 @@ type mcpHit struct {
 	// "unverified". Status and stale appear only when they are the exception,
 	// so a current, stable hit costs nothing extra.
 	Trust  string `json:"trust"`
-	Status string `json:"status,omitempty"` // draft or deprecated; absent means stable
+	Status string `json:"status,omitempty"` // anything but stable, raw; absent means stable
 	Stale  bool   `json:"stale,omitempty"`
+
+	// SupersededBy and Replaces carry OKF v0.3 section 5.4's replacement link:
+	// on a deprecated hit, and on the hit a current search gave in its place.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Replaces     string `json:"replaces,omitempty"`
 }
 
 // maxSearchLimit bounds a single search page. The caller can page past it
@@ -376,6 +403,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Type    string   `json:"type"`
 		Status  string   `json:"status"`
 		Stale   bool     `json:"stale"`
+		Current bool     `json:"current"`
 		Limit   int      `json:"limit"`
 		Offset  int      `json:"offset"`
 	}
@@ -395,6 +423,7 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		Type:    a.Type,
 		Status:  a.Status,
 		Stale:   a.Stale,
+		Current: a.Current,
 		Limit:   a.Limit,
 		Offset:  a.Offset,
 		Dir:     a.Dir,
@@ -421,8 +450,13 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 			Snippet: r.Snippet,
 			Trust:   r.Trust,
 			Stale:   r.Stale,
+
+			Replaces: r.Replaces,
 		}
 		if lc := r.Lifecycle(); lc != "stable" {
+			if lc == "deprecated" {
+				hit.SupersededBy = r.SupersededBy
+			}
 			hit.Status = lc
 		}
 		hits = append(hits, hit)
@@ -555,12 +589,13 @@ func createMetadata(status, staleAfter, resource, generatedBy string) (func(*yam
 			}
 		}
 		if generatedBy != "" {
-			if err := setGeneratedMutator(generatedBy)(m); err != nil {
-				return err
-			}
-			// generated.at mirrors timestamp; validation rejects a disagreement.
+			// Created now, so generated at the creation instant.
+			at := ""
 			if ts := bundle.MapGet(m, "timestamp"); ts != nil {
-				return bundle.SetPath(m, "generated.at", ts.Value)
+				at = ts.Value
+			}
+			if err := setGeneratedMutator(generatedBy, at)(m); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -743,12 +778,16 @@ func readWindow(content string, offset, limit int, section string) string {
 
 func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolResult {
 	var a struct {
-		Ref    string `json:"ref"`
-		Action string `json:"action"`
-		Value  string `json:"value"`
+		Ref          string `json:"ref"`
+		Action       string `json:"action"`
+		Value        string `json:"value"`
+		SupersededBy string `json:"superseded_by"`
 	}
 	if err := json.Unmarshal(args, &a); err != nil {
 		return errResult(err)
+	}
+	if a.SupersededBy != "" && a.Action != "set_lifecycle" {
+		return errResult(fmt.Errorf("superseded_by applies only to set_lifecycle"))
 	}
 	if a.Ref == "" || a.Action == "" {
 		return errResult(fmt.Errorf("ref and action are required"))
@@ -773,12 +812,11 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 	case "set_project":
 		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"project": a.Value})
 	case "set_lifecycle":
-		switch a.Value {
-		case "draft", "stable", "deprecated":
-		default:
-			return errResult(fmt.Errorf("invalid lifecycle status %q: want draft, stable, or deprecated", a.Value))
+		mut, merr := lifecycleMutator(cfg, a.Value, a.SupersededBy)
+		if merr != nil {
+			return errResult(merr)
 		}
-		newContent, err = bundle.UpdateFrontmatter(content, map[string]string{"status": a.Value})
+		newContent, err = applyOKFEdit(content, mut)
 	case "set_stale_after":
 		v, nerr := config.NormalizeDateTime(a.Value)
 		if nerr != nil {
@@ -795,12 +833,14 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		if err == nil {
 			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
 		}
+	// A body write is a change to the content: it moves generated.at too, so
+	// a review of the old text stops counting (OKF v0.3 section 5.3).
 	case "append":
-		newContent, err = bundle.UpdateFrontmatter(bundle.AppendBody(content, a.Value), nil) // bump timestamp
+		newContent, err = bundle.TouchContentChange(bundle.AppendBody(content, a.Value))
 	case "set_body":
 		newContent, err = bundle.SetBody(content, a.Value)
 		if err == nil {
-			newContent, err = bundle.UpdateFrontmatter(newContent, nil) // bump timestamp
+			newContent, err = bundle.TouchContentChange(newContent)
 		}
 
 	// The OKF trust and provenance families. These share their mutators with
@@ -818,7 +858,7 @@ func (s *mcpServer) toolUpdate(cfg *config.Config, args json.RawMessage) *toolRe
 		if actor == "" {
 			actor = defaultHumanActor()
 		}
-		newContent, err = applyOKFEdit(content, setGeneratedMutator(actor))
+		newContent, err = applyOKFEdit(content, setGeneratedMutator(actor, ""))
 	case "set_resource":
 		newContent, err = applyOKFEdit(content, setResourceMutator(a.Value))
 	case "add_source":
@@ -1015,13 +1055,9 @@ func applyOKFEdit(content []byte, fn func(*yaml.Node) error) ([]byte, error) {
 		if err := fn(m); err != nil {
 			return err
 		}
-		stamp := time.Now().Format(time.RFC3339)
-		bundle.MapSetString(m, "timestamp", stamp)
-		if bundle.MapGet(m, "generated") != nil {
-			if err := bundle.SetPath(m, "generated.at", stamp); err != nil {
-				return err
-			}
-		}
+		// timestamp records the write; generated.at is left alone, as the
+		// CLI's editConcept leaves it (OKF v0.3 section 5.2).
+		bundle.MapSetString(m, "timestamp", time.Now().Format(time.RFC3339))
 		return nil
 	})
 	if err != nil {

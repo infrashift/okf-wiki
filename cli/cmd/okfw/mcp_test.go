@@ -331,7 +331,7 @@ func TestMCPSearchHitsSayHowFarToTrustThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ file, title, extra string }{
-		{"a--0001.md", "Ledger Reviewed", "verified:\n  by: \"human:ryan\"\n"},
+		{"a--0001.md", "Ledger Reviewed", "verified:\n  by: \"human:ryan\"\n  at: \"2026-02-14T00:00:00Z\"\n"},
 		{"b--0002.md", "Ledger Retired", "status: \"deprecated\"\nstale_after: \"2020-01-01T00:00:00Z\"\n"},
 	} {
 		writeConceptFile(t, cfg.RootPath, c.file, "---\nid: \"019680f0-7e00-7abc-8def-"+

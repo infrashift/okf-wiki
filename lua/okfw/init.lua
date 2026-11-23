@@ -832,7 +832,7 @@ M.graph = function(opts)
     job:start()
 end
 
--- Export graph subset as portable markdown to ephemeral/
+-- Export graph subset as portable markdown to .ephemeral/
 M.export = function(opts)
     opts = opts or {}
     local limit = opts.limit or 10
@@ -1030,7 +1030,8 @@ M.resolve_concept = function(ref)
     local prefix_ok = #want >= 8 and want:match("^%x+$") ~= nil
     local prefixed = {}
     for _, p in ipairs(vim.fn.globpath(root, "**/*.md", false, true)) do
-        -- ephemeral/ holds `okfw export` copies, which carry the same id.
+        -- .ephemeral/ (skipped: ** matches no dot-directory) and the pre-v0.3
+        -- ephemeral/ hold `okfw export` copies, which carry the same id.
         if not vim.startswith(p, root .. "/ephemeral/") then
             local id = id_of(p)
             if id == ref then return p end

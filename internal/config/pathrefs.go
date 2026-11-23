@@ -19,8 +19,9 @@ type PathRef struct {
 	Value string
 }
 
-// PathRefs returns the concept's non-empty path-valued fields: resource,
-// sources[].resource, computation, executor.resource and attester.resource.
+// PathRefs returns the concept's non-empty path-valued fields (OKF v0.3
+// section 6.2): resource, sources[].resource, computation, executor.resource,
+// attester.resource and superseded_by.
 //
 // A path in one of these is a link: section 5.1 says a source naming another
 // concept "already exists in the bundle graph". okfw read only body links, so
@@ -46,21 +47,23 @@ func (z *Concept) PathRefs() []PathRef {
 	if z.Attester != nil {
 		add("attester.resource", z.Attester.Resource)
 	}
+	add("superseded_by", z.SupersededBy)
 	return out
 }
 
 // ResolveConceptLinks resolves a concept's outbound links to concept keys: its
 // body links, then the path-valued frontmatter fields that name a concept
-// (graph.NormalizeRef). keyOf is as for ResolveBodyLinks. Deduplicated, in
+// (graph.ResolveRef, section 6.4). keyOf is as for ResolveBodyLinks; exists
+// turns on the v0.2 path fallback (nil for a v0.3 bundle). Deduplicated, in
 // order.
-func ResolveConceptLinks(z *Concept, body, fromDir string, keyOf func(rel string) string) []string {
+func ResolveConceptLinks(z *Concept, body, fromDir string, keyOf func(rel string) string, exists func(rel string) bool) []string {
 	keys := ResolveBodyLinks(body, fromDir, keyOf)
 	seen := make(map[string]bool, len(keys))
 	for _, k := range keys {
 		seen[k] = true
 	}
 	for _, r := range z.PathRefs() {
-		rel := graph.NormalizeRef(r.Value, fromDir)
+		rel := graph.ResolveRef(r.Value, fromDir, exists)
 		if rel == "" {
 			continue
 		}

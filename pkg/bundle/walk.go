@@ -38,6 +38,10 @@ var (
 	// valid fs.FS path inside the directory walked: it is absolute, holds a
 	// "." or ".." element, or leaves the directory.
 	ErrInvalidPath = errors.New("path is not inside the bundle")
+
+	// ErrNotConcept is Parse's error for a .md file with no non-empty `type`
+	// (OKF v0.3 section 3.2): a README.md or SKILL.md a bundle may hold.
+	ErrNotConcept = errors.New("not a concept: no type in the frontmatter")
 )
 
 // Walk calls fn for each concept file at or below dir in the bundle at the
@@ -56,7 +60,8 @@ var (
 // never follows a symbolic link to a directory. It opens every file through
 // fsys, so whether a symbolic link to a file is followed is up to fsys: an
 // in-memory FS that holds no links cannot be escaped, whereas os.DirFS follows
-// a link out of its directory.
+// a link out of its directory. Use DirFS for a bundle on disk: it refuses one,
+// as OKF v0.3 section 3.2 requires.
 func Walk(fsys fs.FS, dir string, lim Limits, fn func(path string, content []byte) error) error {
 	if lim.MaxFileBytes <= 0 || lim.MaxFiles <= 0 {
 		return fmt.Errorf("bundle: limits must be positive, got %+v", lim)

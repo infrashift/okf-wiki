@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/infrashift/okf-wiki/internal/config"
+	"github.com/infrashift/okf-wiki/internal/graph"
 	okfbundle "github.com/infrashift/okf-wiki/pkg/bundle"
 )
 
@@ -47,8 +48,14 @@ type Options struct {
 	Limit   int      // max results (0 → DefaultLimit)
 	Offset  int      // pagination offset
 
-	Status string // OKF lifecycle: draft/stable/deprecated
+	Status string // OKF lifecycle: draft/stable/deprecated, or a raw unknown value
 	Stale  bool   // only concepts whose stale_after has passed
+
+	// Current keeps only current knowledge (OKF v0.3 section 5.4): no
+	// deprecated concept and none with a status outside the vocabulary. A
+	// deprecated hit with superseded_by is replaced by the concept it names,
+	// as the section asks of a consumer that filters to current knowledge.
+	Current bool
 }
 
 // DefaultLimit caps a result set that did not ask for a size.
@@ -67,8 +74,13 @@ type Result struct {
 	Score       float64  `json:"score"`
 	Snippet     string   `json:"snippet,omitempty"`
 
-	Status     string `json:"status,omitempty"`
-	StaleAfter string `json:"stale_after,omitempty"`
+	Status       string `json:"status,omitempty"`
+	StaleAfter   string `json:"stale_after,omitempty"`
+	SupersededBy string `json:"superseded_by,omitempty"`
+
+	// Replaces names the deprecated concept a --current search followed to
+	// this hit through its superseded_by.
+	Replaces string `json:"replaces,omitempty"`
 
 	// Derived, so a caller can weigh a hit without opening it: a search that
 	// returned a deprecated, stale or never-reviewed concept looked exactly like
@@ -104,27 +116,34 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 
 	var candidates []*okfbundle.Concept
 	byConcept := make(map[*okfbundle.Concept]Result)
-	err = okfbundle.Walk(os.DirFS(bundleRoot), dir, unbounded, func(rel string, content []byte) error {
+	// Every concept seen, matching or not, so a --current search can hand
+	// back the replacement a deprecated hit's superseded_by names.
+	byRel := make(map[string]Result)
+	err = okfbundle.Walk(okfbundle.DirFS(bundleRoot), dir, unbounded, func(rel string, content []byte) error {
 		fm, err := config.ParseFrontmatter(content)
-		if err != nil {
-			return nil // no parseable frontmatter: not a concept
+		if err != nil || !config.IsConcept(fm) {
+			return nil // no frontmatter or no type: not a concept (OKF section 3.2)
 		}
 		abs, _ := filepath.Abs(filepath.Join(bundleRoot, filepath.FromSlash(rel)))
 		r := Result{
 			// A concept okfw did not write may carry no id; its OKF concept ID
 			// (the path) is what identifies it, and what read and resolve accept.
-			ID:          config.ConceptKey(fm, rel),
-			Title:       fm.Title,
-			Type:        fm.Type,
-			Kind:        fm.GetKind(),
-			Description: fm.Description,
-			Project:     fm.Project,
-			Tags:        fm.Tags,
-			FilePath:    abs,
-			Status:      fm.Status,
-			StaleAfter:  fm.StaleAfter,
-			Trust:       fm.TrustTier(),
-			Stale:       config.IsStale(fm.StaleAfter, now),
+			ID:           config.ConceptKey(fm, rel),
+			Title:        fm.Title,
+			Type:         fm.Type,
+			Kind:         fm.GetKind(),
+			Description:  fm.Description,
+			Project:      fm.Project,
+			Tags:         fm.Tags,
+			FilePath:     abs,
+			Status:       fm.Status,
+			StaleAfter:   fm.StaleAfter,
+			SupersededBy: fm.SupersededBy,
+			Trust:        fm.TrustTier(),
+			Stale:        config.IsStale(fm.StaleAfter, now),
+		}
+		if opts.Current {
+			byRel[rel] = r
 		}
 		if !matches(r, opts) {
 			return nil
@@ -148,7 +167,16 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 	}
 
 	hits := okfbundle.Search(candidates, opts.Query, 0)
-	total := len(hits)
+	results := make([]Result, 0, len(hits))
+	for _, h := range hits {
+		r := byConcept[h.Concept]
+		r.Score, r.Snippet = h.Score, h.Snippet
+		results = append(results, r)
+	}
+	if opts.Current {
+		results = followSuperseded(bundleRoot, results, byRel, opts)
+	}
+	total := len(results)
 	if opts.Offset < 0 {
 		opts.Offset = 0
 	}
@@ -156,13 +184,71 @@ func Search(bundleRoot string, opts Options) ([]Result, int, error) {
 		return nil, total, nil
 	}
 	end := min(opts.Offset+limit, total)
-	page := make([]Result, 0, end-opts.Offset)
-	for _, h := range hits[opts.Offset:end] {
-		r := byConcept[h.Concept]
-		r.Score, r.Snippet = h.Score, h.Snippet
-		page = append(page, r)
+	return results[opts.Offset:end], total, nil
+}
+
+// followSuperseded applies the current-knowledge filter after ranking: a
+// current hit stays; a deprecated one is replaced, at its rank, by the
+// concept its superseded_by names when that concept is itself current and
+// passes the other filters; anything else is dropped. A chain of
+// replacements is followed a few steps, never in a loop.
+func followSuperseded(bundleRoot string, hits []Result, byRel map[string]Result, opts Options) []Result {
+	exists := legacyExists(bundleRoot)
+	seen := make(map[string]bool, len(hits))
+	for _, r := range hits {
+		if isCurrent(r) {
+			seen[r.ID] = true
+		}
 	}
-	return page, total, nil
+	out := make([]Result, 0, len(hits))
+	for _, r := range hits {
+		if isCurrent(r) {
+			out = append(out, r)
+			continue
+		}
+		cur, replaced := r, false
+		for step := 0; step < 8 && cur.Lifecycle() == "deprecated" && cur.SupersededBy != ""; step++ {
+			rel := relOf(bundleRoot, cur.FilePath)
+			target := graph.ResolveRef(cur.SupersededBy, path.Dir(rel), exists)
+			next, ok := byRel[target]
+			if !ok || next.ID == cur.ID {
+				break
+			}
+			cur, replaced = next, true
+		}
+		if !replaced || !isCurrent(cur) || seen[cur.ID] || !matches(cur, Options{Project: opts.Project, Type: opts.Type, Kind: opts.Kind, Tags: opts.Tags, Status: opts.Status, Stale: opts.Stale}) {
+			continue
+		}
+		seen[cur.ID] = true
+		cur.Score, cur.Snippet, cur.Replaces = r.Score, "", r.ID
+		out = append(out, cur)
+	}
+	return out
+}
+
+func isCurrent(r Result) bool {
+	s := r.Lifecycle()
+	return s == "draft" || s == "stable"
+}
+
+func relOf(bundleRoot, abs string) string {
+	rel, err := filepath.Rel(bundleRoot, abs)
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+// legacyExists is the section 6.2 fallback's existence check for a bundle
+// declaring okf_version 0.2 or earlier, or none (see bundle.RefExists).
+func legacyExists(bundleRoot string) func(string) bool {
+	if !config.LegacyPathFallback(config.ReadDeclaredOKFVersion(bundleRoot)) {
+		return nil
+	}
+	return func(rel string) bool {
+		_, err := os.Stat(filepath.Join(bundleRoot, filepath.FromSlash(rel)))
+		return err == nil
+	}
 }
 
 // scopeDir resolves Options.Dir to the directory the walk starts from. The
@@ -190,12 +276,12 @@ func scopeDir(bundleRoot, dir string) (string, error) {
 }
 
 func lifecycleOf(s string) string {
-	// OKF section 5.4: an absent status means stable.
-	switch s {
-	case "draft", "stable", "deprecated":
-		return s
+	// OKF section 5.4: an absent status means stable, and an unknown one is
+	// kept raw — it is not stable.
+	if s = strings.TrimSpace(s); s == "" {
+		return "stable"
 	}
-	return "stable"
+	return s
 }
 
 // matches applies every non-query filter.

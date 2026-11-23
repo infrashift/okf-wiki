@@ -3,7 +3,7 @@ title: Note Format
 description: YAML frontmatter schema and fields for OKF Wiki concepts.
 ---
 
-Concepts are markdown files with YAML frontmatter, validated against a CUE schema. The schema implements the [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md) **v0.2**, with two deliberate divergences described in [OKF conformance](#okf-conformance-and-divergences) below.
+Concepts are markdown files with YAML frontmatter, validated against a CUE schema. The schema implements the [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md) **v0.3**, with a few deliberate divergences summarized in [OKF conformance](#okf-conformance-and-divergences) below and explained in [OKF v0.3 and OKF Wiki: where we differ](/okf-wiki/reference/okf-divergences/).
 
 A plain note looks like this:
 
@@ -49,9 +49,9 @@ If you previously saw a `type:` field holding `note`/`daily-note`/`issue`, that 
 | `project` | No | Non-empty string | Optional project metadata (set with `--project`). Never derived from git. |
 | `tags` | Yes | List of non-empty strings | Categorization tags |
 | `created` | Yes | ISO 8601 datetime with offset | Creation time |
-| `timestamp` | Yes | ISO 8601 datetime with offset | OKF "last meaningful change". Updated by the CLI on every mutation. |
+| `timestamp` | Yes | ISO 8601 datetime with offset | okfw's last-write time, updated by the CLI on every mutation. Not the same as `generated.at` — see [Trust fields](#trust-fields). |
 | `parent` | No | Concept id (UUID) | Parent concept for hierarchies |
-| `x` | No | Mapping | Your own metadata. The only place custom keys are accepted — see [Custom fields](#custom-fields). |
+| `x-<producer>-<name>` | No | Anything | Your own metadata, at any level — see [Custom fields](#custom-fields). |
 
 ## Lifecycle fields
 
@@ -59,20 +59,26 @@ OKF spec §5.4–5.5. An absent `status` means `stable`.
 
 | Field | Format | Description |
 |-------|--------|-------------|
-| `status` | `draft`, `stable`, `deprecated` | `draft`: not yet reviewed, possibly incomplete. `stable`: ready for consumption (the default). `deprecated`: kept for links and history, no longer current. Set with `okfw set-lifecycle`. |
-| `stale_after` | ISO 8601 datetime with offset | A concept is **stale** once now is on or after this instant. An absolute instant rather than a TTL, so staleness is a plain comparison that needs no record of when the concept was read. Set with `okfw set-stale-after`; find them with `okfw search --stale`. |
+| `status` | `draft`, `stable`, `deprecated` | `draft`: not yet reviewed, possibly incomplete. `stable`: ready for consumption (the default). `deprecated`: kept for links and history, no longer current. Set with `okfw set-lifecycle`. A value outside these three (from another tool) is shown as written and treated as not current. |
+| `superseded_by` | Path | The concept that replaces a deprecated one. Meaningful only with `status: deprecated`. Set with `okfw set-lifecycle <ref> deprecated --superseded-by <new>`; `okfw search --current` follows it. It is a link, so `okfw move` keeps it pointing at the replacement. |
+| `stale_after` | Timestamp | A concept is **stale** once now is on or after this instant. An absolute instant rather than a TTL, so staleness is a plain comparison that needs no record of when the concept was read. A value that cannot be parsed counts as stale. Set with `okfw set-stale-after`; find them with `okfw search --stale`. |
 
 ```yaml
 status: "deprecated"
+superseded_by: "/metrics/gross-margin.md"
 stale_after: "2026-12-31T00:00:00Z"
 ```
 
-Every timestamp — `stale_after`, `generated.at`, `verified[].at`,
-`sources[].last_modified` and `usage_window`, as well as `created` and
-`timestamp` — is an ISO 8601 datetime with an explicit UTC offset. A bare `2026-12-31` names a different instant in every
-timezone, so `okfw validate` rejects it; the writers accept one and store it as
-midnight UTC, and `okfw migrate` upgrades the bare dates older okfw versions
-wrote.
+To retire a concept, keep the file, deprecate it and name its replacement:
+links and stored references to it keep working, and a reader filtering to
+current knowledge is sent on to the replacement.
+
+An OKF **timestamp** — `stale_after`, `generated.at`, `verified[].at`,
+`sources[].last_modified` and `usage_window` — is either an RFC 3339
+date-time with an explicit offset (`"2026-12-31T08:30:00+05:30"`) or a date
+(`"2026-12-31"`), which means the start of that day in UTC. A date-time with
+no offset is invalid. okfw's own writers store the date-time form. okfw's
+own `created` and `timestamp` always use the date-time form.
 
 ## Trust fields
 
@@ -80,10 +86,18 @@ OKF spec §5.2–5.3. Both are optional; a concept with no trust metadata is per
 
 | Field | Format | Description |
 |-------|--------|-------------|
-| `generated` | `{by, at}` | Who produced the content and when. `by` is required within the block. `at` mirrors `timestamp` — okfw keeps them equal and rejects a disagreement, since both record the same event. Set `by` with `okfw set-generated`. |
-| `verified` | List of `{by, at}` | Verification events. Multiple entries capture independent checks; "how recently" is the latest `at`. Append with `okfw verify`. |
+| `generated` | `{by, at}` | Who produced the content, and when it last *meaningfully* changed. `by` is required within the block. Set both with `okfw set-generated` (`--at` defaults to now). A format, whitespace or link-repair edit does not move `at`. |
+| `verified` | List of `{by, at}` | Verification events; both keys are required in an event, and one missing either is ignored. Multiple entries capture independent checks; "how recently" is the latest `at`. Append with `okfw verify`. |
 
-Actors follow the OKF convention (§7): `human:<id>` for a person, `process:<id>` for an automated process, `<producer>/<version>` for an agent or tool. `okfw validate` holds `generated.by` and every `verified[].by` to exactly those three forms, prefix in lowercase, and `verify`/`set-generated` refuse anything else. The trust tier below keys on the exact prefix `human:`, so `Human:ryan` or `humna:ryan` would otherwise record a human review that reads back as machine-confirmed. `sources[].author` is not checked: the spec's own examples use `team:` there, and it does not feed the trust tier.
+**`generated.at` is not `timestamp`.** okfw moves `timestamp` on every write,
+but `generated.at` only when the content changes: through `okfw
+set-generated`, or a body rewrite made through okfw (the MCP update tool's
+`append` and `set_body`). Adding a tag, changing the lifecycle, adding a source,
+recording a verification, or the link repair `okfw move` does in other
+concepts, leave it alone — otherwise each of those would invalidate the
+reviews below.
+
+Actors follow the OKF convention (§7): `<scheme>:<id>` — `human:` for a person, `team:` for a group, `process:` for an automated process, or another scheme — or `<producer>/<version>` for an agent or tool. The scheme is lowercase. Only `human:` gives the human-reviewed tier, so `okfw validate`, `verify` and `set-generated` refuse a scheme that is a near miss of it (`Human:`, `humna:`, `humans:`), which would otherwise record a human review that reads back as machine-confirmed. `sources[].author` follows the same convention, but okfw only warns about it.
 
 ```yaml
 generated:
@@ -98,15 +112,15 @@ verified:
 
 A single verifier may be written as a bare mapping without the list dash; okfw reads that as a one-element list, as the spec requires.
 
-**Trust tiers** are derived from `verified`, and key strictly on the `human:` prefix:
+**Trust tiers** are derived from the **current** `verified` events — those at or after `generated.at` (all of them when there is no `generated`) — and key strictly on the `human:` scheme:
 
-| `verified` contains | Tier |
+| current `verified` events | Tier |
 |---|---|
-| nothing (key absent) | `unverified` |
-| only non-`human:` actors | `machine-confirmed` |
+| none | `unverified` |
+| only non-`human:` actors (`team:`, `process:`, agents, other schemes) | `machine-confirmed` |
 | any `human:<id>` actor | `human-reviewed` |
 
-A concept from another tool may carry an actor outside the convention, such as `team:data-platform`. okfw still reads it, and it is *not* a `human:` actor, so it yields `machine-confirmed`; `okfw validate` reports it.
+A review older than the last meaningful change stays in the file as history but no longer counts: when an agent rewrites a concept after a human review, the human has not read the new text. Run `okfw verify` again after checking it.
 
 ## Provenance fields
 
@@ -115,12 +129,12 @@ OKF spec §5.1. Append entries with `okfw add-source`.
 | Field | Format | Description |
 |-------|--------|-------------|
 | `sources` | List | Where the concept's knowledge came from |
-| `sources[].resource` | String | **Required within an entry.** Either a concrete artifact a consumer can follow (a URL or bundle-relative path) or a scope descriptor it cannot, such as `all queries in project X`. A path naming another concept is a link: it shows in backlinks and the graph, `okfw move` keeps it pointing at the concept, and `gf` follows it. A path starting `./` or `../` resolves from the citing concept's directory. Any other path resolves from the bundle root, including a bare `policies/refunds.md`. In a body link, a bare path is relative. This rule applies to every path-valued field (`resource`, `computation`, `executor.resource`, `attester.resource`), and it matches the spec's own examples. |
+| `sources[].resource` | String | **Required within an entry.** Either a concrete artifact a consumer can follow (a URL or a path in the bundle) or a scope descriptor it cannot, such as `all queries in project X`. A path naming another concept is a link: it shows in backlinks and the graph, `okfw move` keeps it pointing at the concept, and `gf` follows it. |
 | `sources[].id` | String | Join key for body footnotes — see below |
 | `sources[].title` | String | Human-readable label |
-| `sources[].author` | Actor | Who or what produced the source |
+| `sources[].author` | Actor | Who or what produced the source (`team:ga4-docs`) |
 | `sources[].usage_count` | Integer | How often the resource was exercised over `usage_window`. Read it as liveness and trend, not as a score. |
-| `sources[].last_modified` | ISO 8601 datetime with offset | When the source itself last changed — distinct from `generated.at`, which is when the concept was written |
+| `sources[].last_modified` | Timestamp | When the source itself last changed — distinct from `generated.at`, the last meaningful change to the concept |
 | `usage_window` | `{from, to}` | Written once as a sibling of `sources`, framing every `usage_count`. A single entry may carry its own to override it. |
 
 ```yaml
@@ -144,32 +158,61 @@ The `events_` table is sharded daily as `events_YYYYMMDD`.[^ga4-schema]
 
 Labels are keyed rather than positional because reordering the `sources` list would otherwise silently misattribute every claim. For the same reason `okfw validate` rejects two sources sharing an `id` (markdown matches footnote labels case-insensitively, so `GA4` and `ga4` collide), and a `[^label]` that matches neither a `sources[].id` nor a `[^label]:` definition, since that claim cites nothing. An ordinary footnote with its own definition is fine.
 
+## Paths
+
+Body links and path fields — `resource`, `sources[].resource`,
+`computation`, `executor.resource`, `attester.resource` and `superseded_by` —
+resolve by one rule (OKF §6):
+
+- a value with a scheme (`https://…`) is a URL;
+- a value starting with `/` resolves from the bundle root: `/policies/refunds.md`;
+- any other value resolves from the directory of the file it is in:
+  `refunds.md`, `./refunds.md`, `../policies/refunds.md`.
+
+okfw writes paths with a leading `/`, which stays correct when the referring
+concept moves. A space or other reserved character is percent-encoded
+(`my%20note.md`). A path that climbs out of the bundle is external, and okfw
+never reads it.
+
+:::caution[Changed in OKF v0.3]
+Under v0.2, okfw read a bare *frontmatter* path (`policies/refunds.md`) from
+the bundle root. v0.3 reads it from the concept's directory. A bundle that
+still declares `okf_version: "0.3"` keeps the old reading as a fallback; run
+`okfw migrate` to rewrite such paths with a leading `/` and move the bundle to
+v0.3. See the [migration guide](/okf-wiki/reference/migrating-to-okf-v0-3/).
+:::
+
 ## Custom fields
 
-The schema is closed, so an unrecognized top-level key is an error — that is what catches `descrption:` before it becomes a silently ignored field. Put your own metadata under `x:`, which accepts anything:
+The schema is closed, so an unrecognized key is an error — that is what catches `descrption:` before it becomes a silently ignored field. Name your own keys `x-<producer>-<name>`: OKF v0.3 promises never to define a key starting with `x-`, and okfw accepts one at any level, including inside `sources` entries, `generated` and `verified` events:
 
 ```yaml
-x:
-  review_cycle: "quarterly"
-  jira_epic: "PLAT-1421"
-  owners:
-    - "alice"
-    - "bob"
+x-acme-review-cycle: "quarterly"
+x-acme-jira-epic: "PLAT-1421"
+sources:
+  - resource: "https://example.com/schema"
+    x-acme-confidence: 0.8
 ```
+
+The `x:` block from earlier okfw versions is still accepted and passes anything through, but new metadata belongs in `x-` keys: `x` itself is not a reserved name, so a future OKF version could define it.
 
 ## OKF conformance and divergences
 
 okfw knowingly breaks two of the spec's consumer rules, in exchange for a hard guarantee about the bundles it writes:
 
-1. **okfw requires six fields** — `id`, `title`, `type`, `tags`, `created`, `timestamp`. OKF §11 requires only a non-empty `type`, and says consumers MUST NOT reject a concept for missing optional fields.
-2. **The schema is closed.** Undeclared top-level keys are rejected, where OKF §4.1 says consumers MUST NOT reject documents with unrecognized fields. The `x:` block above is the escape hatch.
+1. **okfw requires six fields** — `id`, `title`, `type`, `tags`, `created`, `timestamp` — and a bundle `title` and `description`. OKF v0.3 requires only a non-empty `type`.
+2. **The schema is closed.** Undeclared keys are rejected, except `x-*` extension keys, where OKF §4.1 says consumers MUST NOT reject documents with unknown keys.
 
 The consequence: `okfw validate` will reject a *conformant third-party* bundle. Two commands exist for the two questions:
 
 - `okfw validate <concept>` and `okfw validate --all` apply okfw's strict schema.
-- `okfw validate --okf` applies the permissive OKF §11 conformance check — parseable frontmatter with a non-empty `type` — and nothing else.
+- `okfw validate --okf [dir]` applies the permissive OKF §11.1 conformance check — frontmatter that parses as a YAML mapping with no duplicate keys, and well-formed `index.md`/`log.md` — and nothing else. It works on any directory, with or without a `.okfw`.
 
-**okfw has no task-tracking fields.** It once carried `status`, `due`, `completed`, and `priority` for a `todo` kind, where `status` collided with the field OKF v0.2 spec'd for lifecycle. The feature was removed rather than namespaced. Run `okfw migrate` on a bundle written by an older okfw: it drops the retired fields and rewrites `status: closed` to `status: deprecated`.
+[OKF v0.3 and OKF Wiki: where we differ](/okf-wiki/reference/okf-divergences/) explains each divergence, why okfw makes it, and what it costs.
+
+A `.md` file with no frontmatter, or no `type`, is not a concept (OKF §3.2) — a `README.md` in the bundle, say. Search, the graph and the listings skip it, and `validate` only warns.
+
+**okfw has no task-tracking fields.** It once carried `status`, `due`, `completed`, and `priority` for a `todo` kind, where `status` collided with the field OKF spec'd for lifecycle. The feature was removed rather than namespaced. Run `okfw migrate` on a bundle written by an older okfw: it drops the retired fields and rewrites `status: closed` to `status: deprecated`.
 
 Attested Computation (spec §10) is accepted but not executed: the schema declares its keys (`runtime`, `parameters`, `computation`, `executor`, `attester`) so a bundle can hold such a concept, and a concept of that `type` must carry `runtime`. okfw runs and attests nothing — the spec still defers its receipt formats and attester ABI to a future revision.
 

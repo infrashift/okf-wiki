@@ -3,7 +3,7 @@ title: Why OKF Wiki?
 description: The thinking behind OKF Wiki and why this tool exists.
 ---
 
-OKF Wiki is a local-first, file-based knowledge base built on the [Open Knowledge Format (OKF)](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md). Every idea lives in its own markdown file — a **concept** — with structured frontmatter, and concepts are woven together with plain markdown links. OKF Wiki draws on the Zettelkasten method's insight that knowledge compounds when atomic notes are densely linked.
+OKF Wiki is a local-first, file-based knowledge base built on the [Open Knowledge Format (OKF)](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md). Every idea lives in its own markdown file — a **concept** — with structured frontmatter, and concepts are woven together with plain markdown links. OKF Wiki draws on the Zettelkasten method's insight that knowledge compounds when atomic notes are densely linked.
 
 ## The Problem with Traditional Note-Taking
 

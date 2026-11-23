@@ -3,6 +3,7 @@ package search
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -116,12 +117,13 @@ func TestFiltersAndPaging(t *testing.T) {
 
 // TestStaleFilterReadsInstants: the filter used to parse only bare dates, so a
 // spec-form stale_after was never reported stale, and it compared local time
-// against UTC midnight, which was off by a day east of UTC.
+// against UTC midnight, which was off by a day east of UTC. OKF v0.3 makes a
+// bare date valid again, as UTC midnight, and an unparseable value stale.
 func TestStaleFilterReadsInstants(t *testing.T) {
 	root := t.TempDir()
 	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
 	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339)
-	for name, stale := range map[string]string{"past": past, "future": future, "dateonly": "2000-01-01"} {
+	for name, stale := range map[string]string{"past": past, "future": future, "dateonly": "2000-01-01", "Dfuture": "2999-01-01", "garbage": "soon"} {
 		write(t, root, name+".md", "---\nid: \"019680f0-7e00-7abc-8def-10000000000"+name[:1]+"\"\n"+
 			"title: \""+name+"\"\ntype: \"note\"\ntags: []\nstale_after: \""+stale+"\"\n"+
 			"created: \"2026-01-01T00:00:00Z\"\ntimestamp: \"2026-01-01T00:00:00Z\"\n---\nbody\n")
@@ -130,12 +132,13 @@ func TestStaleFilterReadsInstants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || hits[0].Title != "past" {
-		var titles []string
-		for _, h := range hits {
-			titles = append(titles, h.Title)
-		}
-		t.Errorf("stale hits = %v, want [past] (a bare date is not a valid instant)", titles)
+	var titles []string
+	for _, h := range hits {
+		titles = append(titles, h.Title)
+	}
+	sort.Strings(titles)
+	if strings.Join(titles, ",") != "dateonly,garbage,past" {
+		t.Errorf("stale hits = %v, want [dateonly garbage past] (a past date is stale, an unparseable value is never fresh)", titles)
 	}
 }
 
@@ -169,10 +172,10 @@ func TestResultsSayHowFarToTrustThem(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "a--0001.md", concept("019680f0-7e00-7abc-8def-100000000000",
 		"Ledger reviewed", "d", "ledger\n",
-		"verified:\n  - by: \"process:nightly\"\n  - by: \"human:ryan\"\n"))
+		"verified:\n  - by: \"process:nightly\"\n    at: \"2026-07-01T00:00:00Z\"\n  - by: \"human:ryan\"\n    at: \"2026-07-02T00:00:00Z\"\n"))
 	write(t, root, "b--0002.md", concept("019680f0-7e00-7abc-8def-200000000000",
 		"Ledger checked", "d", "ledger\n",
-		"status: \"draft\"\nverified:\n  by: \"process:nightly\"\n"))
+		"status: \"draft\"\nverified:\n  by: \"process:nightly\"\n  at: \"2026-07-01T00:00:00Z\"\n"))
 	write(t, root, "c--0003.md", concept("019680f0-7e00-7abc-8def-300000000000",
 		"Ledger old", "d", "ledger\n",
 		"status: \"deprecated\"\nstale_after: \"2020-01-01T00:00:00Z\"\n"))
@@ -226,5 +229,44 @@ func TestResultsSayHowFarToTrustThem(t *testing.T) {
 		if !strings.Contains(js, key) {
 			t.Errorf("--json lacks %s:\n%s", key, js)
 		}
+	}
+}
+
+// TestCurrentFollowsSupersededBy: OKF v0.3 section 5.4 — a consumer that
+// filters to current knowledge excludes deprecated and unknown-status
+// concepts, and SHOULD follow superseded_by to give the replacement.
+func TestCurrentFollowsSupersededBy(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "index.md", "---\nokf_version: \"0.3\"\n---\n")
+	write(t, root, "metrics/gross-margin-legacy.md", concept("019680f0-7e00-7abc-8def-a00000000001",
+		"Gross margin (legacy)", "d", "gross margin, old definition\n",
+		"status: \"deprecated\"\nsuperseded_by: \"/metrics/gross-margin.md\"\n"))
+	write(t, root, "metrics/gross-margin.md", concept("019680f0-7e00-7abc-8def-a00000000002",
+		"Gross margin", "d", "the current definition\n", ""))
+	write(t, root, "metrics/net-margin.md", concept("019680f0-7e00-7abc-8def-a00000000003",
+		"Net margin", "d", "net margin\n", "status: \"deprecated\"\n"))
+	write(t, root, "metrics/odd.md", concept("019680f0-7e00-7abc-8def-a00000000004",
+		"Odd margin", "d", "margin\n", "status: \"retired\"\n"))
+	write(t, root, "README.md", "# margin, not a concept\n")
+
+	all, _, err := Search(root, Options{Query: "margin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4 {
+		t.Errorf("without --current: %d hits, want 4 (the README is no concept)", len(all))
+	}
+	hits, total, err := Search(root, Options{Query: "margin", Current: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || hits[0].Title != "Gross margin" {
+		t.Fatalf("--current hits = %+v, want only the replacement", hits)
+	}
+	// The replacement matched the query by itself here; when it does not, it
+	// is still given in the deprecated hit's place.
+	hits, _, _ = Search(root, Options{Query: "old", Current: true})
+	if len(hits) != 1 || hits[0].Title != "Gross margin" || hits[0].Replaces != "019680f0-7e00-7abc-8def-a00000000001" {
+		t.Errorf("hits = %+v, want the replacement standing in for the legacy concept", hits)
 	}
 }

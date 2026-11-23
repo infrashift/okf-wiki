@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/infrashift/okf-wiki/cli/internal/bundle"
 	"github.com/infrashift/okf-wiki/internal/config"
 )
 
@@ -44,8 +45,21 @@ func TestMCPInstructionsStayShort(t *testing.T) {
 	}
 
 	got := instructions()
-	if got != mcpInstructions {
+	if !strings.HasPrefix(got, mcpInstructions) || strings.Contains(got, "top-level directories") {
 		t.Errorf("an empty wiki should get the static instructions, got:\n%s", got)
+	}
+	// OKF v0.3 section 8.1: the bundle's title and description say what it is.
+	cfg, err := config.Discover(project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("Billing runbooks and decisions. ", 20)
+	if err := bundle.SetBundleMeta(cfg, map[string]string{"title": "Billing", "description": long}); err != nil {
+		t.Fatal(err)
+	}
+	got = instructions()
+	if !strings.Contains(got, "This wiki, Billing: Billing runbooks") || len(got)-len(mcpInstructions) > maxBundleDescription+64 {
+		t.Errorf("instructions should carry the bundle title and a capped description, got:\n%s", got)
 	}
 	if len(mcpInstructions) > 1200 {
 		t.Errorf("instructions are %d bytes; they stay in every agent's context", len(mcpInstructions))

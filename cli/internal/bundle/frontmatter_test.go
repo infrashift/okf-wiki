@@ -1,6 +1,7 @@
 package bundle
 
 import (
+	"github.com/infrashift/okf-wiki/internal/config"
 	"strings"
 	"testing"
 
@@ -430,10 +431,7 @@ func TestTouchTimestampLeavesExplicitValue(t *testing.T) {
 	}
 }
 
-// generated.at and timestamp record the same event, and ValidateBusinessRules
-// rejects a disagreement — so one edit must move both.
-func TestUpdateFrontmatterKeepsGeneratedAtInSync(t *testing.T) {
-	content := []byte(`---
+const generatedConcept = `---
 id: "019680f0-7e00-7abc-8def-1234567890ab"
 title: "T"
 type: "note"
@@ -443,23 +441,55 @@ timestamp: "2026-07-01T10:00:00Z"
 generated:
   by: "human:ryan"
   at: "2026-07-01T10:00:00Z"
+verified:
+  - by: "human:alice"
+    at: "2026-07-02T00:00:00Z"
 ---
 
 # T
-`)
-	out, err := UpdateFrontmatter(content, map[string]string{"timestamp": "2026-07-25T12:00:00Z"})
+`
+
+// OKF v0.3 section 5.2: generated.at is the last meaningful change to the
+// content. A metadata edit moves okfw's timestamp but not generated.at, so a
+// human review stays current across it (section 5.3).
+func TestUpdateFrontmatterLeavesGeneratedAtAlone(t *testing.T) {
+	out, err := UpdateFrontmatter([]byte(generatedConcept), map[string]string{"timestamp": "2026-07-25T12:00:00Z", "project": "p"})
 	if err != nil {
 		t.Fatalf("UpdateFrontmatter: %v", err)
 	}
 	s := string(out)
-	if strings.Count(s, `"2026-07-25T12:00:00Z"`) != 2 {
-		t.Errorf("timestamp and generated.at should both advance:\n%s", s)
+	if !strings.Contains(s, `timestamp: "2026-07-25T12:00:00Z"`) || !strings.Contains(s, `at: "2026-07-01T10:00:00Z"`) {
+		t.Errorf("timestamp should advance and generated.at stay:\n%s", s)
 	}
-	if strings.Contains(s, `at: "2026-07-01T10:00:00Z"`) {
-		t.Errorf("generated.at was left behind:\n%s", s)
+	z, err := config.ParseFrontmatter(out)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(s, `by: "human:ryan"`) {
-		t.Errorf("generated.by must not be disturbed:\n%s", s)
+	if z.TrustTier() != config.TrustHumanReviewed {
+		t.Errorf("a metadata edit demoted the review: tier %q", z.TrustTier())
+	}
+}
+
+// A body change is a meaningful change: TouchContentChange moves generated.at
+// with timestamp, and the review before it stops counting.
+func TestTouchContentChangeMovesGeneratedAt(t *testing.T) {
+	body, err := SetBody([]byte(generatedConcept), "# T\n\nRewritten.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := TouchContentChange(body)
+	if err != nil {
+		t.Fatalf("TouchContentChange: %v", err)
+	}
+	z, err := config.ParseFrontmatter(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if z.Generated == nil || z.Generated.At == "2026-07-01T10:00:00Z" || z.Generated.By != "human:ryan" {
+		t.Errorf("generated = %+v, want at moved and by kept", z.Generated)
+	}
+	if z.TrustTier() != config.TrustUnverified {
+		t.Errorf("tier = %q; a review of the old text must not count", z.TrustTier())
 	}
 }
 

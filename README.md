@@ -124,8 +124,8 @@ The layout inside `.okfw/` is fixed:
 |------|-------------|
 | `*.md` (top level) | Concept markdown (subdirectories via `--path` or `--project`) |
 | `daily/YYYY/MM/` | Daily notes |
-| `ephemeral/` | Export scratch dir |
-| `.gitignore` | Ignores `ephemeral/` |
+| `.ephemeral/` | Export scratch dir |
+| `.gitignore` | Ignores `.ephemeral/` |
 
 Concept markdown is meant to be committed with the project; generated
 artifacts are gitignored.
