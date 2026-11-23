@@ -42,13 +42,16 @@ plugin/okfw.lua              — Neovim plugin auto-load
 make build           # Builds bin/okfw (CGO_ENABLED=0 — keep okfw pure Go)
 make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works because okfw is pure Go)
 make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
+make build-darwin-arm64 # Cross-compiles bin/okfw-darwin-arm64 (macOS, Apple silicon)
+make man             # Man pages from the command tree (okfw man) into bin/man/man1
 make build VERSION=v2026.10.0 # Overrides the stamped version (default: git describe --tags)
-make dist            # dist/: okfw-<version>-linux-{amd64,arm64}.tar.gz, SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
+make dist            # dist/: okfw-<version>-{linux-amd64,linux-arm64,darwin-arm64}.tar.gz (bin/okfw + share/man/man1), SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
 make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
 make sign            # make dist, then a cosign .sigstore.json bundle per file; offline, never logged to Rekor
 make test            # Runs Go tests + CUE schema validation
 make test-race       # Go tests under the race detector
-make install         # Installs okfw to $GOPATH/bin
+make install         # bin/okfw + man pages under PREFIX (default $GOPATH)
+make zmake-check     # make -n vs zmake -n of every task must agree (needs zmake)
 make docs-dev-up     # Docs dev server in the background (astro dev --background)
 make docs-dev-down   # Stop it and free the port (astro dev stop)
 make docs-build      # Build the docs site; Pagefind search works only on a build
@@ -56,6 +59,22 @@ make integration-test # NeoVim plugin suite (sources plugin/okfw.lua for the :Ok
 make e2e             # The NeoVim suite against the okfw binary, inside a container
 go test ./... -count=1       # Run all tests
 ```
+
+**The release platforms are exactly linux-amd64, linux-arm64 and darwin-arm64**
+(`PLATFORMS` in the Makefile); CI cross-compiles darwin-arm64 so a Linux-only
+break shows. The macOS binary is cosign-signed but not Apple-notarized.
+Man pages are generated from `rootCmd()` (`okfw man`, `cobra/doc`), never
+hand-written, so they cannot drift; `TestEveryCommandHasAManPage` checks every
+command gets one.
+
+**The ZMakefile mirrors the Makefile** for [zmake](https://github.com/infrashift/zmake)
+(modern syntax: `@name:` tasks, no `.PHONY`; zmake reads it before the
+Makefile). Change both in the same commit. `TestZMakefileMatchesMakefile`
+(`internal/buildfiles`) requires the same task set and a complete
+`ZMAKE_CHECK_TASKS`, and CI's `make zmake-check` dry-runs every task under both
+tools and diffs the recipes. Avoid make-only flags in recipes (zmake has no
+`--no-print-directory`; use `-s`) and backslash-newlines inside `$$(...)`, which
+the two print differently under `-n`.
 
 **Versions are CalVer tags, `vYYYY.M.N`** (no leading zeros, so also valid
 semver), stamped by `make` into `config.version` with `-ldflags -X` from

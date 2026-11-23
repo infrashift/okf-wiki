@@ -40,11 +40,13 @@ maintainer's machine, not at the `make signing-key` default
 sign` then checks every new signature against the committed public key, so a
 wrong key fails there instead of producing a release no one can verify.
 
-`make sign` runs `make dist`, which builds the Linux x86_64 and aarch64
-binaries with the version stamped in, packages each as a tarball with an SPDX
-SBOM, and writes `SHA256SUMS` and `SHA256SUMS.sbom`. It then reads the key's
+`make sign` runs `make dist`. That builds the binaries for the three release
+platforms (Linux x86_64 and aarch64, macOS on Apple silicon) with the version
+stamped in, and generates the man pages, dated by the commit time. It packages
+each platform as a tarball (`bin/okfw` and `share/man/man1`) with an SPDX SBOM,
+and writes `SHA256SUMS` and `SHA256SUMS.sbom`. `make sign` then reads the key's
 password once (or takes `COSIGN_PASSWORD`), writes a `<file>.sigstore.json`
-bundle for each of those six files, writes the public key to `dist/cosign.pub`
+bundle for each of those eight files, writes the public key to `dist/cosign.pub`
 (from `COSIGN_PUB`, or derived from the key), and verifies every bundle.
 
 Check that every file in `dist/` is named for the tag. A `-dirty` suffix means

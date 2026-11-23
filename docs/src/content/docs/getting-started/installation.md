@@ -6,17 +6,38 @@ description: How to install okfw, from a signed release or from source.
 ## Download a release
 
 Each [release](https://github.com/infrashift/okf-wiki/releases) carries static
-Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`), with no runtime
-dependencies:
+binaries, with no runtime dependencies, for three platforms:
+
+| Platform | `PLATFORM` |
+|---|---|
+| Linux on x86_64 | `linux-amd64` |
+| Linux on aarch64 | `linux-arm64` |
+| macOS on Apple silicon | `darwin-arm64` |
+
+Each archive holds `bin/okfw` and the man pages under `share/man/man1`. Copying
+both into `~/.local` installs the command and its manual. `man` searches the
+`share/man` beside each `bin` directory on your `PATH`, so `man okfw` works
+without setting `MANPATH`.
 
 ```bash
 VERSION=v2026.10.2
-ARCH=amd64   # or arm64
-curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
-tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
-install okfw-$VERSION-linux-$ARCH/okfw ~/.local/bin/
+PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
+a=okfw-$VERSION-$PLATFORM
+curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
+tar -xzf $a.tar.gz
+mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
 okfw --version   # okfw version v2026.10.2
+man okfw
 ```
+
+Put `~/.local/bin` on your `PATH`. The macOS binary is signed with the
+project's cosign key, but it is not notarized by Apple. A download through
+`curl` is not quarantined. After a download through a browser, run
+`xattr -d com.apple.quarantine ~/.local/bin/okfw`.
+
+A binary from releases before v2026.11 has no man pages in its archive, and
+`okfw man` installs them for any okfw binary: it writes them to
+`~/.local/share/man/man1`, from the commands themselves.
 
 Every release is signed. Before installing, you can check that the tarball is
 the one the project published; see
@@ -31,27 +52,35 @@ else is needed at runtime.
 git clone https://github.com/infrashift/okf-wiki.git
 cd okf-wiki
 make build    # Writes bin/okfw
-make install  # Moves bin/okfw to $GOPATH/bin
+make install  # bin/okfw and the man pages, under PREFIX (default: $GOPATH)
+make install PREFIX=~/.local   # ~/.local/bin/okfw and ~/.local/share/man/man1
 ```
+
+[zmake](https://github.com/infrashift/zmake) works too: the repository's
+`ZMakefile` holds the same tasks in zmake's syntax, so `zmake build` and
+`zmake install` do what `make build` and `make install` do.
 
 `make test` additionally needs the [CUE](https://cuelang.org/docs/introduction/installation/)
 CLI, for its schema syntax check.
 
-## Build for a specific Linux architecture
+## Build for a release platform
 
 okfw is pure Go, so it cross-compiles from any host. `make build` targets the
-machine you run it on; to build for Linux x86_64 or aarch64 from any machine:
+machine you run it on. To build for one of the release platforms from any
+machine:
 
 ```bash
-make build-linux-amd64   # Writes bin/okfw-linux-amd64 (x86_64)
-make build-linux-arm64   # Writes bin/okfw-linux-arm64 (aarch64)
-make dist                # Both, packaged for distribution in dist/ (needs syft)
+make build-linux-amd64    # Writes bin/okfw-linux-amd64 (Linux x86_64)
+make build-linux-arm64    # Writes bin/okfw-linux-arm64 (Linux aarch64)
+make build-darwin-arm64   # Writes bin/okfw-darwin-arm64 (macOS, Apple silicon)
+make man                  # Writes the man pages to bin/man/man1
+make dist                 # All three, packaged in dist/ (needs syft)
 ```
 
-`make dist` writes, for each architecture, `okfw-<version>-linux-<arch>.tar.gz`
-(the binary, LICENSE and README) and an SPDX SBOM of the binary,
-`okfw-<version>-linux-<arch>.spdx.json`, plus `SHA256SUMS` over the tarballs and
-`SHA256SUMS.sbom` over the SBOMs. Signing them is covered in
+`make dist` writes, for each platform, `okfw-<version>-<platform>.tar.gz`
+(`bin/okfw`, `share/man/man1/*.1`, LICENSE and README) and an SPDX SBOM of the
+binary, `okfw-<version>-<platform>.spdx.json`, plus `SHA256SUMS` over the
+tarballs and `SHA256SUMS.sbom` over the SBOMs. Signing them is covered in
 [Releasing](/okf-wiki/reference/releasing/).
 
 ## Versions

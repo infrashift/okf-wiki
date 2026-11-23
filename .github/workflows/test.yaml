@@ -71,6 +71,37 @@ jobs:
           CGO_ENABLED: 0
         run: go build -o /dev/null ./cli/cmd/okfw
 
+      # The release platforms are linux-amd64, linux-arm64 and darwin-arm64;
+      # the macOS one is the one a Linux runner would otherwise never build.
+      - name: Cross-compile for macOS on Apple silicon
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: arm64
+        run: go build -o /dev/null ./cli/cmd/okfw
+
+      # The ZMakefile mirrors the Makefile for zmake. A pinned, checksummed
+      # zmake release dry-runs every task under both and compares the recipes.
+      - name: Install zmake
+        env:
+          ZMAKE_VERSION: 0.1.0
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          cd "$work"
+          a=zmake-v$ZMAKE_VERSION-linux-amd64
+          base=https://github.com/infrashift/zmake/releases/download/v$ZMAKE_VERSION
+          curl -fsSLO "$base/$a.tar.gz"
+          curl -fsSLO "$base/SHA256SUMS"
+          sha256sum --ignore-missing -c SHA256SUMS
+          tar -xzf "$a.tar.gz"
+          mkdir -p "$HOME/.local"
+          cp -R "$a/bin" "$a/share" "$HOME/.local/"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Makefile and ZMakefile agree
+        run: make zmake-check
+
       # `cue vet` on the schema alone type-checks it against no data instance, so
       # it cannot catch a concept that violates #Concept. It is kept only as a
       # syntax gate; the real conformance check is
