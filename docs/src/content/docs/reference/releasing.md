@@ -3,8 +3,9 @@ title: Releasing
 description: How a maintainer cuts, signs and publishes an okfw release.
 ---
 
-okfw has no release workflow in CI. A release is built, signed and published
-from a maintainer's machine with `make`, so the signing key never leaves it.
+okfw has no release workflow in CI. A maintainer builds, signs and publishes
+each release on their own machine with `make`, so the signing key stays on
+that machine.
 
 ## Requirements
 
@@ -15,9 +16,10 @@ from a maintainer's machine with `make`, so the signing key never leaves it.
 
 ## Cut a release
 
-Releases are CalVer tags, `vYYYY.M.N`, with no leading zeros. Tag the commit on
-`main` that CI has passed, after renaming the CHANGELOG's `Unreleased` section
-to the version:
+Releases are CalVer tags, `vYYYY.M.N`, with no leading zeros.
+
+1. Change the name of the CHANGELOG's `Unreleased` section to the version.
+2. Tag the commit on `main` that passed CI:
 
 ```bash
 git switch main && git pull --ff-only
@@ -32,45 +34,49 @@ make sign COSIGN_KEY=~/.config/cosign/infrashift/trusted-build-agents/release.ke
   COSIGN_PUB=release/cosign.pub
 ```
 
-The project's release key is kept at
-`~/.config/cosign/infrashift/trusted-build-agents/release.key` on the
-maintainer's machine, not at the `make signing-key` default
-(`~/.config/cosign/okfw.key`), so `make sign` must be told where it is. Pass
-`COSIGN_PUB=release/cosign.pub` as well: the verification at the end of `make
-sign` then checks every new signature against the committed public key, so a
-wrong key fails there instead of producing a release no one can verify.
+The maintainer keeps the project's release key at
+`~/.config/cosign/infrashift/trusted-build-agents/release.key`. That is not the
+`make signing-key` default (`~/.config/cosign/okfw.key`), so give the path to
+`make sign`. Also give `COSIGN_PUB=release/cosign.pub`. Then the last step of
+`make sign` checks each new signature against the committed public key. With
+the wrong key, the command fails at that step. It does not make a release
+that no user can verify.
 
-`make sign` runs `make dist`. That builds the binaries for the three release
-platforms (Linux x86_64 and aarch64, macOS on Apple silicon) with the version
-stamped in, and generates the man pages, dated by the commit time. It packages
-each platform as a tarball (`bin/okfw` and `share/man/man1`) with an SPDX SBOM,
-and writes `SHA256SUMS` and `SHA256SUMS.sbom`. `make sign` then reads the key's
-password once (or takes `COSIGN_PASSWORD`), writes a `<file>.sigstore.json`
-bundle for each of those eight files, writes the public key to `dist/cosign.pub`
-(from `COSIGN_PUB`, or derived from the key), and verifies every bundle.
+`make sign` runs `make dist`. That target builds the binaries for the three
+release platforms: Linux x86_64 and aarch64, and macOS on Apple silicon. Each
+binary contains the version. It also makes the man pages, with the date of the
+commit. It puts each platform in a tarball (`bin/okfw` and `share/man/man1`)
+with an SPDX SBOM. Then it writes `SHA256SUMS` and `SHA256SUMS.sbom`.
 
-Check that every file in `dist/` is named for the tag. A `-dirty` suffix means
+Next, `make sign` reads the password of the key one time, or uses
+`COSIGN_PASSWORD`. It writes a `<file>.sigstore.json` bundle for each of those
+eight files. It writes the public key to `dist/cosign.pub`, from `COSIGN_PUB`
+or from the key. Then it verifies each bundle.
+
+Make sure that the name of each file in `dist/` has the tag. A `-dirty` suffix means
 the working tree had uncommitted changes, and a `-<n>-g<commit>` suffix means
 HEAD is not the tagged commit.
 
 Signing is offline. `make sign` uses a signing config that names no
 transparency log or timestamp authority
-(`release/cosign-offline-signing-config.json`), so nothing is uploaded to the
-public Rekor log, which cosign v3 writes to by default.
+(`release/cosign-offline-signing-config.json`). So `make sign` sends nothing to
+the public Rekor log. cosign v3 writes to that log by default.
 
 ## The release key
 
-`dist/cosign.pub` must match the published key, `release/cosign.pub` in the
-repository. Its fingerprint is also listed in
-[Verifying Releases](/okf-wiki/reference/verifying-releases/#the-release-key).
-Users verify against those copies, not just the one inside the release:
+`dist/cosign.pub` must agree with the published key, `release/cosign.pub` in
+the repository. The page
+[Verify a release](/okf-wiki/reference/verifying-releases/#the-release-key)
+also lists its fingerprint. Users verify against those copies, not only
+against the copy in the release:
 
 ```bash
 diff dist/cosign.pub release/cosign.pub && echo "release key matches"
 ```
 
-To rotate the key, commit the new `release/cosign.pub`, add its fingerprint to
-the table in Verifying Releases, and say so in the release notes. Older releases
+To rotate the key, commit the new `release/cosign.pub`. Add its fingerprint to
+the table in [Verify a release](/okf-wiki/reference/verifying-releases/#the-release-key).
+Then tell users in the release notes. Older releases
 stay verifiable against the key that signed them.
 
 To make a key for a fork or a private build, `make signing-key` writes an
@@ -85,7 +91,7 @@ gh release create v2026.10.0 --verify-tag --title "okfw v2026.10.0" \
   --notes-file notes.md dist/*
 ```
 
-The notes should carry the CHANGELOG section for the version and the install
-and verify steps. Then download the release into an empty directory and
-follow [Verifying Releases](/okf-wiki/reference/verifying-releases/) against it,
-as a user would.
+The notes must have the CHANGELOG section for the version, and the steps to
+install and verify. Then download the release into an empty directory. Do the
+steps in [Verify a release](/okf-wiki/reference/verifying-releases/) on it, as
+a user does.

@@ -14,7 +14,7 @@ description: "okfw reads and writes OKF v0.3 bundles, stamps okf_version 0.3 on 
 
 **Status:** Accepted
 **Date:** 2026-11-23
-**Source:** PR #15, commit 4500d7d, "OKF v0.3 compliance in the read and write paths".
+**Source:** PR #15, commit 4500d7d, `OKF v0.3 compliance in the read and write paths`.
 
 ## Context
 OKF v0.3 is at `open-knowledge-format/open-knowledge-format`, pinned at `527e81a`. The `knowledge-catalog/okf` copy stays at v0.2. v0.3 has two declared breaking changes and new consumer MUSTs that okfw broke.
@@ -26,11 +26,11 @@ OKF v0.3 is at `open-knowledge-format/open-knowledge-format`, pinned at `527e81a
 - A full date means UTC midnight. An unparseable `stale_after` is stale, never fresh.
 - `superseded_by` is a path field and a graph edge. `search --current` shows the concept that replaces a deprecated hit.
 - A `.md` file with no `type` is not a concept. okfw refuses duplicate keys.
-- Strict validate requires a bundle `title` and `description` in the root `index.md`.
+- The strict check, `okfw validate --all`, requires a bundle `title` and `description` in the root `index.md`.
 - `okfw migrate` updates a v0.2 bundle.
 
 ## Consequences
-- The four upstream example bundles are a regression corpus in `cli/testdata/`.
+- The four upstream example bundles are a test corpus in `cli/testdata/`.
 - The okfw-benchmark repository compares okfw with the reference implementation.
 - [ADR-0006](/decisions/adr-0006-okfw-is-stricter-than-okf-on-purpose--01a208a240ed.md) still applies: okfw stays stricter than the spec on writes.
 

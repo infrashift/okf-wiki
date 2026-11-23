@@ -3,7 +3,7 @@ title: Notes Workflow
 description: A hands-on tutorial for using okfw to build a personal knowledge base directly from NeoVim.
 ---
 
-A hands-on tutorial for using `okfw` to build a personal knowledge base directly from your editor.
+This tutorial shows how to use `okfw` to build a personal knowledge base from the editor.
 
 ---
 
@@ -15,25 +15,25 @@ You're a developer. You read documentation, solve problems, attend meetings, and
 - Notes scattered across apps, files, and sticky notes
 - Good ideas forgotten within days
 - No way to connect related thoughts
-- Context lost when switching projects
+- Context lost when you change to a different project
 
 **The solution:**
-- One system for capturing everything
+- One system that captures everything
 - Notes that link to each other
 - Searchable knowledge, with no index to maintain
-- Works from your editor - no context switching
+- Works from the editor, so you stay in one context
 
-`okfw` brings OKF Wiki into NeoVim, so your knowledge base grows while you work.
+`okfw` brings OKF Wiki into NeoVim, so the knowledge base grows while you work.
 
 ---
 
 ## Before You Begin
 
-**Recommended reading:** [Why OKF Wiki?](/okf-wiki/methodology/why-okf-wiki/)
+**Read first:** [Why OKF Wiki?](/okf-wiki/methodology/why-okf-wiki/)
 
-Understanding the methodology will help you get more value from the tool. The key concepts are:
+When you know the method, the tool is more useful. These are the important concepts:
 
-- **Capture** - Get ideas into notes quickly, without judging them
+- **Capture** - Get ideas into notes quickly, and do not judge them yet
 - **Refine** - Sharpen captures into clear, focused insights
 - **Atomic notes** - One idea per note
 - **Links** - Connections between notes create emergent structure
@@ -42,12 +42,12 @@ Understanding the methodology will help you get more value from the tool. The ke
 
 ## User Story
 
-> *As a developer working on multiple projects, I want to capture ideas and insights as I work, so that I can build a searchable knowledge base without leaving my editor.*
+> *As a developer on many projects, I want to capture ideas while I work. Then I build a knowledge base that I can search, and I stay in the editor.*
 
-This tutorial will show you how to:
+This tutorial shows how to:
 1. Capture a quick idea
 2. Refine and link it
-3. Search and connect your notes
+3. Search and connect the notes
 4. Use templates for structured content
 5. Build daily review habits
 
@@ -55,22 +55,22 @@ This tutorial will show you how to:
 
 ## Prerequisites
 
-Ensure you have:
+Make sure that you have:
 - NeoVim 0.9+ with the okfw plugin installed
-- The `okfw` CLI binary in your PATH
-- An initialized wiki: run `:OkfwInit` (or `okfw init` from a shell) once at
-  your project root to create the `.okfw/` directory
+- The `okfw` CLI binary on the PATH
+- A wiki. To create the `.okfw/` directory, run `:OkfwInit` (or `okfw init` in
+  a shell) one time at the project root
 
-The plugin discovers the wiki via `okfw root` from NeoVim's current working
-directory, so open NeoVim anywhere inside your project.
+The plugin finds the wiki with `okfw root`, from the current working directory
+of NeoVim. So you can open NeoVim in any directory of the project.
 
-Verify your setup:
+Verify the setup:
 ```vim
 :OkfwTemplate
 ```
 
-You should see a picker with available templates (the picker needs
-[snacks.nvim](https://github.com/folke/snacks.nvim)).
+A picker with the available templates opens. The picker needs
+[snacks.nvim](https://github.com/folke/snacks.nvim).
 
 ---
 
@@ -78,32 +78,32 @@ You should see a picker with available templates (the picker needs
 
 ### Step 1: Capture a Note
 
-You're reading code and notice an interesting pattern. Capture it immediately.
+You read code and see a useful pattern. Capture it immediately.
 
 **From NeoVim:**
 ```vim
 :OkfwNote
 ```
 
-Or using the Lua API:
+Or use the Lua API:
 ```vim
 :lua require("okfw").create_note()
 ```
 
-You'll be prompted for a title:
+The plugin asks for a title:
 ```
 Note Title: Interesting error handling pattern in auth module
 ```
 
-The plugin creates the note and opens it in the current window. Files are named `slug--shortid.md`, where the short id is the first 12 hex digits of the concept's UUID:
+The plugin creates the note and opens it in the current window. The file name is `slug--shortid.md`. The short id is the first 12 hex digits of the UUID of the concept:
 ```
 .okfw/interesting-error-handling-pattern-in-auth-module--019f049400a8.md
 ```
 
-**What just happened:**
-- A new markdown file was created with a UUIDv7 `x-okfw-id` and a `slug--shortid.md` filename
-- YAML frontmatter was generated with metadata
-- No project context required - just capture the thought
+**What occurred:**
+- okfw created a new markdown file with a UUIDv7 `x-okfw-id` and a `slug--shortid.md` filename
+- okfw wrote YAML frontmatter with metadata
+- You did not choose a place for it. You only captured the thought
 
 ### Step 2: View Your Note
 
@@ -112,7 +112,7 @@ The new note is already open. To find it again later:
 :OkfwSearch
 ```
 
-Find your note in the picker and press `<CR>` to open it.
+Find the note in the picker and push `<CR>` to open it.
 
 The file looks like this:
 ```markdown
@@ -131,7 +131,7 @@ x-okfw-timestamp: "2026-02-13T14:23:45-06:00"
 
 ### Step 3: Add Content
 
-Fill in your thoughts while they're fresh:
+Write down the thoughts while they are fresh:
 
 ```markdown
 ---
@@ -164,16 +164,17 @@ Save the file (`:w`).
 
 ### Step 4: Search Your Notes
 
-There is nothing to index: search reads the files directly, so the note is
-searchable as soon as it is saved. Saving also refreshes the wiki's `index.md`
-listings. If you edited concepts outside NeoVim, regenerate the listings with:
+There is nothing to index. Search reads the files directly, so you can find the
+note immediately after you save it. A save also refreshes the `index.md`
+listings of the wiki. If you edited concepts outside NeoVim, regenerate the
+listings with:
 ```vim
 :OkfwIndex
 ```
 
 ### Step 5: Refine the Note
 
-A week later, you've used this pattern successfully. Time to refine the note: review the content, sharpen the writing, and add any context you were missing at capture time.
+A week later, the pattern worked for you. Now refine the note. Review the content, make the text clear, and add the context that it did not have at capture time.
 
 You can also file it in a directory with `:OkfwMove`, which keeps its id and
 repairs every link to it:
@@ -181,19 +182,19 @@ repairs every link to it:
 :OkfwMove patterns/
 ```
 
-(The `\p` mapping that set a project still works but is deprecated: a
-directory does the same job, and every OKF tool reads it.)
+(The `\p` mapping that set a project still works, but do not use it. A
+directory does the same job, and each OKF tool reads it.)
 
 **Why refine?**
-- Refined notes represent validated knowledge
+- Refined notes hold knowledge that you checked
 - A directory makes them easy to find later (`:OkfwSearch --path patterns`)
-- They're the building blocks of your knowledge base
+- They are the blocks of the knowledge base
 
 ### Step 6: Link Notes Together
 
-Later, you write another note about Go best practices. Link back to your error handling note.
+Later, you write a different note about Go best practices. Link back to the note about Go errors.
 
-Links are **vanilla markdown links** that point at a concept's file path (a concept's OKF id is its path minus `.md`). While editing, press `\l` to open the link picker. Find the error handling note, press `<CR>`, and a link is inserted. It uses a wiki-relative absolute path — a leading `/` means the wiki root — with the file name as the link text, which you can then reword:
+Links are **vanilla markdown links** to the file path of a concept. The OKF id of a concept is its path without `.md`. While you edit, push `\l` to open the link picker. Find the note about Go errors, and push `<CR>`. The picker inserts a link with a wiki-relative absolute path. A leading `/` means the wiki root. The link text is the file name, and you can change it:
 ```markdown
 See also [interesting-error-handling-pattern-in-auth-module--019f049400a8](/interesting-error-handling-pattern-in-auth-module--019f049400a8.md) for the pattern.
 ```
@@ -208,32 +209,32 @@ You can also write relative links by hand:
 See [the pattern](./interesting-error-handling-pattern-in-auth-module--019f049400a8.md).
 ```
 
-Broken links are tolerated — if a target moves or is removed, the link simply doesn't resolve. To **follow a link**, place your cursor on it and press `gf` (go to file).
+okfw accepts broken links. If a target moves or goes away, the link does not resolve, and that is not an error. To **follow a link**, put the cursor on it and push `gf` (go to file).
 
 ### Step 7: Find Backlinks
 
-Open your error handling note and press `\b` to toggle the backlinks panel:
+Open the note about Go errors and push `\b` to toggle the backlinks panel:
 ```
 \b  →  Backlinks panel (right side)
 ```
 
-A panel shows all notes that reference this one - your knowledge graph is forming.
+A panel shows all notes that refer to this one. The knowledge graph starts to grow.
 
 ---
 
 ## Part 2: Working with Templates
 
-Templates provide structure for common note types. They save time and ensure consistency.
+Templates give a structure to common types of notes. They save time and keep the notes consistent.
 
 ### Available Templates
 
-Use `:OkfwTemplate` without arguments to open a picker showing all templates:
+Use `:OkfwTemplate` without arguments to open a picker with all templates:
 
 `meeting`, `book-review`, `snippet`, `project-idea`, `user-story`, `feature`, `daily`, `issue`
 
 ### Example: Meeting Notes
 
-You're about to join a sprint planning meeting.
+You are about to join a sprint meeting.
 
 ```vim
 :OkfwTemplate meeting
@@ -350,8 +351,8 @@ Title: `Go context with timeout pattern`
 The template includes sections for:
 - Language and source
 - Context: why the snippet is useful
-- The code itself, an explanation, and a usage example
-- Related notes and citations
+- The code itself, what it does, and an example of its use
+- Related notes and sources
 
 ### Using the Template Picker
 
@@ -369,7 +370,7 @@ The picker shows all templates with descriptions. Select one and continue.
 
 ### Full-Text Search
 
-Find notes containing specific terms:
+Find notes that contain specific terms:
 ```vim
 :OkfwSearch authentication
 ```
@@ -383,7 +384,7 @@ Search as you type:
 
 ### Search with Flags
 
-`:OkfwSearch` supports flags for filtering by frontmatter fields:
+`:OkfwSearch` has flags that filter by frontmatter fields:
 
 ```vim
 " Search one directory, recursively
@@ -413,11 +414,11 @@ Search as you type:
 :OkfwSearch --tag golang --tag api
 ```
 
-Flags support tab completion — press `<Tab>` after typing a flag name to see valid values.
+Flags have tab completion. Type a flag name, then push `<Tab>` to see the valid values.
 
 ### Graph Visualization
 
-See how your notes connect:
+See how the notes connect:
 ```vim
 :OkfwGraph 20
 ```
@@ -437,10 +438,10 @@ Capture -> Review -> Refine -> Link
 ### When to Refine
 
 Refine a captured note when:
-- You've validated the idea through use
-- The content needs sharpening for clarity
-- It connects meaningfully to other notes
-- It's worth keeping long-term
+- You used the idea, and it worked
+- The content is not yet clear
+- It has a real connection to other notes
+- You want to keep it for a long time
 
 ### How to Refine
 
@@ -454,7 +455,7 @@ Refine a captured note when:
 
 ## Recommended Keymaps
 
-Add these to your NeoVim configuration:
+Add these to the NeoVim configuration:
 
 ```lua
 -- Daily notes
@@ -503,26 +504,26 @@ vim.keymap.set("n", "<leader>zi", "<cmd>OkfwIndex<cr>", { desc = "Refresh index.
 
 ### Build a Daily Habit
 
-Daily notes are the foundation of a sustainable practice. They provide:
+Daily notes are the base of a practice that lasts. They give:
 - A consistent place to capture thoughts
-- A natural review rhythm
-- A timeline of your thinking
+- A natural rhythm for reviews
+- A time line of thoughts
 
 **Read:** [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a comprehensive guide to daily, weekly, and monthly review workflows in NeoVim.
 
 ### Keep Knowledge Current with OKF Metadata
 
-okfw is a knowledge format, not a task tracker — there are no todo fields. What
-it does track is whether a concept can still be trusted:
+okfw is a knowledge format, not a task tracker, so it has no todo fields. It
+records whether you can still trust a concept:
 - Lifecycle status (`draft`, `stable`, `deprecated`)
-- A staleness date, so review becomes a query rather than a memory exercise
-- A verification trail, and provenance for where the knowledge came from
+- A stale date, so a review is a query, and you do not have to remember it
+- A verification trail, and provenance for the origin of the knowledge
 
 **Read:** [CLI Commands](/okf-wiki/reference/cli-commands/#okf-metadata) for the OKF metadata commands.
 
 ### Master the CLI
 
-The NeoVim plugin wraps the `okfw` CLI. For scripting, automation, or terminal use:
+The NeoVim plugin calls the `okfw` CLI. For scripts, automated tasks, or the terminal:
 
 **Read:** [CLI Commands](/okf-wiki/reference/cli-commands/) for the complete command reference.
 
@@ -548,11 +549,11 @@ You've learned how to:
 
 1. **Capture** - Create notes for quick ideas
 2. **Refine** - Add content and tags, and file it in a directory
-3. **Link** - Connect validated insights to related notes
-4. **Search** - Find and connect your knowledge
+3. **Link** - Connect checked ideas to related notes
+4. **Search** - Find and connect the knowledge
 5. **Template** - Use structured formats for consistency
 
-The key is consistency. Capture freely, review regularly, and link deliberately. Your knowledge base will grow organically as you work.
+Be consistent. Capture freely, review regularly, and link on purpose. Then the knowledge base grows naturally while you work.
 
 ---
 
