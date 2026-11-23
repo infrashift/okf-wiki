@@ -582,9 +582,19 @@ require("okfw").link_picker({ include_title = true })  -- <CR> inserts [Title](/
 
 #### `insert_link(entry, use_title)`
 
-Insert a markdown link to `entry` (a search result: a table with `file_path`
-and `title`) at the cursor. `use_title` makes the title the link text. Linking
+Insert a markdown link to `entry` (a search result: a table with a
+bundle-relative `path`, or an absolute `file_path`, and `title`) at the cursor. `use_title` makes the title the link text. Linking
 a concept to itself, or to a file outside the wiki, is refused.
+
+#### `entry_file(entry)`
+
+The absolute file of a search result. `okfw search --json` gives a
+bundle-relative `path`, which this resolves against the wiki root; an entry
+with an absolute `file_path` is returned as it is.
+
+```lua
+local file = require("okfw").entry_file(hit)
+```
 
 #### `insert_link_prompt(use_title)`
 

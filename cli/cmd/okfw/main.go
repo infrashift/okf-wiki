@@ -336,7 +336,7 @@ Examples:
 			}
 
 			if jsonFlag {
-				jsonOutput, err := search.ResultsToJSON(results)
+				jsonOutput, err := search.HitsToJSON(results, cfg.RootPath)
 				if err != nil {
 					return fmt.Errorf("failed to format JSON: %w", err)
 				}

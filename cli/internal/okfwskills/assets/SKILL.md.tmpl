@@ -56,7 +56,7 @@ use whichever surface you have.
 
 | do this | CLI | MCP |
 |---|---|---|
-| find concepts | `okfw search "query" --json` | `okfw_search {"q":"query"}` |
+| find concepts | `okfw search "query" --json` (each hit's `path` is relative to `.okfw/`) | `okfw_search {"q":"query"}` |
 | search one directory | `okfw search --path <dir> --json` | `okfw_search {"dir":"<dir>"}` |
 | list a directory | read `.okfw/<dir>/index.md` | `okfw_read {"ref":"<dir>/"}` (`"/"` for the root) |
 | read one | — | `okfw_read {"ref":"<id or path>"}` |

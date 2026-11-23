@@ -3,6 +3,13 @@
 
 local M = {}
 
+-- The absolute file of a search hit; see okfw.entry_file.
+local function okfw_entry_file(entry)
+    local ok, okfw = pcall(require, "okfw")
+    if ok and okfw.entry_file then return okfw.entry_file(entry) end
+    return entry.file_path
+end
+
 -- Badges for the states worth noticing before opening a concept. A stale,
 -- deprecated or draft hit looked exactly like the current answer, and a
 -- human-reviewed one like an unchecked note. Unverified and stable are the
@@ -184,7 +191,7 @@ M.search = function(opts)
             idx = idx,
             text = format_concept_ordinal(entry),
             display = format_concept_display(entry),
-            file = entry.file_path,
+            file = okfw_entry_file(entry),
             data = entry,
         })
     end
@@ -258,7 +265,7 @@ M.live_search = function(opts)
                     idx = idx,
                     text = format_concept_ordinal(entry),
                     display = format_concept_display(entry),
-                    file = entry.file_path,
+                    file = okfw_entry_file(entry),
                     data = entry,
                 })
             end

@@ -458,10 +458,25 @@ okfw search "query" --json | jq '.[] | .title'
 okfw search --json | jq '.[] | select(.trust == "human-reviewed" and (.stale | not)) | .title'
 ```
 
-Each result carries `trust` and `stale` (a boolean) alongside the raw `status`
-and `stale_after`. The MCP `okfw_search` tool returns the same `trust` on every
-hit, and `status` and `stale` only when they are the exception: `draft` or
-`deprecated`, and `true`.
+`--json` prints a compact JSON array of hits, the same hit the MCP
+`okfw_search` tool returns:
+
+```json
+[{"id":"019f0494-…","title":"Pricing","path":"infra/pricing--019f049400a8.md","kind":"note","type":"note","tags":["pricing"],"snippet":"…","trust":"human-reviewed"}]
+```
+
+- `path` is relative to the wiki (`.okfw/`); every command that takes a
+  concept accepts it.
+- `trust` is on every hit. `status` appears only when it isn't `stable`, and
+  `stale` only when it is `true`.
+- `superseded_by` appears on a deprecated hit, and `replaces` on the hit
+  `--current` gave in a deprecated one's place.
+- Empty fields are left out.
+
+It is shaped for agents, which pay per token. Before v2026.11.2 it was
+indented and carried an absolute `file_path`, a `score`, the `description`
+beside the snippet, and empty defaults on every hit, about twice the size for
+the same results.
 
 ### Combined filters
 ```bash

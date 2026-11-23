@@ -364,30 +364,6 @@ func (s *mcpServer) callTool(name string, args json.RawMessage) (res *toolResult
 	return errResult(fmt.Errorf("unknown tool: %s", name))
 }
 
-type mcpHit struct {
-	ID    string `json:"id"`
-	Title string `json:"title"`
-	Path  string `json:"path"`
-	// Kind and Type say what a hit *is*, so a caller can route on it without
-	// reading the concept.
-	Kind    string   `json:"kind,omitempty"`
-	Type    string   `json:"type,omitempty"`
-	Project string   `json:"project,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
-	Snippet string   `json:"snippet,omitempty"`
-	// Trust is always present: an agent cannot tell an omitted tier from
-	// "unverified". Status and stale appear only when they are the exception,
-	// so a current, stable hit costs nothing extra.
-	Trust  string `json:"trust"`
-	Status string `json:"status,omitempty"` // anything but stable, raw; absent means stable
-	Stale  bool   `json:"stale,omitempty"`
-
-	// SupersededBy and Replaces carry OKF v0.3 section 5.4's replacement link:
-	// on a deprecated hit, and on the hit a current search gave in its place.
-	SupersededBy string `json:"superseded_by,omitempty"`
-	Replaces     string `json:"replaces,omitempty"`
-}
-
 // maxSearchLimit bounds a single search page. The caller can page past it
 // with offset; nothing bounded it before, so `limit: 100000` dumped the bundle.
 const maxSearchLimit = 100
@@ -437,29 +413,9 @@ func (s *mcpServer) toolSearch(cfg *config.Config, args json.RawMessage) *toolRe
 		return errResult(err)
 	}
 
-	hits := make([]mcpHit, 0, len(results))
+	hits := make([]search.Hit, 0, len(results))
 	for _, r := range results {
-		hit := mcpHit{
-			ID:      r.ID,
-			Title:   r.Title,
-			Path:    relPath(cfg, r.FilePath),
-			Kind:    r.Kind,
-			Type:    r.Type,
-			Project: r.Project,
-			Tags:    r.Tags,
-			Snippet: r.Snippet,
-			Trust:   r.Trust,
-			Stale:   r.Stale,
-
-			Replaces: r.Replaces,
-		}
-		if lc := r.Lifecycle(); lc != "stable" {
-			if lc == "deprecated" {
-				hit.SupersededBy = r.SupersededBy
-			}
-			hit.Status = lc
-		}
-		hits = append(hits, hit)
+		hits = append(hits, r.Hit(cfg.RootPath))
 	}
 	out := map[string]interface{}{"total": total, "results": hits}
 	// A bare total the caller has to compare against len(results) is not an

@@ -767,6 +767,25 @@ do
     end
 end
 
+-- Test 37b: `search --json` hits carry a bundle-relative `path` (the compact
+-- hit the MCP search tool returns), and the plugin resolves it to the file.
+log("")
+log("Test 37b: search --json path resolves to the concept's file")
+do
+    local _, out = run_okfw({ "search", "--json", "Badged Ledger" })
+    local okj, hits = pcall(vim.json.decode, out)
+    local hit = okj and type(hits) == "table" and hits[1] or {}
+    assert_true(type(hit.path) == "string" and hit.path:sub(1, 1) ~= "/", "the hit's path is bundle-relative")
+    assert_true(hit.file_path == nil, "the hit carries no absolute file_path")
+    local real_cwd = vim.fn.getcwd()
+    vim.cmd("cd " .. vim.fn.fnameescape(test_project))
+    okfw._bundle_roots = {}
+    local file = okfw.entry_file(hit)
+    assert_true(file ~= nil and vim.fn.filereadable(file) == 1, "entry_file resolves the hit to a readable file")
+    assert_eq(okfw.entry_file({ file_path = "/x/y.md" }), "/x/y.md", "a file_path entry is used as given")
+    vim.cmd("cd " .. vim.fn.fnameescape(real_cwd))
+end
+
 -- Test 38: :OkfwMove and :OkfwDelete take an id, as the CLI does. They expanded
 -- the argument as a file path, so an id named a file that did not exist.
 log("")
