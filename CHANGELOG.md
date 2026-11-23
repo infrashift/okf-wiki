@@ -2,6 +2,11 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Changed
+- **`okfw search --json` is half the size**, and now prints the same hit the MCP search tool returns. It is a compact array of `{id, title, path, kind, type, project, tags, snippet, trust, status, stale, superseded_by, replaces}`. Empty fields are left out; `status` appears only when it isn't `stable`, and `stale` only when it is `true`. **Breaking for scripts:** `file_path` (absolute) is replaced by `path` (relative to `.okfw/`; every command accepts it), and `score`, `description` and `stale_after` are gone. Agents that follow okfw's skill use this form, and paid about 2,900 tokens per search where the MCP tool costs about 1,400. The Neovim plugin resolves `path` itself, and its new `entry_file(hit)` does the same for scripts.
+
 ## v2026.11.1 — 2026-11-23
 
 ### Fixed

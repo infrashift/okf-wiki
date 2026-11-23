@@ -316,16 +316,83 @@ func matches(r Result, opts Options) bool {
 	return true
 }
 
-// ResultsToJSON renders results as a JSON array.
-func ResultsToJSON(results []Result) (string, error) {
-	if results == nil {
-		results = []Result{}
+// Hit is a search result as okfw hands it to an agent: `okfw search --json`
+// and the MCP search tool emit exactly this, from this one type, so the two
+// surfaces cannot drift apart.
+//
+// It is shaped for the reader who pays per token. The CLI used to print the
+// whole Result indented: an absolute file path, a score, the description beside
+// the snippet, and kind "note", project "" and stale false on every hit. That
+// cost twice what the MCP tool returned for the same search (2,923 against
+// 1,432 tokens a query, counted with count_tokens on the okfw-benchmark query
+// set), and agents following okfw's skill use the CLI form.
+type Hit struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Path  string `json:"path"` // bundle-relative; okfw accepts it wherever it takes a concept
+	// Kind and Type say what a hit *is*, so a caller can route on it without
+	// reading the concept.
+	Kind    string   `json:"kind,omitempty"`
+	Type    string   `json:"type,omitempty"`
+	Project string   `json:"project,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Snippet string   `json:"snippet,omitempty"`
+	// Trust is always present: an agent cannot tell an omitted tier from
+	// "unverified". Status and stale appear only when they are the exception,
+	// so a current, stable hit costs nothing extra.
+	Trust  string `json:"trust"`
+	Status string `json:"status,omitempty"` // anything but stable, raw; absent means stable
+	Stale  bool   `json:"stale,omitempty"`
+
+	// SupersededBy and Replaces carry OKF v0.3 section 5.4's replacement link:
+	// on a deprecated hit, and on the hit a current search gave in its place.
+	SupersededBy string `json:"superseded_by,omitempty"`
+	Replaces     string `json:"replaces,omitempty"`
+}
+
+// Hit renders r for an agent; bundleRoot makes its path bundle-relative.
+func (r Result) Hit(bundleRoot string) Hit {
+	h := Hit{
+		ID:       r.ID,
+		Title:    r.Title,
+		Path:     relTo(bundleRoot, r.FilePath),
+		Kind:     r.Kind,
+		Type:     r.Type,
+		Project:  r.Project,
+		Tags:     r.Tags,
+		Snippet:  r.Snippet,
+		Trust:    r.Trust,
+		Stale:    r.Stale,
+		Replaces: r.Replaces,
 	}
-	b, err := json.MarshalIndent(results, "", "  ")
+	if lc := r.Lifecycle(); lc != "stable" {
+		if lc == "deprecated" {
+			h.SupersededBy = r.SupersededBy
+		}
+		h.Status = lc
+	}
+	return h
+}
+
+// HitsToJSON renders results as a compact JSON array of Hits, the form
+// `okfw search --json` prints.
+func HitsToJSON(results []Result, bundleRoot string) (string, error) {
+	hits := make([]Hit, 0, len(results))
+	for _, r := range results {
+		hits = append(hits, r.Hit(bundleRoot))
+	}
+	b, err := json.Marshal(hits)
 	if err != nil {
 		return "", err
 	}
 	return string(b), nil
+}
+
+func relTo(root, abs string) string {
+	if rel, err := filepath.Rel(root, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, "../") {
+		return filepath.ToSlash(rel)
+	}
+	return abs
 }
 
 // FormatResultsFrom renders a page, numbering from offset and saying when more

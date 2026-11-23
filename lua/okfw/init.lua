@@ -1102,15 +1102,32 @@ M.bundle_rel = function(abs)
     return nil
 end
 
--- Insert a vanilla markdown link to a concept entry ({ file_path, title, id }).
--- When use_title is true the link text is the concept title, otherwise its slug.
+-- The absolute file of a search hit or other concept entry. `okfw search --json`
+-- gives a bundle-relative `path` (the same hit the MCP search tool returns, at
+-- half the tokens of the absolute `file_path` it used to print); older callers
+-- and the daily-note list pass `file_path`.
+M.entry_file = function(entry)
+    if not entry then return nil end
+    if entry.file_path and entry.file_path ~= "" then return entry.file_path end
+    if entry.path and entry.path ~= "" then
+        if entry.path:sub(1, 1) == "/" then return entry.path end
+        local root = M.bundle_root()
+        if root then return root .. "/" .. entry.path end
+    end
+    return nil
+end
+
+-- Insert a vanilla markdown link to a concept entry ({ path or file_path, title,
+-- id }). When use_title is true the link text is the concept title, otherwise
+-- its slug.
 M.insert_link = function(entry, use_title)
-    if not entry or not entry.file_path then
+    local file = M.entry_file(entry)
+    if not file then
         print("No link target")
         return
     end
 
-    local target = M.bundle_rel(entry.file_path)
+    local target = M.bundle_rel(file)
     if not target then
         vim.notify("Link target is outside the bundle", vim.log.levels.WARN)
         return

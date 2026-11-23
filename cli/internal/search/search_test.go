@@ -1,6 +1,7 @@
 package search
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sort"
@@ -221,14 +222,50 @@ func TestResultsSayHowFarToTrustThem(t *testing.T) {
 		t.Errorf("the default lifecycle should not be spelled out:\n%s", text)
 	}
 
-	js, err := ResultsToJSON(hits[:1])
+	js, err := HitsToJSON(hits, root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{`"trust":`, `"stale":`} {
-		if !strings.Contains(js, key) {
-			t.Errorf("--json lacks %s:\n%s", key, js)
+	var decoded []map[string]any
+	if err := json.Unmarshal([]byte(js), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	byTitle := map[string]map[string]any{}
+	for _, h := range decoded {
+		byTitle[h["title"].(string)] = h
+	}
+	if h := byTitle["Ledger reviewed"]; h["trust"] != "human-reviewed" || h["stale"] != nil || h["status"] != nil {
+		t.Errorf("a current, stable hit carries only its trust: %v", h)
+	}
+	if h := byTitle["Ledger old"]; h["status"] != "deprecated" || h["stale"] != true {
+		t.Errorf("the exceptions are spelled out: %v", h)
+	}
+}
+
+// TestHitsAreCompact: `okfw search --json` is read by agents that pay per
+// token. It is compact JSON with a bundle-relative path and no fields that
+// carry nothing: no absolute path, no score, no description beside the
+// snippet, no empty project, no stale:false.
+func TestHitsAreCompact(t *testing.T) {
+	root := bundleWith(t)
+	hits, _, err := Search(root, Options{Query: "policy"})
+	if err != nil || len(hits) == 0 {
+		t.Fatalf("hits = %v, %v", hits, err)
+	}
+	js, err := HitsToJSON(hits, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(js, "\n") || strings.Contains(js, root) {
+		t.Errorf("not compact, or carries an absolute path:\n%s", js)
+	}
+	for _, gone := range []string{`"file_path"`, `"score"`, `"description"`, `"project":""`, `"stale":false`, `"stale_after"`} {
+		if strings.Contains(js, gone) {
+			t.Errorf("--json still carries %s:\n%s", gone, js)
 		}
+	}
+	if !strings.Contains(js, `"path":"`) {
+		t.Errorf("--json lacks the bundle-relative path:\n%s", js)
 	}
 }
 
