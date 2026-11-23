@@ -39,13 +39,12 @@ type Stats struct {
 }
 
 type page struct {
-	rel     string // bundle-relative path, with .md
-	dir     string
-	slug    string
-	z       *config.Concept
-	body    string
-	links   []string // bundle-relative paths of linked concepts
-	isIndex bool
+	rel   string // bundle-relative path, with .md
+	dir   string
+	slug  string
+	z     *config.Concept
+	body  string
+	links []string // bundle-relative paths of linked concepts
 }
 
 // Generate writes the Astro content for the bundle at bundleRoot into the
