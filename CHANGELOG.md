@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Added — man pages, macOS, zmake
+- **Man pages.** `okfw man` writes okfw(1) and one page per subcommand, such as okfw-search(1), generated from the commands themselves. They go to `~/.local/share/man/man1` by default. `make install` installs them beside the binary under `PREFIX`, and release archives ship them in `share/man/man1`.
+- **macOS on Apple silicon.** Releases cover `linux-amd64`, `linux-arm64` and `darwin-arm64`, via `make build-darwin-arm64`. The macOS binary is signed with the project's cosign key but is not notarized by Apple.
+- **A `ZMakefile` for [zmake](https://github.com/infrashift/zmake)** holds the Makefile's tasks in zmake's modern syntax. A test keeps the two task lists equal, and CI's `make zmake-check` dry-runs every task under both tools and compares the recipes.
+
+### Changed — release archives
+- **A release archive unpacks to `bin/okfw` and `share/man/man1/`**, not a top-level `okfw`, and is named `okfw-<version>-<platform>.tar.gz`. Install with `cp -R okfw-<version>-<platform>/bin okfw-<version>-<platform>/share ~/.local/`. `make install` now copies to `$(PREFIX)/bin`, with `PREFIX` defaulting to `$GOPATH`, instead of moving `bin/okfw`.
+
 ### Changed (breaking) — OKF v0.3
 okfw now targets [OKF v0.3](https://github.com/open-knowledge-format/open-knowledge-format/blob/main/SPEC.md). The spec has moved: the `knowledge-catalog/okf/SPEC.md` copy is frozen at v0.2. **Run `okfw migrate`** on an existing bundle, then `okfw set-bundle-meta --description "…"`. The [migration guide](https://infrashift.github.io/okf-wiki/reference/migrating-to-okf-v0-3/) has the details, and a new page, [OKF v0.3 and OKF Wiki: where we differ](https://infrashift.github.io/okf-wiki/reference/okf-divergences/), explains where okfw is stricter than the spec, why, and what it costs.
 - **A bare frontmatter path resolves from the concept's directory, not the bundle root** (v0.3 §6.2, a breaking change in the spec). Body links and path fields now follow one rule. In a bundle still declaring `okf_version` 0.2 or none, a bare path that names nothing locally is tried from the root, the compatibility fallback §12.1 allows. `okfw migrate` gives those paths a leading `/` and then declares 0.3. okfw's writers now spell in-bundle paths with a leading `/`.

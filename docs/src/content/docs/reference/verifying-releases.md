@@ -12,8 +12,8 @@ the public key you verify with is the project's key.
 
 | File | What it is |
 | --- | --- |
-| `okfw-<version>-linux-<arch>.tar.gz` | The binary, LICENSE and README, for `amd64` (x86_64) and `arm64` (aarch64) |
-| `okfw-<version>-linux-<arch>.spdx.json` | An SPDX SBOM of that binary: every Go module linked into it, and the Go version |
+| `okfw-<version>-<platform>.tar.gz` | `bin/okfw`, the man pages (`share/man/man1`), LICENSE and README, for `linux-amd64`, `linux-arm64` and `darwin-arm64` |
+| `okfw-<version>-<platform>.spdx.json` | An SPDX SBOM of that binary: every Go module linked into it, and the Go version |
 | `SHA256SUMS` | SHA-256 checksums of the tarballs |
 | `SHA256SUMS.sbom` | SHA-256 checksums of the SBOMs |
 | `<file>.sigstore.json` | A cosign signature bundle for each of the six files above |
@@ -113,7 +113,7 @@ Unpack the tarball and confirm the binary is the version you verified:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
-okfw-$VERSION-linux-amd64/okfw --version   # okfw version v2026.10.2
+okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.10.2
 ```
 
 With Go installed, `go version -m` prints what the binary records about its
@@ -121,7 +121,7 @@ own build. `vcs.revision` is the commit it was built from, which should be the
 tagged commit, and `vcs.modified=false` means the tree was clean:
 
 ```bash
-go version -m okfw-$VERSION-linux-amd64/okfw | grep -E 'vcs\.(revision|modified)'
+go version -m okfw-$VERSION-linux-amd64/bin/okfw | grep -E 'vcs\.(revision|modified)'
 git ls-remote https://github.com/infrashift/okf-wiki.git "refs/tags/$VERSION^{}"
 ```
 

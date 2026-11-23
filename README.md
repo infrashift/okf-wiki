@@ -36,7 +36,7 @@ Before diving into the code, understand the "why" behind the workflow:
 1. **Install the CLI** from a [release](https://github.com/infrashift/okf-wiki/releases) (see [Installation](#installation)), or from source:
 ```bash
 git clone https://github.com/infrashift/okf-wiki.git && cd okf-wiki
-make install  # Builds bin/okfw and moves it to $GOPATH/bin
+make install  # Builds bin/okfw and installs it, with its man pages, under $GOPATH
 ```
 
 2. **Initialize a wiki in your project:**
@@ -70,16 +70,22 @@ tutorial.
 ### Download a release
 
 Each [release](https://github.com/infrashift/okf-wiki/releases) carries signed,
-static Linux binaries for x86_64 (`amd64`) and aarch64 (`arm64`):
+static binaries for Linux on x86_64 (`linux-amd64`) and aarch64 (`linux-arm64`),
+and macOS on Apple silicon (`darwin-arm64`). Each archive holds `bin/okfw` and
+the man pages under `share/man/man1`:
 
 ```bash
 VERSION=v2026.10.2
-ARCH=amd64   # or arm64
-curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/okfw-$VERSION-linux-$ARCH.tar.gz
-tar -xzf okfw-$VERSION-linux-$ARCH.tar.gz
-install okfw-$VERSION-linux-$ARCH/okfw ~/.local/bin/
-okfw --version
+PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
+a=okfw-$VERSION-$PLATFORM
+curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
+tar -xzf $a.tar.gz && mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
+okfw --version && man okfw
 ```
+
+The macOS binary is not notarized by Apple: after a browser download, run
+`xattr -d com.apple.quarantine ~/.local/bin/okfw`. `okfw man` installs the man
+pages for a binary that came without them.
 
 To check a download against the project's release key, signatures and
 checksums before installing it, follow
@@ -94,16 +100,20 @@ Requires Go 1.24+ (`make test` also needs the [CUE](https://cuelang.org/) CLI).
 git clone https://github.com/infrashift/okf-wiki.git
 cd okf-wiki
 make build    # Writes bin/okfw
-make install  # Moves bin/okfw to $GOPATH/bin
+make install  # bin/okfw and the man pages under PREFIX (default $GOPATH; try PREFIX=~/.local)
 ```
 
 okfw is pure Go, so it cross-compiles from any host:
 
 ```bash
-make build-linux-amd64   # Writes bin/okfw-linux-amd64 (x86_64)
-make build-linux-arm64   # Writes bin/okfw-linux-arm64 (aarch64)
-make dist                # Both, as tarballs + SPDX SBOMs + SHA256SUMS in dist/ (needs syft)
+make build-linux-amd64    # Writes bin/okfw-linux-amd64 (x86_64)
+make build-linux-arm64    # Writes bin/okfw-linux-arm64 (aarch64)
+make build-darwin-arm64   # Writes bin/okfw-darwin-arm64 (macOS, Apple silicon)
+make dist                 # All three, as tarballs + SPDX SBOMs + SHA256SUMS in dist/ (needs syft)
 ```
+
+[zmake](https://github.com/infrashift/zmake) users can run the same tasks from
+the `ZMakefile`: `zmake build`, `zmake test`, `zmake dist`.
 
 `okfw --version` prints the version `make` stamped in: the git tag on HEAD,
 `<tag>-<n>-g<commit>` past one, or the short commit. Releases are CalVer tags,
