@@ -685,6 +685,23 @@ See [Daily Notes Workflow](/okf-wiki/neovim/daily-notes-workflow/) for a compreh
 
 ---
 
+## Browsing the wiki as a site
+
+```bash
+okfw site up               # build, then serve in the background on :4321
+okfw site down             # stop the server and free the port
+okfw site build --out ./site   # build only, and copy the static site
+okfw site status           # bun, the build directory, the server
+```
+
+`okfw site` turns the wiki into a static HTML site, built with
+Astro and Starlight, with full-text search. See
+[Browsing the Wiki as a Site](/okf-wiki/getting-started/site/) for what the
+pages show and how it is built. It needs bun 1.2 or later; okfw checks for it
+before doing anything, and nothing else in okfw needs it.
+
+---
+
 ## OKF Metadata
 
 okfw implements OKF v0.3's lifecycle, trust, and provenance families, and its
@@ -1026,6 +1043,18 @@ Usage: `okfw move <id_or_file> <destination>` (aliases: `rename`, `mv`)
 | `--json` | - | `false` | Output the result as JSON |
 | `--help` | `-h` | - | Show help |
 
+### `okfw site`
+
+Usage: `okfw site build|up|down|status`
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--bun` | - | `$OKFW_BUN`, then `bun` on PATH | Path to the bun binary |
+| `--out` (build) | - | - | Also copy the built site to this directory |
+| `--port` (up) | - | `4321` | Port to serve on |
+| `--no-build` (up) | - | `false` | Serve the last build without rebuilding |
+| `--help` | `-h` | - | Show help |
+
 ### `okfw set-lifecycle`
 
 Usage: `okfw set-lifecycle <id_or_file> <draft|stable|deprecated>`
@@ -1228,7 +1257,9 @@ make tidy             # Run go mod tidy
 make ui-check         # Lint Lua plugin
 make integration-test # Test NeoVim integration
 make e2e              # CLI + NeoVim suite inside a container
-make docs-dev         # Run the docs site locally
+make docs-dev-up      # Start the docs dev server in the background
+make docs-dev-down    # Stop it and free the port
+make docs-build       # Build the docs site (search works on the build)
 make build-image      # Build the devcontainer image
 make run-container    # Start the devcontainer
 make stop-container   # Stop and remove the devcontainer

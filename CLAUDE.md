@@ -19,6 +19,9 @@ cli/cmd/okfw/                — Cobra CLI: rootCmd() in main.go, plus filecmds.
 cli/internal/bundle/         — Bundle write path (concept creation, frontmatter,
                                move/delete, index.md listings, link-graph load)
 cli/internal/search/         — Concept search: scan + rank, no index
+cli/internal/site/           — `okfw site`: bun preflight, the embedded Astro +
+                               Starlight template, content generation, preview
+                               server up/down
 cli/internal/agentskill/     — Agent-skill installer (SKILL.md placement, managed
                                CLAUDE.md/GEMINI.md/AGENTS.md block)
 cli/internal/okfwskills/     — okfw's SKILL.md / CLAUDE.md-block templates
@@ -46,6 +49,9 @@ make sign            # make dist, then a cosign .sigstore.json bundle per file; 
 make test            # Runs Go tests + CUE schema validation
 make test-race       # Go tests under the race detector
 make install         # Installs okfw to $GOPATH/bin
+make docs-dev-up     # Docs dev server in the background (astro dev --background)
+make docs-dev-down   # Stop it and free the port (astro dev stop)
+make docs-build      # Build the docs site; Pagefind search works only on a build
 make integration-test # NeoVim plugin suite (sources plugin/okfw.lua for the :Okfw* commands)
 make e2e             # The NeoVim suite against the okfw binary, inside a container
 go test ./... -count=1       # Run all tests
@@ -377,6 +383,26 @@ user).
   more`); `TestEveryMCPToolIsCappedAndSaysSo` is driven from the tool list so a
   tool added later cannot escape it, and exists because every other MCP test
   pushes toward returning more
+- `okfw site` builds a static HTML site of the wiki with Astro + Starlight,
+  run by **bun, which nothing else in okfw may need**: every bun invocation
+  lives in `cli/internal/site` (`TestOnlySiteRunsBun`), and every site
+  subcommand runs `site.Preflight` *before writing anything* — locate bun
+  (`--bun` > `OKFW_BUN` > PATH; an explicit path never falls back), run
+  `bun --version` under a timeout, require `MinBunVersion`, and fail with what
+  was found, what is needed and how to fix it. `site down` must free the port
+  even with bun gone: it falls back to stopping the PID in Astro's lockfile
+  (`.astro/preview.json`) only after attributing it to this workdir
+  (`/proc/<pid>/cwd` on Linux). The template (`cli/internal/site/template`,
+  embedded, pinned by its `bun.lock`) is materialized into a workdir in the
+  user cache dir, never in the bundle — v0.3 §3.2 counts every non-dot path
+  under the root, so a `node_modules` there would be read by every OKF tool.
+  The site is served by `astro preview`, not `astro dev`, because Starlight
+  disables Pagefind under dev. Pages are generated from the same walk, concept
+  rule and link resolution as every other command; slugs are set explicitly in
+  frontmatter; past `sidebarConceptLimit` the sidebar lists directories only,
+  since Starlight renders the sidebar into every page (N concepts × N pages).
+  CI installs bun and sets `OKFW_REQUIRE_BUN`, so the real-build test cannot
+  skip silently there.
 - `okfw install` writes the agent skill through `cli/internal/agentskill`, which
   owns the platform mechanics (SKILL.md placement, the managed
   CLAUDE.md/GEMINI.md/AGENTS.md block, namespaced by tool so it coexists with

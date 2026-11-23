@@ -13,6 +13,12 @@ okfw now targets [OKF v0.3](https://github.com/open-knowledge-format/open-knowle
 - **The export scratch directory is `.ephemeral/`.** v0.3 leaves only dot-named paths outside a bundle, so other OKF tools read every copy in `ephemeral/` as a second concept. `okfw migrate` removes the old directory.
 - **`okfw validate --all` requires a bundle `title` and `description`** in the root `index.md`. `okfw init` sets the title from the project directory.
 
+### Added
+- **`okfw site`: a browsable, searchable HTML site of the wiki.** `okfw site up` builds the site with Astro and Starlight and serves it in the background, and `okfw site down` stops it and frees the port. `okfw site build [--out DIR]` only builds it, and `okfw site status` reports what it found. Every concept is a page showing its type, tags, trust tier, lifecycle and staleness, a banner on a deprecated concept linking its replacement, and its provenance and backlinks. Every directory is a page. Pagefind gives full-text search with type and tag filters.
+  - The site needs bun 1.2 or later, and okfw itself does not. Each site command checks bun before it writes anything. It reports a missing, non-executable, failing, hung or too-old bun with the fix (`--bun`, `OKFW_BUN`, https://bun.sh). `site down` frees the port even if bun has gone away.
+  - The build lives in the user cache directory, never in the bundle.
+- **Docs: `make docs-dev-up` / `make docs-dev-down`** start the docs dev server in the background and stop it, freeing the port. They replace `make docs-dev`. `make docs-build` builds the site; Starlight's search works only on a build. The docs site moved to Astro 7 and Starlight 0.41.
+
 ### Added — OKF v0.3
 - **`superseded_by`** (§5.4) names a deprecated concept's replacement: `okfw set-lifecycle <ref> deprecated --superseded-by <new>`, or `superseded_by` on the MCP `set_lifecycle` action. It is a link, so `okfw move` keeps it pointing at the replacement and `okfw delete` reports it.
 - **`okfw search --current`** and MCP `current` drop deprecated concepts and concepts with an unknown status. They replace a deprecated hit with its `superseded_by`.

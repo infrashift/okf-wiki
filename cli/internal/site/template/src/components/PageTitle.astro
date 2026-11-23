@@ -1,0 +1,94 @@
+---
+// Starlight's page title, followed by what OKF says about the concept: its
+// type and tags, lifecycle, trust tier and staleness, the concept that
+// supersedes it, its path fields and the concepts that link to it. The type
+// and tags are also Pagefind filters, so search can be narrowed by them.
+import Default from '@astrojs/starlight/components/PageTitle.astro';
+import { Badge, Aside } from '@astrojs/starlight/components';
+
+const okf = Astro.locals.starlightRoute.entry.data.okf;
+const trustVariant = { 'human-reviewed': 'success', 'machine-confirmed': 'note', unverified: 'default' };
+const statusVariant = { draft: 'caution', deprecated: 'danger' };
+---
+
+<Default />
+{
+  okf && (
+    <div class="okf-meta">
+      <p class="okf-badges">
+        {okf.type && <Badge text={okf.type} variant="tip" />}
+        <Badge text={okf.trust} variant={trustVariant[okf.trust] ?? 'default'} />
+        {okf.status !== 'stable' && <Badge text={okf.status} variant={statusVariant[okf.status] ?? 'caution'} />}
+        {okf.stale && <Badge text={okf.staleAfter ? `stale since ${okf.staleAfter}` : 'stale'} variant="caution" />}
+        {okf.tags.map((t) => <span class="okf-tag">#{t}</span>)}
+      </p>
+      <span hidden data-pagefind-filter={`type:${okf.type ?? 'untyped'}`} />
+      {okf.tags.map((t) => <span hidden data-pagefind-filter={`tag:${t}`} />)}
+      {okf.status === 'deprecated' && (
+        <Aside type="caution" title="Deprecated">
+          {okf.supersededBy ? (
+            <>Superseded by <a href={okf.supersededBy.href}>{okf.supersededBy.title}</a>.</>
+          ) : (
+            <>Kept for links and history; no longer current.</>
+          )}
+        </Aside>
+      )}
+      <details class="okf-details" data-pagefind-ignore>
+        <summary>Provenance and links</summary>
+        <dl>
+          <dt>Path</dt>
+          <dd><code>{okf.path}</code></dd>
+          {okf.generatedBy && (
+            <>
+              <dt>Generated</dt>
+              <dd>{okf.generatedBy}{okf.generatedAt && ` at ${okf.generatedAt}`}</dd>
+            </>
+          )}
+          {okf.verified.length > 0 && (
+            <>
+              <dt>Verified</dt>
+              <dd>
+                <ul>
+                  {okf.verified.map((v) => (
+                    <li>
+                      {v.by} at {v.at}
+                      {!v.current && <em> (before the last change)</em>}
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          )}
+          {okf.pathRefs.length > 0 && (
+            <>
+              <dt>References</dt>
+              <dd>
+                <ul>
+                  {okf.pathRefs.map((r) => (
+                    <li>
+                      <code>{r.field}</code>: {r.href ? <a href={r.href}>{r.value}</a> : r.value}
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </>
+          )}
+          <dt>Linked from</dt>
+          <dd>
+            {okf.backlinks.length === 0 ? (
+              <em>nothing</em>
+            ) : (
+              <ul>
+                {okf.backlinks.map((b) => (
+                  <li>
+                    <a href={b.href}>{b.title}</a>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </dd>
+        </dl>
+      </details>
+    </div>
+  )
+}
