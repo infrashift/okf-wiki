@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -81,5 +82,20 @@ func TestConceptSchemaCompiles(t *testing.T) {
 	}
 	if err := schema.Err(); err != nil {
 		t.Fatalf("#Concept definition is not usable: %v", err)
+	}
+}
+
+// TestSchemaEmbedsNoDefinition: from CUE language v0.18 (explicitopen, made
+// stable), an embedded definition stays closed to its own fields, so a
+// definition embedding one that holds only a pattern rejects every field it
+// declares. okfw's v0.7 library still reads the old way, so no test of the
+// compiled schema can notice; the cue v0.18 CLI did, failing CI. Embed a
+// hidden regular value (_ext) instead: it means the same under both.
+func TestSchemaEmbedsNoDefinition(t *testing.T) {
+	embedded := regexp.MustCompile(`^\s+(_?#[A-Za-z]\w*)\s*$`)
+	for i, line := range strings.Split(conceptSchema, "\n") {
+		if m := embedded.FindStringSubmatch(line); m != nil {
+			t.Errorf("concept-schema.cue:%d embeds the definition %s; from CUE v0.18 that closes the enclosing definition to %s's fields alone. Embed a hidden regular value instead, as _ext is", i+1, m[1], m[1])
+		}
 	}
 }

@@ -57,33 +57,41 @@
 
 // OKF v0.3 section 4.1: extension keys may appear at any level, and future
 // versions will not define keys starting with x-. Every definition embeds this.
-#Ext: {[=~"^x-"]: _}
+//
+// It is a hidden regular value, not a definition, on purpose. Embedding a
+// definition means different things across CUE versions: from language
+// v0.18 (the explicitopen experiment, made stable), an embedded definition
+// stays closed to its own fields, so a definition holding only the x-
+// pattern rejected every field of each definition that embedded it. An
+// embedded regular value is closed by the enclosing definition alone, under
+// every version.
+_ext: {[=~"^x-"]: _}
 
 #ConceptID: =~"^([0-9]{14}-)?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 // Trust (OKF section 5.2)
 #Generated: {
-	#Ext
+	_ext
 	by:  #Actor
 	at?: #Timestamp // the last meaningful change; not okfw's timestamp
 }
 
 // v0.3 section 5.2: by and at are both REQUIRED in an event.
 #Verification: {
-	#Ext
+	_ext
 	by: #Actor
 	at: #Timestamp
 }
 
 // Provenance (OKF section 5.1)
 #UsageWindow: {
-	#Ext
+	_ext
 	from?: #Timestamp
 	to?:   #Timestamp
 }
 
 #Source: {
-	#Ext
+	_ext
 	resource:       string & !="" // a path/URL, or a scope descriptor
 	id?:            string & !="" // join key for [^id] body footnotes
 	title?:         string & !=""
@@ -95,25 +103,25 @@
 
 // Attested Computation (OKF section 10.2)
 #Parameter: {
-	#Ext
+	_ext
 	name:      string & !=""
 	type:      string & !=""
 	required?: bool
 }
 
 #Executor: {
-	#Ext
+	_ext
 	resource?: string & !=""
 	receipt?: [...(string & !="")]
 }
 
 #Attester: {
-	#Ext
+	_ext
 	resource?: string & !=""
 }
 
 #Concept: {
-	#Ext
+	_ext
 
 	// --- OKF core ---
 	type:         string & !="" // OKF required free-form concept kind
