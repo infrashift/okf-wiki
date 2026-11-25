@@ -27,7 +27,7 @@ later (checked with v2.6.5, v3.0.4 and v3.1.4).
 ## 1. Download
 
 ```bash
-VERSION=v2026.11.5
+VERSION=v2026.11.6
 mkdir okfw-$VERSION && cd okfw-$VERSION
 gh release download $VERSION -R infrashift/okf-wiki
 ```
@@ -116,7 +116,7 @@ checked:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
-okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.5
+okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.6
 ```
 
 If you have Go, `go version -m` prints the build data that the binary
@@ -136,7 +136,7 @@ match the table, in uppercase. Then check the signatures on the zip and on
 `SHA256SUMS`:
 
 ```powershell
-$Version = "v2026.11.5"
+$Version = "v2026.11.6"
 $a = "okfw-$Version-windows-amd64.zip"
 cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true --bundle SHA256SUMS.sigstore.json SHA256SUMS
 cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true --bundle "$a.sigstore.json" $a
@@ -154,7 +154,7 @@ The output must be `OK`. Then unpack the zip and check the version:
 
 ```powershell
 Expand-Archive $a -DestinationPath .
-& ".\okfw-$Version-windows-amd64\bin\okfw.exe" --version   # okfw version v2026.11.5
+& ".\okfw-$Version-windows-amd64\bin\okfw.exe" --version   # okfw version v2026.11.6
 ```
 
 ## Using the SBOM

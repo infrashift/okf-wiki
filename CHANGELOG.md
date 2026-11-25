@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## v2026.11.6 — 2026-11-25
 
 ### Fixed
 - **The concept schema failed under CUE v0.18.** CUE v0.18.0 made the `explicitopen` experiment stable: from language v0.18, an embedded definition stays closed to its own fields. Every definition in the schema embedded `#Ext`, which held only the `x-` key pattern, so `cue vet` rejected every field the schema declared (`#Concept.title: field not allowed`, and so on). okfw itself was not affected, because it validates with the CUE v0.7 library. The `x-` pattern is now a hidden regular value, `_ext`, which has the same meaning in v0.7 and v0.18. Unknown keys are still refused and `x-` keys still pass, at the top level and in nested mappings. A test refuses an embedded definition in the schema, and CI pins the `cue` CLI to v0.18.0 instead of `@latest`.

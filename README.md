@@ -76,7 +76,7 @@ on x86_64 (`windows-amd64`). Each Linux and macOS archive holds `bin/okfw` and
 the man pages under `share/man/man1`:
 
 ```bash
-VERSION=v2026.11.5
+VERSION=v2026.11.6
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
