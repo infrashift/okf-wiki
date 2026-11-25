@@ -119,8 +119,11 @@ jobs:
       # syntax gate; the real conformance check is
       # internal/config/fixtures_test.go, which validates the fixture corpus
       # against the compiled schema as part of the suite above.
+      # Pinned: cue v0.18.0 reports every field of a definition that embeds
+      # #Ext as "not allowed", which v0.17.1 and the v0.7 library okfw
+      # validates with (go.mod) do not. Move the pin deliberately.
       - name: Install CUE
-        run: go install cuelang.org/go/cmd/cue@latest
+        run: go install cuelang.org/go/cmd/cue@v0.17.1
 
       - name: Validate CUE schema syntax
         run: cue vet ./internal/config/concept-schema.cue
