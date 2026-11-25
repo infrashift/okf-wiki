@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## v2026.11.5 — 2026-11-25
+
+### Added
+- **Windows on x86_64 (experimental).** Each release now has `okfw-<version>-windows-amd64.zip`, which holds `bin\okfw.exe`, the man pages, LICENSE and README. It has an SPDX SBOM and is signed like the other archives. `SHA256SUMS` covers it. `make build-windows-amd64` builds it, and `make dist` needs `zip`. CI cross-compiles and vets okfw for Windows, but it does not run the tests there. The Installation page gives the PowerShell steps to install it, and Verifying Releases gives the steps to check it. Before this release, okfw did not compile for Windows: `okfw site` stopped its preview server with `syscall.Kill` and `/proc`. That code is now behind a build tag. On Windows it finds the server's command line through PowerShell (CIM), and a process it cannot identify is never stopped.
+
+### Fixed
+- **`okfw site` showed each concept's title twice.** Starlight shows the title above the metadata, and the body repeated it as its own `# heading`. okfw's templates start every concept with that heading. The site now drops a body's first heading when it is the same as the title. A different first heading is kept.
+- **`okfw site` headings were too large**, so long titles wrapped. Each heading level is now one step smaller at each screen width. On a wide screen, h1 goes from 42px to 35px and h2 from 35px to 29px.
+
 ## v2026.11.4 — 2026-11-23
 
 ### Fixed

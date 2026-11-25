@@ -22,7 +22,7 @@ export default defineConfig({
         {
           label: 'Getting Started',
           items: [
-            { label: 'Installation', slug: 'getting-started/installation' },
+            { label: 'Installation', slug: 'getting-started/installation', badge: { text: 'New', variant: 'tip' } },
             { label: 'Quick Start', slug: 'getting-started/quick-start' },
             { label: 'Configuration', slug: 'getting-started/configuration' },
             { label: 'Note Format', slug: 'getting-started/note-format' },

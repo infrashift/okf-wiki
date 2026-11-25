@@ -71,11 +71,12 @@ tutorial.
 
 Each [release](https://github.com/infrashift/okf-wiki/releases) carries signed,
 static binaries for Linux on x86_64 (`linux-amd64`) and aarch64 (`linux-arm64`),
-and macOS on Apple silicon (`darwin-arm64`). Each archive holds `bin/okfw` and
+macOS on Apple silicon (`darwin-arm64`), and — new and experimental — Windows
+on x86_64 (`windows-amd64`). Each Linux and macOS archive holds `bin/okfw` and
 the man pages under `share/man/man1`:
 
 ```bash
-VERSION=v2026.11.4
+VERSION=v2026.11.5
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
@@ -86,6 +87,10 @@ okfw --version && man okfw
 The macOS binary is not notarized by Apple: after a browser download, run
 `xattr -d com.apple.quarantine ~/.local/bin/okfw`. `okfw man` installs the man
 pages for a binary that came without them.
+
+On Windows the release is a zip, `okfw-<version>-windows-amd64.zip`, holding
+`bin\okfw.exe`. The PowerShell steps to install it are in
+[Install on Windows](https://infrashift.github.io/okf-wiki/getting-started/installation/#install-on-windows).
 
 To check a download against the project's release key, signatures and
 checksums before installing it, follow
@@ -109,7 +114,8 @@ okfw is pure Go, so it cross-compiles from any host:
 make build-linux-amd64    # Writes bin/okfw-linux-amd64 (x86_64)
 make build-linux-arm64    # Writes bin/okfw-linux-arm64 (aarch64)
 make build-darwin-arm64   # Writes bin/okfw-darwin-arm64 (macOS, Apple silicon)
-make dist                 # All three, as tarballs + SPDX SBOMs + SHA256SUMS in dist/ (needs syft)
+make build-windows-amd64  # Writes bin/okfw-windows-amd64.exe (Windows x86_64, experimental)
+make dist                 # All four, as archives + SPDX SBOMs + SHA256SUMS in dist/ (needs syft and zip)
 ```
 
 [zmake](https://github.com/infrashift/zmake) users can run the same tasks from

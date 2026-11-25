@@ -71,14 +71,26 @@ jobs:
           CGO_ENABLED: 0
         run: go build -o /dev/null ./cli/cmd/okfw
 
-      # The release platforms are linux-amd64, linux-arm64 and darwin-arm64;
-      # the macOS one is the one a Linux runner would otherwise never build.
+      # The release platforms are linux-amd64, linux-arm64, darwin-arm64 and
+      # (experimental) windows-amd64; macOS and Windows are the ones a Linux
+      # runner would otherwise never build.
       - name: Cross-compile for macOS on Apple silicon
         env:
           CGO_ENABLED: 0
           GOOS: darwin
           GOARCH: arm64
         run: go build -o /dev/null ./cli/cmd/okfw
+
+      # Windows has no syscall.Kill or /proc, so the site's process code is
+      # split by build tag; vet type-checks the Windows files, tests included.
+      - name: Cross-compile and vet for Windows on x86_64
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -o /dev/null ./cli/cmd/okfw
+          go vet ./...
 
       # The ZMakefile mirrors the Makefile for zmake. A pinned, checksummed
       # zmake release dry-runs every task under both and compares the recipes.

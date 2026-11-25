@@ -87,11 +87,11 @@ func writeBundle(t *testing.T) string {
 		"metrics/margin.md": "---\ntype: Metric\ntitle: \"Margin: \\\"gross\\\"\"\ntags: [finance]\n" +
 			"verified: { by: \"human:ann\", at: \"2026-07-02T00:00:00Z\" }\n" +
 			"executor:\n  resource: /skills/run.py\n---\n\nSee [old](old.md), [dir](../metrics/), [chart](/img/c.png) and [gone](nope.md).\n\n```\n[not a link](old.md)\n```\n",
-		"metrics/old.md":   "---\ntype: Metric\ntitle: Old\nstatus: deprecated\nsuperseded_by: /metrics/margin.md\n---\n\nOld.\n",
+		"metrics/old.md":   "---\ntype: Metric\ntitle: Old\nstatus: deprecated\nsuperseded_by: /metrics/margin.md\n---\n\n# old\n\nOld.\n",
 		"README.md":        "# Not a concept\n",
 		"skills/run.py":    "print('x')\n",
 		"img/c.png":        "png",
-		"Weird Dir/A B.md": "---\ntype: Note\n---\n\nBody\n",
+		"Weird Dir/A B.md": "---\ntype: Note\n---\n\n# Another heading\n\nBody\n",
 	}
 	for rel, content := range files {
 		p := filepath.Join(root, filepath.FromSlash(rel))
@@ -147,8 +147,15 @@ func TestGenerate(t *testing.T) {
 	if !strings.Contains(margin, "backlinks:\n        - title: Old") {
 		t.Errorf("backlink from old.md (its superseded_by) missing:\n%s", margin)
 	}
-	if !strings.Contains(read("weird-dir/a-b.md"), "slug: weird-dir/a-b") {
+	if strings.Contains(old, "# old") || !strings.Contains(old, "Old.") {
+		t.Errorf("a leading H1 that repeats the title must go (Starlight renders the title), the body stay:\n%s", old)
+	}
+	weird := read("weird-dir/a-b.md")
+	if !strings.Contains(weird, "slug: weird-dir/a-b") {
 		t.Error("a path with spaces and capitals was not slugified")
+	}
+	if !strings.Contains(weird, "# Another heading") {
+		t.Errorf("a leading H1 that differs from the title is content and must stay:\n%s", weird)
 	}
 	if idx := read("index.md"); !strings.Contains(idx, "title: 'Test: bundle'") || !strings.Contains(idx, "](/metrics/)") {
 		t.Errorf("root page:\n%s", idx)

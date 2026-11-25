@@ -1,3 +1,22 @@
+/* Headings one step below Starlight's scale at each width, so a concept title
+   seldom wraps. Starlight sets these tokens on :root inside its cascade layer;
+   this sheet is unlayered, so it wins. h3 and h4 move with h1 and h2, which
+   keeps each level one step above the next. */
+:root {
+  --sl-text-h1: var(--sl-text-3xl);
+  --sl-text-h2: var(--sl-text-2xl);
+  --sl-text-h3: var(--sl-text-xl);
+  --sl-text-h4: var(--sl-text-lg);
+}
+@media (min-width: 50em) {
+  :root {
+    --sl-text-h1: var(--sl-text-4xl);
+    --sl-text-h2: var(--sl-text-3xl);
+    --sl-text-h3: var(--sl-text-2xl);
+    --sl-text-h4: var(--sl-text-xl);
+  }
+}
+
 .okf-meta { margin-top: 0.75rem; }
 .okf-badges { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0; }
 .okf-tag { font-size: var(--sl-text-xs); color: var(--sl-color-gray-3); }

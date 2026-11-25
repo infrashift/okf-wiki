@@ -3,30 +3,34 @@ title: Installation
 description: How to install okfw, from a signed release or from source.
 ---
 
+import { Badge } from '@astrojs/starlight/components';
+
 ## Download a release
 
 Each [release](https://github.com/infrashift/okf-wiki/releases) carries static
-binaries, with no runtime dependencies, for three platforms:
+binaries, with no runtime dependencies, for four platforms:
 
 | Platform | `PLATFORM` |
 |---|---|
 | Linux on x86_64 | `linux-amd64` |
 | Linux on aarch64 | `linux-arm64` |
 | macOS on Apple silicon | `darwin-arm64` |
+| Windows on x86_64 <Badge text="New" variant="tip" /> <Badge text="Experimental" variant="caution" /> | `windows-amd64` |
 
-Each archive holds `bin/okfw` and the man pages under `share/man/man1`. Copy
+For Windows, see [Install on Windows](#install-on-windows). Each Linux and
+macOS archive holds `bin/okfw` and the man pages under `share/man/man1`. Copy
 both into `~/.local` to install the command and its manual. `man` looks in the
 `share/man` next to each `bin` directory on the `PATH`, so `man okfw` works
 without a `MANPATH`.
 
 ```bash
-VERSION=v2026.11.4
+VERSION=v2026.11.5
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
 tar -xzf $a.tar.gz
 mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
-okfw --version   # okfw version v2026.11.4
+okfw --version   # okfw version v2026.11.5
 man okfw
 ```
 
@@ -42,6 +46,54 @@ them to `~/.local/share/man/man1`.
 The project signs each release. Before you install a tarball, you can verify
 that the project published it. See
 [Verify a release](/okf-wiki/reference/verifying-releases/).
+
+## Install on Windows
+
+<Badge text="New" variant="tip" size="medium" /> <Badge text="Experimental" variant="caution" size="medium" />
+
+:::caution[Experimental]
+The Windows release is new. The project builds it in CI on each change, but
+it does not run the tests on Windows. When you find a problem,
+[report it](https://github.com/infrashift/okf-wiki/issues). `okfw site down` uses PowerShell to identify the preview server.
+The Neovim plugin is not tested on Windows.
+:::
+
+The Windows archive is a zip, `okfw-<version>-windows-amd64.zip`. It holds
+`bin\okfw.exe`, LICENSE and README. It also holds the man pages, but Windows
+has no `man` command. Use `okfw --help` and `okfw <command> --help` instead.
+
+In PowerShell, download the zip, unpack it, and copy `okfw.exe` to a
+directory on the user `Path`:
+
+```powershell
+$Version = "v2026.11.5"
+$a = "okfw-$Version-windows-amd64"
+Invoke-WebRequest "https://github.com/infrashift/okf-wiki/releases/download/$Version/$a.zip" -OutFile "$a.zip"
+Expand-Archive "$a.zip" -DestinationPath .
+$bin = "$env:LOCALAPPDATA\Programs\okfw\bin"
+New-Item -ItemType Directory -Force $bin | Out-Null
+Copy-Item "$a\bin\okfw.exe" $bin -Force
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if (($userPath -split ";") -notcontains $bin) {
+  [Environment]::SetEnvironmentVariable("Path", (@($userPath -split ";" | Where-Object { $_ }) + $bin) -join ";", "User")
+}
+$env:Path += ";$bin"
+okfw --version   # okfw version v2026.11.5
+```
+
+The `Path` change applies to new terminals. The last `$env:Path` line also
+applies it to the current terminal. To update okfw, do the steps again.
+
+The project signs the zip with its cosign key, but it does not sign
+`okfw.exe` with an Authenticode certificate. After a download through a
+browser, Windows can show a SmartScreen warning. To prevent it, run
+`Unblock-File "$a.zip"` before you unpack the zip. See
+[Verify a release](/okf-wiki/reference/verifying-releases/#on-windows) to
+check the zip before you install it.
+
+`okfw site` needs [bun](https://bun.sh/), as it does on each platform. It
+finds `bun.exe` on the `Path`, or at the path that `OKFW_BUN` or `--bun`
+gives.
 
 ## Build from source
 
@@ -73,14 +125,17 @@ machine:
 make build-linux-amd64    # Writes bin/okfw-linux-amd64 (Linux x86_64)
 make build-linux-arm64    # Writes bin/okfw-linux-arm64 (Linux aarch64)
 make build-darwin-arm64   # Writes bin/okfw-darwin-arm64 (macOS, Apple silicon)
+make build-windows-amd64  # Writes bin/okfw-windows-amd64.exe (Windows x86_64)
 make man                  # Writes the man pages to bin/man/man1
-make dist                 # All three, packaged in dist/ (needs syft)
+make dist                 # All four, packaged in dist/ (needs syft and zip)
 ```
 
-For each platform, `make dist` writes `okfw-<version>-<platform>.tar.gz`, with
-`bin/okfw`, `share/man/man1/*.1`, LICENSE and README. It also writes an SPDX
-SBOM of the binary, `okfw-<version>-<platform>.spdx.json`. `SHA256SUMS` covers
-the tarballs, and `SHA256SUMS.sbom` covers the SBOMs. The
+For each Linux and macOS platform, `make dist` writes
+`okfw-<version>-<platform>.tar.gz`, with `bin/okfw`, `share/man/man1/*.1`,
+LICENSE and README. For Windows, it writes `okfw-<version>-windows-amd64.zip`,
+with `bin/okfw.exe` and the same other files. It also writes an SPDX SBOM of
+each binary, `okfw-<version>-<platform>.spdx.json`. `SHA256SUMS` covers the
+archives, and `SHA256SUMS.sbom` covers the SBOMs. The
 [release procedure](/okf-wiki/reference/releasing/) tells how to sign them.
 
 ## Versions

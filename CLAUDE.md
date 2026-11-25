@@ -43,11 +43,12 @@ make build           # Builds bin/okfw (CGO_ENABLED=0 — keep okfw pure Go)
 make build-linux-amd64 # Cross-compiles bin/okfw-linux-amd64 (x86_64; works because okfw is pure Go)
 make build-linux-arm64 # Cross-compiles bin/okfw-linux-arm64 (aarch64)
 make build-darwin-arm64 # Cross-compiles bin/okfw-darwin-arm64 (macOS, Apple silicon)
+make build-windows-amd64 # Cross-compiles bin/okfw-windows-amd64.exe (experimental)
 make man             # Man pages from the command tree (okfw man) into bin/man/man1
 make docs-flags      # Regenerate the docs site's CLI Flags page from the command tree
 make docs-style      # lexiscope ASD-STE100 check of the docs site and the wiki (needs lexiscope; not in CI)
 make build VERSION=v2026.10.0 # Overrides the stamped version (default: git describe --tags)
-make dist            # dist/: okfw-<version>-{linux-amd64,linux-arm64,darwin-arm64}.tar.gz (bin/okfw + share/man/man1), SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft)
+make dist            # dist/: okfw-<version>-{linux-amd64,linux-arm64,darwin-arm64}.tar.gz and -windows-amd64.zip (bin/okfw[.exe] + share/man/man1), SPDX SBOMs, SHA256SUMS{,.sbom} (needs syft, zip)
 make signing-key     # ECDSA P-256 cosign key pair at ~/.config/cosign/okfw.{key,pub}, outside the repo
 make sign            # make dist, then a cosign .sigstore.json bundle per file; offline, never logged to Rekor
 make test            # Runs Go tests + CUE schema validation
@@ -62,9 +63,15 @@ make e2e             # The NeoVim suite against the okfw binary, inside a contai
 go test ./... -count=1       # Run all tests
 ```
 
-**The release platforms are exactly linux-amd64, linux-arm64 and darwin-arm64**
-(`PLATFORMS` in the Makefile); CI cross-compiles darwin-arm64 so a Linux-only
-break shows. The macOS binary is cosign-signed but not Apple-notarized.
+**The release platforms are exactly linux-amd64, linux-arm64, darwin-arm64 and
+windows-amd64** (`PLATFORMS` in the Makefile); CI cross-compiles darwin-arm64
+and windows-amd64 (and vets the latter) so a Linux-only break shows. The macOS
+binary is cosign-signed but not Apple-notarized. Windows is **experimental**:
+cross-compiled only, never tested on Windows in CI, shipped as a `.zip` with
+`bin/okfw.exe` (its own `build-windows-amd64` task, for the suffix), and not
+Authenticode-signed. Anything that signals or inspects a process goes behind a
+build tag (`cli/internal/site/process_{unix,windows}.go`); `syscall.Kill` and
+`/proc` do not exist there.
 Man pages are generated from `rootCmd()` (`okfw man`, `cobra/doc`), never
 hand-written, so they cannot drift; `TestEveryCommandHasAManPage` checks every
 command gets one. The docs site's flag reference
