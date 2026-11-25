@@ -1,19 +1,22 @@
-/* Headings one step below Starlight's scale at each width, so a concept title
-   seldom wraps. Starlight sets these tokens on :root inside its cascade layer;
-   this sheet is unlayered, so it wins. h3 and h4 move with h1 and h2, which
-   keeps each level one step above the next. */
+/* Headings two steps below Starlight's scale at each width, so a concept
+   title seldom wraps. Starlight sets these tokens on :root inside its cascade
+   layer; this sheet is unlayered, so it wins. Every level moves together, h5
+   included, which keeps each level one step above the next. Wide screens: h1
+   29px (Starlight: 42px), h2 24px (35px). */
 :root {
-  --sl-text-h1: var(--sl-text-3xl);
-  --sl-text-h2: var(--sl-text-2xl);
-  --sl-text-h3: var(--sl-text-xl);
-  --sl-text-h4: var(--sl-text-lg);
+  --sl-text-h1: var(--sl-text-2xl);
+  --sl-text-h2: var(--sl-text-xl);
+  --sl-text-h3: var(--sl-text-lg);
+  --sl-text-h4: var(--sl-text-base);
+  --sl-text-h5: var(--sl-text-base);
 }
 @media (min-width: 50em) {
   :root {
-    --sl-text-h1: var(--sl-text-4xl);
-    --sl-text-h2: var(--sl-text-3xl);
-    --sl-text-h3: var(--sl-text-2xl);
-    --sl-text-h4: var(--sl-text-xl);
+    --sl-text-h1: var(--sl-text-3xl);
+    --sl-text-h2: var(--sl-text-2xl);
+    --sl-text-h3: var(--sl-text-xl);
+    --sl-text-h4: var(--sl-text-lg);
+    --sl-text-h5: var(--sl-text-base);
   }
 }
 

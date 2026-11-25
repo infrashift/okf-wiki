@@ -259,7 +259,7 @@ own `x-okfw-id`, `x-okfw-created`, `x-okfw-timestamp`) where §4.1 requires only
 and §11.2 say consumers MUST NOT. None of the six was deprecated by v0.3
 (`title` and `tags` went from "recommended" to "optional"). The trade buys a
 hard guarantee about the bundles okfw authors. Two escape hatches keep a
-closed schema liveable: every mapping accepts `x-*` keys (`#Ext`), the
+closed schema liveable: every mapping accepts `x-*` keys (`_ext`), the
 namespace v0.3 §4.1 promises never to claim and the one producers SHOULD use
 (`x-<producer>-<name>`), and the v0.2-era open `x:` block still passes
 anything through. The consequence is that `okfw validate` rejects conformant
