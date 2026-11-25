@@ -3,17 +3,14 @@ package site
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -75,11 +72,11 @@ func (w *Workdir) Running() *Server {
 // ownsProcess reports whether pid is alive and is the Astro server started in
 // this workdir. On Linux the process's working directory must be the
 // workdir, which is where Astro starts its background server; elsewhere its
-// command line must run Astro. A PID that cannot be attributed is never ours:
-// PIDs are reused, and signalling a stranger is worse than leaving a server
-// up.
+// command line must run Astro's preview (from ps, or from CIM on Windows). A
+// PID that cannot be attributed is never ours: PIDs are reused, and
+// signalling a stranger is worse than leaving a server up.
 func (w *Workdir) ownsProcess(pid int) bool {
-	if err := syscall.Kill(pid, 0); err != nil && !errors.Is(err, syscall.EPERM) {
+	if !processAlive(pid) {
 		return false
 	}
 	if runtime.GOOS == "linux" {
@@ -101,8 +98,8 @@ func (w *Workdir) ownsProcess(pid int) bool {
 		cmdline, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
 		return err == nil && strings.Contains(string(cmdline), "astro")
 	}
-	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
-	return err == nil && strings.Contains(string(out), "astro") && strings.Contains(string(out), "preview")
+	cmdline, err := processCommandLine(pid)
+	return err == nil && strings.Contains(cmdline, "astro") && strings.Contains(cmdline, "preview")
 }
 
 // PortFree reports whether 127.0.0.1:port can be bound. Astro would otherwise
@@ -162,23 +159,4 @@ func Down(ctx context.Context, w *Workdir, bun *Bun) (*Server, error) {
 	}
 	_ = os.Remove(w.lockfile())
 	return s, nil
-}
-
-// stopProcess sends SIGTERM, then SIGKILL after a grace period, as Astro's own
-// stop does.
-func stopProcess(pid int) error {
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("stopping pid %d: %w", pid, err)
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if syscall.Kill(pid, 0) != nil {
-			return nil
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("killing pid %d: %w", pid, err)
-	}
-	return nil
 }

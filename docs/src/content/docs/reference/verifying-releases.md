@@ -13,10 +13,11 @@ check that you do first: the public key that you use must be the project's key.
 | File | What it is |
 | --- | --- |
 | `okfw-<version>-<platform>.tar.gz` | `bin/okfw`, the man pages (`share/man/man1`), LICENSE and README, for `linux-amd64`, `linux-arm64` and `darwin-arm64` |
+| `okfw-<version>-windows-amd64.zip` | `bin\okfw.exe` and the same other files, for Windows on x86_64 (experimental) |
 | `okfw-<version>-<platform>.spdx.json` | An SPDX SBOM of that binary: every Go module linked into it, and the Go version |
-| `SHA256SUMS` | SHA-256 checksums of the tarballs |
+| `SHA256SUMS` | SHA-256 checksums of the tarballs and the zip |
 | `SHA256SUMS.sbom` | SHA-256 checksums of the SBOMs |
-| `<file>.sigstore.json` | A cosign signature bundle for each of the six files above |
+| `<file>.sigstore.json` | A cosign signature bundle for each file above (ten in all) |
 | `cosign.pub` | The public half of the release key |
 
 You need `sha256sum` (on macOS, `shasum -a 256`) and
@@ -26,7 +27,7 @@ later (checked with v2.6.5, v3.0.4 and v3.1.4).
 ## 1. Download
 
 ```bash
-VERSION=v2026.11.4
+VERSION=v2026.11.5
 mkdir okfw-$VERSION && cd okfw-$VERSION
 gh release download $VERSION -R infrashift/okf-wiki
 ```
@@ -80,7 +81,7 @@ Each command prints `Verified OK`. Other output means that the file is not
 the file that the project signed. To check everything in the release at once:
 
 ```bash
-for f in *.tar.gz *.spdx.json SHA256SUMS SHA256SUMS.sbom; do
+for f in *.tar.gz *.zip *.spdx.json SHA256SUMS SHA256SUMS.sbom; do
   cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
     --bundle "$f.sigstore.json" "$f" >/dev/null 2>&1 \
     && echo "signature OK  $f" || echo "SIGNATURE FAILED  $f"
@@ -115,7 +116,7 @@ checked:
 
 ```bash
 tar -xzf okfw-$VERSION-linux-amd64.tar.gz
-okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.4
+okfw-$VERSION-linux-amd64/bin/okfw --version   # okfw version v2026.11.5
 ```
 
 If you have Go, `go version -m` prints the build data that the binary
@@ -125,6 +126,35 @@ commit. `vcs.modified=false` means that the tree had no changes:
 ```bash
 go version -m okfw-$VERSION-linux-amd64/bin/okfw | grep -E 'vcs\.(revision|modified)'
 git ls-remote https://github.com/infrashift/okf-wiki.git "refs/tags/$VERSION^{}"
+```
+
+## On Windows
+
+cosign has a Windows build, and `cosign verify-blob` takes the same arguments
+in PowerShell. Do step 2 with `Get-FileHash cosign.pub`. Its `Hash` must
+match the table, in uppercase. Then check the signatures on the zip and on
+`SHA256SUMS`:
+
+```powershell
+$Version = "v2026.11.5"
+$a = "okfw-$Version-windows-amd64.zip"
+cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true --bundle SHA256SUMS.sigstore.json SHA256SUMS
+cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true --bundle "$a.sigstore.json" $a
+```
+
+Then compare the checksum of the zip with its line in `SHA256SUMS`:
+
+```powershell
+$want = ((Select-String -Path SHA256SUMS -SimpleMatch $a).Line -split "\s+")[0]
+$got = (Get-FileHash -Algorithm SHA256 $a).Hash.ToLower()
+if ($got -eq $want) { "OK  $a" } else { "MISMATCH  $a" }
+```
+
+The output must be `OK`. Then unpack the zip and check the version:
+
+```powershell
+Expand-Archive $a -DestinationPath .
+& ".\okfw-$Version-windows-amd64\bin\okfw.exe" --version   # okfw version v2026.11.5
 ```
 
 ## Using the SBOM

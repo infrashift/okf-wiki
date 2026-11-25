@@ -11,6 +11,7 @@ that machine.
 
 - Go 1.24+
 - [syft](https://github.com/anchore/syft#installation), for the SBOMs
+- `zip`, for the Windows archive
 - [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) v3, for signing
 - [gh](https://cli.github.com/), to publish
 
@@ -42,15 +43,17 @@ The maintainer keeps the project's release key at
 the wrong key, the command fails at that step. It does not make a release
 that no user can verify.
 
-`make sign` runs `make dist`. That target builds the binaries for the three
-release platforms: Linux x86_64 and aarch64, and macOS on Apple silicon. Each
-binary contains the version. It also makes the man pages, with the date of the
-commit. It puts each platform in a tarball (`bin/okfw` and `share/man/man1`)
-with an SPDX SBOM. Then it writes `SHA256SUMS` and `SHA256SUMS.sbom`.
+`make sign` runs `make dist`. That target builds the binaries for the four
+release platforms: Linux x86_64 and aarch64, macOS on Apple silicon, and
+Windows x86_64 (experimental). Each binary contains the version. It also makes
+the man pages, with the date of the commit. It puts each Linux and macOS
+platform in a tarball (`bin/okfw` and `share/man/man1`). It puts Windows in a
+zip (`bin/okfw.exe` and `share/man/man1`). Each archive gets an SPDX SBOM. Then it writes
+`SHA256SUMS` and `SHA256SUMS.sbom`.
 
 Next, `make sign` reads the password of the key one time, or uses
 `COSIGN_PASSWORD`. It writes a `<file>.sigstore.json` bundle for each of those
-eight files. It writes the public key to `dist/cosign.pub`, from `COSIGN_PUB`
+ten files. It writes the public key to `dist/cosign.pub`, from `COSIGN_PUB`
 or from the key. Then it verifies each bundle.
 
 Make sure that the name of each file in `dist/` has the tag. A `-dirty` suffix means

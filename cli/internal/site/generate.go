@@ -212,7 +212,7 @@ func Generate(w *Workdir) (*Stats, error) {
 	for _, rel := range conceptRels {
 		pg := concepts[rel]
 		z := pg.z
-		body, dangling := rewriteBody(pg.body, pg.dir, target)
+		body, dangling := rewriteBody(stripLeadingH1(pg.body, titleOf(pg)), pg.dir, target)
 		stats.Dangling += dangling
 
 		o := okfData{
@@ -274,7 +274,7 @@ func Generate(w *Workdir) (*Stats, error) {
 		if !ok {
 			listing = generatedListing(d, dirs, concepts)
 		}
-		listing = stripLeadingH1(listing)
+		listing = stripLeadingH1(listing, "")
 		body, _ := rewriteBody(listing, d, target)
 		fm := frontmatter{Title: d + "/", Slug: dirSlug[d]}
 		if d == "" {
@@ -488,17 +488,24 @@ func rewriteBody(body, fromDir string, target func(dest, fromDir string) string)
 // cannot occur in a markdown file by accident.
 const rewrittenMark = "okfw-site-rewritten:"
 
-// stripLeadingH1 drops a listing's first "# heading": Starlight renders the
-// page title itself.
-func stripLeadingH1(body string) string {
-	lines := strings.SplitN(strings.TrimLeft(body, "\n"), "\n", 2)
-	if len(lines) > 0 && strings.HasPrefix(lines[0], "# ") {
-		if len(lines) == 2 {
-			return lines[1]
-		}
-		return ""
+// stripLeadingH1 drops a body's first "# heading": Starlight renders the page
+// title itself, as the page's one H1. With a title, the heading is dropped
+// only when it says the same thing (okfw's templates open every concept with
+// "# <title>"); a different heading is the author's content and stays. An
+// empty title drops any leading heading, as a directory listing's always is.
+func stripLeadingH1(body, title string) string {
+	lines := strings.SplitN(strings.TrimLeft(body, "\r\n"), "\n", 2)
+	heading, ok := strings.CutPrefix(strings.TrimRight(lines[0], "\r"), "# ")
+	if !ok {
+		return body
 	}
-	return body
+	if title != "" && !strings.EqualFold(oneLine(heading), oneLine(title)) {
+		return body
+	}
+	if len(lines) == 2 {
+		return lines[1]
+	}
+	return ""
 }
 
 // generatedListing writes a directory listing for a directory with no
