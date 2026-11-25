@@ -24,13 +24,13 @@ both into `~/.local` to install the command and its manual. `man` looks in the
 without a `MANPATH`.
 
 ```bash
-VERSION=v2026.11.5
+VERSION=v2026.11.6
 PLATFORM=linux-amd64   # or linux-arm64, darwin-arm64
 a=okfw-$VERSION-$PLATFORM
 curl -fsSLO https://github.com/infrashift/okf-wiki/releases/download/$VERSION/$a.tar.gz
 tar -xzf $a.tar.gz
 mkdir -p ~/.local && cp -R $a/bin $a/share ~/.local/
-okfw --version   # okfw version v2026.11.5
+okfw --version   # okfw version v2026.11.6
 man okfw
 ```
 
@@ -66,7 +66,7 @@ In PowerShell, download the zip, unpack it, and copy `okfw.exe` to a
 directory on the user `Path`:
 
 ```powershell
-$Version = "v2026.11.5"
+$Version = "v2026.11.6"
 $a = "okfw-$Version-windows-amd64"
 Invoke-WebRequest "https://github.com/infrashift/okf-wiki/releases/download/$Version/$a.zip" -OutFile "$a.zip"
 Expand-Archive "$a.zip" -DestinationPath .
@@ -78,7 +78,7 @@ if (($userPath -split ";") -notcontains $bin) {
   [Environment]::SetEnvironmentVariable("Path", (@($userPath -split ";" | Where-Object { $_ }) + $bin) -join ";", "User")
 }
 $env:Path += ";$bin"
-okfw --version   # okfw version v2026.11.5
+okfw --version   # okfw version v2026.11.6
 ```
 
 The `Path` change applies to new terminals. The last `$env:Path` line also
